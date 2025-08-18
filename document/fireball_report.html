@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>爆炸火球计算报告</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"Noto Sans","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;line-height:1.6;margin:0;padding:0;color:#222}
+header,section{padding:24px 20px;max-width:980px;margin:0 auto}
+h1,h2{margin:0 0 12px}
+figure{margin:16px 0}
+figcaption{font-size:0.9rem;color:#555}
+img{max-width:100%;height:auto;border:1px solid #e6e6e6}
+code{background:#f7f7f7;padding:2px 4px;border-radius:4px}
+hr{border:none;border-top:1px solid #eee;margin:24px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>爆炸火球计算报告</h1>
+  <p>本报告汇总了火球直径随时间、表面温度随时间、大气传输率与火球热辐射的计算方法与仿真图表。各计算分别来自本项目的 Python 模型：<code>fireball_radius_calculator.py</code>、<code>fireball_temperature_calculator.py</code>、<code>transmissivity_calculator.py</code>、<code>fireball_heat_radiation_calculator.py</code>。</p>
+</header>
+
+<section>
+  <h2>1. 火球直径随时间</h2>
+  <p>采用指数拖曳模型 <code>R(t) = K·(1 - B·exp(-C·t^2))</code>，图中给出材料 <em>40%Al/Rubber</em> 的直径 <code>D(t)=2R(t)</code> 曲线（时间显示为 ms）。</p>
+  <figure>
+    <img src="../images/report_diameter.png" alt="Fireball diameter vs time" />
+    <figcaption>图 1：火球直径随时间</figcaption>
+  </figure>
+  <hr/>
+</section>
+
+<section>
+  <h2>2. 火球表面温度随时间</h2>
+  <p>温度模型采用“左侧三次多项式 + 右侧拖曳衰减”的分段形式并在交界处进行平滑连接，输出温度单位为 K。</p>
+  <figure>
+    <img src="../images/report_temperature.png" alt="Fireball temperature vs time" />
+    <figcaption>图 2：火球表面温度随时间</figcaption>
+  </figure>
+  <hr/>
+</section>
+
+<section>
+  <h2>3. 大气传输率 τ 与距离</h2>
+  <p>采用经验式：τ = 1.006 − 0.1171·log10(X_H2O) − 0.02368·[log10(X_H2O)]^2 − 0.03188·log10(X_CO2) + 0.001164·[log10(X_CO2)]^2，
+  其中 X_CO2 = (273/Ta)·S，X_H2O = (288.651/Ta)·(760/101325)·[(RH/100)·Pw^sat(Ta)]·S。默认 Ta=297.15 K、RH=48%、Pw^sat=2987.87 Pa。</p>
+  <figure>
+    <img src="../images/report_transmissivity.png" alt="Transmissivity vs distance" />
+    <figcaption>图 3：大气传输率随距离变化</figcaption>
+  </figure>
+  <hr/>
+</section>
+
+<section>
+  <h2>4. 火球热辐射</h2>
+  <p>热通量：<code>q(x,t)=ε·σ·T(t)^4·F(x,t)·τ(x)</code>，其中 ε=0.9，σ=5.67×10^-8 W/(m^2·K^4)，F(x,t)=1/4(D/x)^2，τ(x) 为上节的大气传输率。累积热辐射量在 0–140 ms 时间窗内积分：<code>H(x)=∫q(x,t)dt</code>。下图为 x∈[4,6] m 的 H(x)。</p>
+  <figure>
+    <img src="../images/report_heat_radiation.png" alt="Heat radiation vs distance" />
+    <figcaption>图 4：0–140 ms 累积热辐射量随距离分布</figcaption>
+  </figure>
+</section>
+
+</body>
+</html> 
