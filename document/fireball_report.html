@@ -34,6 +34,14 @@ hr{border:none;border-top:1px solid #eee;margin:24px 0}
 <section>
   <h2>2. 火球表面温度随时间</h2>
   <p>温度模型采用“左侧三次多项式 + 右侧拖曳衰减”的分段形式并在交界处进行平滑连接，输出温度单位为 K。</p>
+  <p>计算公式（时间 t 以 ms 为横轴）：</p>
+  <ul>
+    <li>上升段 0 ≤ t ≤ t0：<code>T_up(t) = p3·t^3 + p2·t^2 + p1·t + p0</code>（单位：°C）</li>
+    <li>衰减段 t ≥ t0：<code>T_drag(t) = A + (T0 − A)·exp(−k·(t − t0))</code>（单位：°C）</li>
+    <li>平滑连接（blend）：<code>T(t) = (1 − S)·T_up(t) + S·T_drag(t)</code>，其中 <code>S(s)=3s^2−2s^3</code>，<code>s = clamp((t − t0)/w, 0, 1)</code></li>
+    <li>若采用严格 C1 连接（c1 模式），在 t0 处满足 <code>T</code> 与 <code>dT/dt</code> 连续，据此确定 <code>k</code>。</li>
+    <li>最终输出（K）：<code>T_K(t) = T(t) + 273.15</code></li>
+  </ul>
   <figure>
     <img src="../images/report_temperature.png" alt="Fireball temperature vs time" />
     <figcaption>图 2：火球表面温度随时间</figcaption>
