@@ -70,10 +70,28 @@ hr{border:none;border-top:1px solid #eee;margin:24px 0}
 
 <section>
   <h2>4. 火球热辐射</h2>
-  <p>热通量：<code>q(x,t)=ε·σ·T(t)^4·F(x,t)·τ(x)</code>，其中 ε=0.9，σ=5.67×10^-8 W/(m^2·K^4)，F(x,t)=1/4(D/x)^2，τ(x) 为上节的大气传输率。累积热辐射量在 0–140 ms 时间窗内积分：<code>H(x)=∫q(x,t)dt</code>。下图为 x∈[4,6] m 的 H(x)。</p>
+  <p>热通量：<code>q(x,t)=ε·σ·T(t)^4·F(x,t)·τ(x)</code>，其中 ε=0.9，σ=5.67×10^-8 W/(m^2·K^4)，F(x,t)=1/4(D/x)^2，τ(x) 为上节的大气传输率。累积热辐射量在 0–140 ms 时间窗内积分：<code>H(x)=∫q(x,t)dt</code>。</p>
+  
+  <h3>4.1 热通量随时间变化</h3>
+  <p>下图展示了不同距离处热通量随时间的变化曲线。可以看出，热通量在爆炸初期（约24ms）达到峰值，然后逐渐衰减。距离越近，热通量峰值越高。</p>
+  <p><strong>热通量统计（40%Al/Rubber材料）：</strong></p>
+  <ul>
+    <li>x = 4.0 m：最大热通量 122,965 W/m²（t = 24.0 ms），总能量 9,390 J/m²</li>
+    <li>x = 4.5 m：最大热通量 95,634 W/m²（t = 24.0 ms），总能量 7,303 J/m²</li>
+    <li>x = 5.0 m：最大热通量 76,350 W/m²（t = 24.0 ms），总能量 5,830 J/m²</li>
+    <li>x = 5.5 m：最大热通量 62,259 W/m²（t = 24.0 ms），总能量 4,754 J/m²</li>
+    <li>x = 6.0 m：最大热通量 51,666 W/m²（t = 24.0 ms），总能量 3,945 J/m²</li>
+  </ul>
+  <figure>
+    <img src="../images/report_heat_flux_vs_time.png" alt="Heat flux vs time for different distances" />
+    <figcaption>图 4a：不同距离处热通量随时间变化</figcaption>
+  </figure>
+  
+  <h3>4.2 累积热辐射量随距离分布</h3>
+  <p>下图显示了 x∈[4,6] m 范围内的累积热辐射量 H(x)。</p>
   <figure>
     <img src="../images/report_heat_radiation.png" alt="Heat radiation vs distance" />
-    <figcaption>图 4：0–140 ms 累积热辐射量随距离分布</figcaption>
+    <figcaption>图 4b：0–140 ms 累积热辐射量随距离分布</figcaption>
   </figure>
 </section>
 

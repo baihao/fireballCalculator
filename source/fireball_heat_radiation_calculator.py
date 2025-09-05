@@ -93,8 +93,75 @@ def plot_H_vs_distance(xs: np.ndarray, Hs: np.ndarray, material: str) -> None:
     plt.show()
 
 
+def plot_heat_flux_vs_time(x_values: list[float] = None, material: str = '40%Al/Rubber',
+                           trans_params: TransmissivityParams = TransmissivityParams(),
+                           save_path: str = None) -> None:
+    """
+    Plot heat flux q(x,t) vs time for multiple distance values x.
+    
+    Args:
+        x_values: List of distance values in meters. If None, uses [4.0, 4.5, 5.0, 5.5, 6.0]
+        material: Explosive material type
+        trans_params: Atmospheric transmissivity parameters
+        save_path: Optional path to save the plot as PNG file
+    """
+    if x_values is None:
+        x_values = [4.0, 4.5, 5.0, 5.5, 6.0]
+    
+    # Time array
+    t_ms = np.linspace(0.0, 140.0, 800)
+    
+    # Compute temperature and diameter profiles
+    T_K = compute_temperature_profile(t_ms)
+    D_m = compute_diameter_profile(t_ms, material=material)
+    
+    # Create the plot
+    plt.figure(figsize=(10, 6))
+    
+    # Colors for different distance curves
+    colors = plt.cm.viridis(np.linspace(0, 1, len(x_values)))
+    
+    for i, x in enumerate(x_values):
+        # Compute heat flux over time for this distance
+        q_t = compute_heat_flux_over_time(x, t_ms, T_K, D_m, trans_params)
+        
+        # Plot the curve
+        plt.plot(t_ms, q_t, color=colors[i], linewidth=2, 
+                label=f'x = {x:.1f} m')
+    
+    plt.xlabel('Time (ms)')
+    plt.ylabel('Heat flux q(x,t) (W/m²)')
+    plt.title(f'Heat flux vs time for different distances, material={material}')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f'Heat flux plot saved to: {save_path}')
+    
+    plt.show()
+    
+    # Print some statistics
+    print(f'\nHeat flux statistics for material={material}:')
+    for x in x_values:
+        q_t = compute_heat_flux_over_time(x, t_ms, T_K, D_m, trans_params)
+        max_flux = np.max(q_t)
+        max_time = t_ms[np.argmax(q_t)]
+        total_energy = integrate_heat_radiation(q_t, t_ms)
+        print(f'  x = {x:.1f} m: max flux = {max_flux:.1f} W/m² at t = {max_time:.1f} ms, '
+              f'total energy = {total_energy:.1f} J/m²')
+
+
 def main():
     material = '40%Al/Rubber'
+    
+    # Plot 1: Heat flux vs time for multiple distances
+    print('Plotting heat flux vs time for different distances...')
+    plot_heat_flux_vs_time(material=material)
+    
+    # Plot 2: Time-integrated heat radiation vs distance
+    print('\nComputing time-integrated heat radiation...')
     xs, Hs = compute_H_vs_distance(4.0, 6.0, 200, material=material)
 
     # Print a few samples

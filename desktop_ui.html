@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>爆炸火球桌面程序 UI 示例</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #0b1220;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #38bdf8;
+      --accent-2: #22d3ee;
+      --danger: #ef4444;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --border: #1f2937;
+    }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+    .app {
+      display: grid;
+      grid-template-rows: 56px 1fr 24px;
+      height: 100vh;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, #0b1220, #0a1020);
+    }
+    header .title { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 28px; height: 28px; border-radius: 6px;
+      background: radial-gradient(circle at 30% 30%, var(--accent), var(--accent-2));
+      box-shadow: 0 0 16px rgba(56, 189, 248, .4);
+    }
+    .subtitle { color: var(--muted); font-size: 12px; }
+
+    .tabs { display: flex; gap: 8px; }
+    .tab-btn {
+      appearance: none; border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+      padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px;
+    }
+    .tab-btn.active { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(56, 189, 248, .35) inset; }
+
+    main { display: grid; grid-template-columns: 300px 1fr; gap: 12px; padding: 12px; overflow: hidden; }
+    .side { border-right: 1px solid var(--border); padding-right: 12px; overflow: auto; }
+    .content { overflow: auto; }
+
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+    .panel + .panel { margin-top: 12px; }
+    .panel h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--accent); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .row { display: grid; gap: 6px; margin-bottom: 10px; }
+    label { font-size: 12px; color: var(--muted); }
+    input[type="text"], input[type="number"], select { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: #0b1220; color: var(--text); }
+    input[type="file"] { width: 100%; }
+    .btn {
+      appearance: none; border: 1px solid var(--border); background: linear-gradient(180deg, #0f1a2d, #0b1322);
+      color: var(--text); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px;
+    }
+    .btn.primary { border-color: var(--accent); color: white; background: linear-gradient(180deg, #0ea5e9, #06b6d4); }
+    .btn.success { background: linear-gradient(180deg, #10b981, #059669); color: #eafff7; border-color: #1f9e7a; }
+    .btn.warning { background: linear-gradient(180deg, #f59e0b, #d97706); color: #fff7e6; border-color: #b45309; }
+    .btn.ghost { background: transparent; }
+    .btn + .btn { margin-left: 8px; }
+
+    .toolbar { display: flex; align-items: center; gap: 8px; }
+    .spacer { flex: 1; }
+    .status { color: var(--muted); font-size: 12px; }
+
+    .viewer {
+      display: grid; grid-template-columns: 2fr 1fr; gap: 12px;
+    }
+    .canvas-wrap { position: relative; background: #050a16; border: 1px solid var(--border); border-radius: 10px; height: 360px; display: grid; place-items: center; overflow: hidden; }
+    .canvas-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .overlay { position: absolute; inset: 0; pointer-events: none; }
+    .timeline { margin-top: 8px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; }
+    input[type="range"] { width: 100%; }
+
+    .chart {
+      background: #0b1220; border: 1px solid var(--border); border-radius: 10px; padding: 8px;
+      height: 160px; position: relative;
+    }
+    .chart canvas { width: 100%; height: 100%; }
+
+    .hidden { display: none; }
+
+    footer { display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="title">
+        <div class="logo"></div>
+        <div>
+          <div style="font-weight:600;">爆炸火球分析系统 - 桌面UI示例</div>
+          <div class="subtitle">图像/参数输入 · 特征提取 · 建模与预测 · 结果导出</div>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-input">输入</button>
+        <button class="tab-btn" data-tab="tab-extract">特征提取</button>
+        <button class="tab-btn" data-tab="tab-model">建模与预测</button>
+        <button class="tab-btn" data-tab="tab-export">导出</button>
+      </div>
+    </header>
+
+    <main>
+      <aside class="side">
+        <!-- 输入模块侧栏 -->
+        <div class="panel" data-sidebar="tab-input">
+          <h3>图像与参数输入</h3>
+          <div class="row">
+            <label>导入火球图像序列（多选）或视频文件</label>
+            <input id="file-images" type="file" accept="image/*,video/*" multiple />
+          </div>
+          <div class="row">
+            <label>导入火球温度时间序列（CSV/JSON）</label>
+            <input id="file-temperature" type="file" accept=".csv,.json,.txt" />
+          </div>
+          <div class="row">
+            <label>炸药类别</label>
+            <select id="explosive-type">
+              <option value="TNT">TNT</option>
+              <option value="Polyurethane">Polyurethane</option>
+              <option value="AlRubber30">30% Al / Rubber</option>
+              <option value="AlRubber40">40% Al / Rubber</option>
+              <option value="AlRubber50">50% Al / Rubber</option>
+              <option value="AlRubber60">60% Al / Rubber</option>
+            </select>
+          </div>
+          <div class="grid-2">
+            <div class="row">
+              <label>当量（kg TNT）</label>
+              <input id="equivalent" type="number" min="0" step="0.1" value="10" />
+            </div>
+            <div class="row">
+              <label>含铝量（%）</label>
+              <input id="al-percent" type="number" min="0" max="100" step="1" value="30" />
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="row">
+              <label>环境温度 Ta（°C）</label>
+              <input id="env-Ta" type="number" step="0.1" value="24" />
+            </div>
+            <div class="row">
+              <label>相对湿度 RH（%）</label>
+              <input id="env-RH" type="number" min="0" max="100" step="1" value="48" />
+            </div>
+          </div>
+          <div class="row">
+            <label>水饱和气压 PwSat(Ta)（Pa）</label>
+            <input id="env-PwSat" type="number" step="0.01" value="2987.87" />
+          </div>
+          <div class="toolbar">
+            <button class="btn" id="btn-clear">清空输入</button>
+            <div class="spacer"></div>
+            <span class="status" id="status-input">等待文件导入…</span>
+          </div>
+        </div>
+
+        <!-- 特征提取侧栏 -->
+        <div class="panel hidden" data-sidebar="tab-extract">
+          <h3>特征提取</h3>
+          <div class="row">
+            <label>点位/掩膜辅助（可选，JSON/GeoJSON/自定义）</label>
+            <input id="file-hints" type="file" accept=".json,.geojson" />
+          </div>
+          <div class="row">
+            <label>模型选择</label>
+            <select id="extract-model">
+              <option value="unet">U-Net 分割</option>
+              <option value="deeplabv3">DeepLabV3</option>
+              <option value="sam">SAM</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>批处理大小</label>
+            <input id="batch-size" type="number" min="1" value="8" />
+          </div>
+          <div class="toolbar">
+            <button class="btn primary" id="btn-extract">开始特征提取</button>
+            <button class="btn ghost" id="btn-cancel-extract">取消</button>
+            <div class="spacer"></div>
+            <span class="status" id="status-extract">待开始</span>
+          </div>
+        </div>
+
+        <!-- 建模与预测侧栏 -->
+        <div class="panel hidden" data-sidebar="tab-model">
+          <h3>建模 - 训练</h3>
+          <div class="row">
+            <label>选择训练时间序列（可多选）</label>
+            <input id="train-series" type="file" multiple accept=".csv,.json" />
+          </div>
+          <div class="row">
+            <label>算法</label>
+            <select id="algo">
+              <option value="eng">工程进算法</option>
+              <option value="ttransformer">T-Transformer</option>
+            </select>
+          </div>
+          <div class="grid-2">
+            <div class="row">
+              <label>学习率</label>
+              <input id="lr" type="number" step="0.0001" value="0.0005" />
+            </div>
+            <div class="row">
+              <label>轮次</label>
+              <input id="epochs" type="number" min="1" value="50" />
+            </div>
+          </div>
+          <div class="toolbar">
+            <button class="btn primary" id="btn-train">开始训练</button>
+            <div class="spacer"></div>
+            <span class="status" id="status-train">未训练</span>
+          </div>
+
+          <h3 style="margin-top:14px;">预测 - 运行</h3>
+          <div class="row">
+            <label>选择已训练模型</label>
+            <select id="model-list">
+              <option value="demo-model">示例模型 v1</option>
+            </select>
+          </div>
+          <div class="grid-2">
+            <div class="row">
+              <label>当量（kg TNT）</label>
+              <input id="p-eq" type="number" value="10" />
+            </div>
+            <div class="row">
+              <label>含铝量（%）</label>
+              <input id="p-al" type="number" value="30" />
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="row">
+              <label>仿真步长（ms）</label>
+              <input id="p-step" type="number" value="1" />
+            </div>
+            <div class="row">
+              <label>仿真时长（ms）</label>
+              <input id="p-duration" type="number" value="140" />
+            </div>
+          </div>
+          <div class="toolbar">
+            <button class="btn success" id="btn-predict">开始预测</button>
+            <div class="spacer"></div>
+            <span class="status" id="status-predict">未开始</span>
+          </div>
+        </div>
+
+        <!-- 导出侧栏 -->
+        <div class="panel hidden" data-sidebar="tab-export">
+          <h3>结果导出</h3>
+          <div class="row">
+            <label>选择导出内容</label>
+            <div>
+              <label><input type="checkbox" class="exp-item" value="features" checked /> 特征时间序列</label><br />
+              <label><input type="checkbox" class="exp-item" value="predictions" checked /> 预测结果</label><br />
+              <label><input type="checkbox" class="exp-item" value="errors" /> 误差分析</label>
+            </div>
+          </div>
+          <div class="row">
+            <label>导出格式</label>
+            <select id="exp-format">
+              <option value="csv">CSV</option>
+              <option value="json">JSON</option>
+              <option value="xlsx">Excel (xlsx)</option>
+            </select>
+          </div>
+          <div class="toolbar">
+            <button class="btn primary" id="btn-export">导出</button>
+            <div class="spacer"></div>
+            <span class="status" id="status-export">等待导出</span>
+          </div>
+        </div>
+      </aside>
+
+      <section class="content">
+        <!-- 输入 Tab 内容区域 -->
+        <div class="panel" data-tabcontent="tab-input">
+          <div class="toolbar" style="margin-bottom:8px;">
+            <div>爆炸流程预览</div>
+            <div class="spacer"></div>
+            <button class="btn" id="btn-fit-width">适应宽度</button>
+            <button class="btn" id="btn-reset-view">重置视图</button>
+          </div>
+          <div class="viewer">
+            <div>
+              <div class="canvas-wrap">
+                <img id="preview-image" alt="预览图像" />
+                <canvas id="overlay" class="overlay"></canvas>
+              </div>
+              <div class="timeline">
+                <input id="time-slider" type="range" min="0" max="100" value="0" />
+                <div id="time-label" class="status">t = 0 ms</div>
+              </div>
+            </div>
+            <div>
+              <div class="panel" style="height:160px;">
+                <h3>材料与环境</h3>
+                <div class="status" id="meta"></div>
+              </div>
+              <div class="chart" style="margin-top:12px;">
+                <div style="font-size:12px; color:var(--accent); margin-bottom:4px; text-align:center;">爆炸温度变化</div>
+                <canvas id="chart-temp"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 特征提取 Tab 内容区域 -->
+        <div class="panel hidden" data-tabcontent="tab-extract">
+          <div class="toolbar" style="margin-bottom:8px;">
+            <div>提取结果预览与质量检查</div>
+            <div class="spacer"></div>
+            <span class="status" id="progress-extract">0%</span>
+          </div>
+          <div class="viewer">
+            <div>
+              <div class="canvas-wrap">
+                <img id="extract-image" alt="提取预览" />
+                <canvas id="extract-overlay" class="overlay"></canvas>
+              </div>
+              <div class="timeline">
+                <input id="extract-slider" type="range" min="0" max="100" value="0" />
+                <div id="extract-time" class="status">t = 0 ms</div>
+              </div>
+            </div>
+            <div>
+              <div class="chart"><canvas id="chart-diam-extracted"></canvas></div>
+              <div class="toolbar" style="margin-top:8px;">
+                <button class="btn" id="btn-save-series">保存提取序列</button>
+                <div class="spacer"></div>
+                <span class="status">提取完成后可保存</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 建模与预测 Tab 内容区域 -->
+        <div class="panel hidden" data-tabcontent="tab-model">
+          <div class="toolbar" style="margin-bottom:8px;">
+            <div>仿真预测结果</div>
+            <div class="spacer"></div>
+            <span class="status" id="status-modeling">未开始</span>
+          </div>
+          <div class="grid-2">
+            <div class="chart">
+              <div style="font-size:12px; color:var(--accent); margin-bottom:4px; text-align:center;">火球直径随时间变化</div>
+              <canvas id="chart-pred-diam"></canvas>
+            </div>
+            <div class="chart">
+              <div style="font-size:12px; color:var(--accent); margin-bottom:4px; text-align:center;">火球温度随时间变化</div>
+              <canvas id="chart-pred-temp"></canvas>
+            </div>
+            <div class="chart">
+              <div style="font-size:12px; color:var(--accent); margin-bottom:4px; text-align:center;">热通量随时间变化 (不同距离)</div>
+              <canvas id="chart-pred-rad"></canvas>
+            </div>
+            <div class="chart">
+              <div style="font-size:12px; color:var(--accent); margin-bottom:4px; text-align:center;">累积热辐射量随距离分布</div>
+              <canvas id="chart-pred-flux"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- 导出 Tab 内容区域 -->
+        <div class="panel hidden" data-tabcontent="tab-export">
+          <div class="toolbar" style="margin-bottom:8px;">
+            <div>导出预览与日志</div>
+          </div>
+          <div class="panel" style="height: 360px; overflow:auto;">
+            <pre id="log" style="margin:0; white-space: pre-wrap; color: #cbd5e1;">[日志] 准备导出…</pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div>状态: <span id="global-status">空闲</span></div>
+      <div>UI 示例文件：desktop_ui.html</div>
+    </footer>
+  </div>
+
+  <script>
+    // Tab 切换
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('[data-tabcontent]');
+    const sidebars = document.querySelectorAll('[data-sidebar]');
+    tabButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.getAttribute('data-tab');
+        tabContents.forEach(el => el.classList.toggle('hidden', el.getAttribute('data-tabcontent') !== tab));
+        sidebars.forEach(el => el.classList.toggle('hidden', el.getAttribute('data-sidebar') !== tab));
+      });
+    });
+
+    // 简易状态更新
+    function setStatus(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
+    function setGlobalStatus(text) { setStatus('global-status', text); }
+
+    // 文件名展示与图像预览
+    const fileImages = document.getElementById('file-images');
+    const previewImg = document.getElementById('preview-image');
+    const timeSlider = document.getElementById('time-slider');
+    const timeLabel = document.getElementById('time-label');
+    let loadedImages = [];
+
+    fileImages.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) { setStatus('status-input', '未选择文件'); return; }
+      setStatus('status-input', `已选择 ${files.length} 个文件`);
+
+      // 仅预览第一张图片帧
+      const first = files.find(f => f.type.startsWith('image/')) || files[0];
+      if (first && first.type.startsWith('image/')) {
+        const url = URL.createObjectURL(first);
+        previewImg.src = url;
+      } else if (first && first.type.startsWith('video/')) {
+        // 对视频：抓取第一帧预览（简化：显示占位）
+        previewImg.alt = '视频文件已导入（此处仅占位预览）';
+        previewImg.src = '';
+      }
+
+      // 模拟加载 N 帧
+      loadedImages = new Array(Math.min(101, files.length || 101)).fill(0);
+      timeSlider.max = loadedImages.length - 1;
+      timeSlider.value = 0;
+      timeLabel.textContent = 't = 0 ms';
+    });
+
+    // 时间轴滑动
+    timeSlider.addEventListener('input', (e) => {
+      const t = Number(e.target.value);
+      timeLabel.textContent = `t = ${t} ms`;
+      // 这里可根据 t 切换预览帧与叠加层
+    });
+
+    // 元数据面板
+    function updateMeta() {
+      const type = document.getElementById('explosive-type').value;
+      const eq = document.getElementById('equivalent').value;
+      const al = document.getElementById('al-percent').value;
+      const Ta = document.getElementById('env-Ta').value;
+      const RH = document.getElementById('env-RH').value;
+      const Pw = document.getElementById('env-PwSat').value;
+      document.getElementById('meta').innerText = `炸药: ${type}\n当量: ${eq} kg TNT\n含铝量: ${al}%\n环境: Ta=${Ta}°C, RH=${RH}%, PwSat=${Pw}Pa`;
+    }
+    ['explosive-type','equivalent','al-percent','env-Ta','env-RH','env-PwSat'].forEach(id => {
+      document.getElementById(id).addEventListener('input', updateMeta);
+    });
+    updateMeta();
+
+    // 清空输入
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      fileImages.value = '';
+      document.getElementById('file-temperature').value = '';
+      previewImg.src = '';
+      timeSlider.value = 0; timeLabel.textContent = 't = 0 ms';
+      setStatus('status-input', '已清空');
+      setGlobalStatus('空闲');
+    });
+
+    // 简易绘图函数（不依赖外部库）
+    // series can be a single array of points [[x,y], ...] or an array of series [[series1], [series2], ...]
+    function drawLineChart(canvasId, series, xLabel = '', yLabel = '', colors = ['#38bdf8'], showLabels = false) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      canvas.width = w; canvas.height = h;
+      ctx.clearRect(0,0,w,h);
+      
+      // 背景格线
+      ctx.strokeStyle = 'rgba(148,163,184,0.15)';
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        const y = (h/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+      }
+      for (let i = 1; i < 4; i++) {
+        const x = (w/4)*i; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+      }
+      
+      // 边框
+      ctx.strokeStyle = 'rgba(56,189,248,0.35)';
+      ctx.strokeRect(0.5,0.5,w-1,h-1);
+      
+      // 确定是单个系列还是多个系列
+      const allSeries = (Array.isArray(series) && Array.isArray(series[0]) && Array.isArray(series[0][0])) ? series : [series];
+      
+      if (allSeries.length === 0 || allSeries[0].length < 2) return;
+      
+      // 计算所有数据点的范围
+      let allXs = [], allYs = [];
+      allSeries.forEach(s => {
+        allXs = allXs.concat(s.map(p => p[0]));
+        allYs = allYs.concat(s.map(p => p[1]));
+      });
+      
+      const xMin = Math.min(...allXs), xMax = Math.max(...allXs);
+      const yMin = Math.min(...allYs), yMax = Math.max(...allYs);
+      
+      const pad = 20;
+      function sx(x){ return pad + (x - xMin) / (xMax - xMin || 1) * (w - 2*pad); }
+      function sy(y){ return h - pad - (y - yMin) / (yMax - yMin || 1) * (h - 2*pad); }
+      
+      // 绘制所有系列
+      allSeries.forEach((s, seriesIndex) => {
+        ctx.beginPath();
+        ctx.strokeStyle = colors[seriesIndex % colors.length];
+        ctx.lineWidth = 2;
+        s.forEach((p,i)=>{ 
+          const x=sx(p[0]), y=sy(p[1]); 
+          if(i===0) ctx.moveTo(x,y); 
+          else ctx.lineTo(x,y); 
+        });
+        ctx.stroke();
+      });
+      
+      // 添加坐标轴标签（仅对指定图表）
+      if (showLabels && (canvasId === 'chart-pred-diam' || canvasId === 'chart-pred-temp' || canvasId === 'chart-pred-rad' || canvasId === 'chart-pred-flux')) {
+        ctx.fillStyle = 'rgba(148,163,184,0.8)';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(xLabel, w/2, h-5);
+        ctx.save();
+        ctx.translate(8, h/2);
+        ctx.rotate(-Math.PI/2);
+        ctx.fillText(yLabel, 0, 0);
+        ctx.restore();
+      }
+    }
+
+    // 演示温度与直径曲线（输入页）
+    function demoSeries(n=140, amp=1) {
+      const s=[]; for (let i=0;i<=n;i++){ const t=i; const y = (Math.sin(i/25)*0.4 + 0.6) * amp; s.push([t,y]); } return s;
+    }
+    
+    // 演示热通量曲线（多条，模拟不同距离）
+    function demoHeatFluxSeries(n=140) {
+      const allSeries = [];
+      const distances = [4.0, 4.5, 5.0, 5.5, 6.0];
+      const maxFluxes = [123000, 96000, 76000, 62000, 52000]; // 近似峰值
+      
+      distances.forEach((dist, index) => {
+        const series = [];
+        const peakTime = 24; // ms
+        const peakFlux = maxFluxes[index];
+        for (let i = 0; i <= n; i++) {
+          const t = i;
+          let y;
+          if (t <= peakTime) {
+            // 上升阶段
+            y = peakFlux * (t / peakTime) * (t / peakTime);
+          } else {
+            // 下降阶段，指数衰减
+            y = peakFlux * Math.exp(-(t - peakTime) / (50 + dist * 5));
+          }
+          series.push([t, y]);
+        }
+        allSeries.push(series);
+      });
+      return allSeries;
+    }
+    
+    drawLineChart('chart-temp', demoSeries(140, 800), '时间 (ms)', '温度 (K)', ['#38bdf8'], true);
+    drawLineChart('chart-diam', demoSeries(140, 4));
+
+    // 特征提取模拟流程
+    document.getElementById('btn-extract').addEventListener('click', () => {
+      setStatus('status-extract', '正在提取…'); setGlobalStatus('特征提取中');
+      let p = 0; const span = document.getElementById('progress-extract');
+      const timer = setInterval(()=>{
+        p += Math.random()*12; if (p >= 100) { p = 100; clearInterval(timer); setStatus('status-extract','已完成'); setGlobalStatus('空闲'); drawLineChart('chart-diam-extracted', demoSeries(140, 5), '时间 (ms)', '直径 (m)', ['#22d3ee'], true); }
+        span.textContent = `${p.toFixed(0)}%`;
+      }, 250);
+    });
+    document.getElementById('btn-cancel-extract').addEventListener('click', () => {
+      setStatus('status-extract', '已取消'); setGlobalStatus('空闲');
+    });
+
+    // 训练与预测模拟
+    document.getElementById('btn-train').addEventListener('click', () => {
+      setStatus('status-train', '训练中…'); setGlobalStatus('训练中');
+      setTimeout(()=>{ setStatus('status-train', '训练完成 (示例模型 v1)'); setGlobalStatus('空闲'); }, 1800);
+    });
+    document.getElementById('btn-predict').addEventListener('click', () => {
+      setStatus('status-predict', '计算中…'); setGlobalStatus('预测中');
+      setTimeout(()=>{
+        // 火球直径随时间变化
+        drawLineChart('chart-pred-diam', demoSeries(140, 5), '时间 (ms)', '直径 (m)', ['#22d3ee'], true);
+        // 火球温度随时间变化
+        drawLineChart('chart-pred-temp', demoSeries(140, 900), '时间 (ms)', '温度 (K)', ['#38bdf8'], true);
+        // 热通量随时间变化 (不同距离) - 多条曲线
+        drawLineChart('chart-pred-rad', demoHeatFluxSeries(140), '时间 (ms)', '热通量 (W/m²)', ['#5f0f40', '#2a4d69', '#4f9d9d', '#8acb88', '#f4d35e'], true);
+        // 累积热辐射量随距离分布
+        drawLineChart('chart-pred-flux', demoSeries(50, 10000).map(p => [p[0]/10 + 4, p[1]]), '距离 (m)', '热辐射量 (J/m²)', ['#10b981'], true);
+        setStatus('status-modeling', '已生成示例预测曲线');
+        setStatus('status-predict', '完成'); setGlobalStatus('空闲');
+      }, 1200);
+    });
+
+    // 导出模拟
+    document.getElementById('btn-export').addEventListener('click', () => {
+      const format = document.getElementById('exp-format').value;
+      const items = Array.from(document.querySelectorAll('.exp-item:checked')).map(el=>el.value);
+      const log = document.getElementById('log');
+      const msg = `[导出] 内容: ${items.join(', ')} | 格式: ${format} | 时间: ${new Date().toLocaleString()}`;
+      log.textContent += `\n${msg}`;
+      setStatus('status-export', '导出完成(示例)');
+    });
+
+    // 视图按钮（示例）
+    document.getElementById('btn-fit-width').addEventListener('click', () => setGlobalStatus('适应宽度(示例)'));
+    document.getElementById('btn-reset-view').addEventListener('click', () => setGlobalStatus('视图已重置'));
+  </script>
+</body>
+</html>
+
+
