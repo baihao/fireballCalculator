@@ -25,6 +25,7 @@ class InputTab(QWidget):
         # 初始化文件路径属性
         self.image_folder_path = None
         self.video_file_path = None
+        self.temperature_file_path = None  # 温度文件路径
         self.image_files = []  # 存储图像文件列表
         self.current_image_index = 0  # 当前显示的图像索引
         self.init_ui()
@@ -176,8 +177,8 @@ class InputTab(QWidget):
         layout.addWidget(splitter)
         self.setLayout(layout)
         
-        # 初始化图表
-        self.update_temperature_chart()
+        # 初始化图表（不绘制曲线）
+        self.init_temperature_chart()
         
     def setup_connections(self):
         """设置信号连接"""
@@ -220,40 +221,88 @@ class InputTab(QWidget):
         except Exception as e:
             print(f"显示图像失败: {e}")
     
-    def update_temperature_chart(self):
-        """更新温度图表"""
+    def init_temperature_chart(self):
+        """初始化温度图表（不绘制曲线）"""
         try:
-            t_ms = np.linspace(0, 140, 800)
-            temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
-            T_K = temp_calc.temperature_modified(t_ms)
+            # 清除图表
+            self.temp_chart.clear()
+            
+            # 创建一个空的图表，只显示提示信息
+            ax = self.temp_chart.figure.add_subplot(111)
             
             # 设置图表样式
             self.temp_chart.figure.patch.set_facecolor('#111827')  # 背景色
-            self.temp_chart.axes.set_facecolor('#111827')  # 坐标轴区域背景色
+            ax.set_facecolor('#111827')  # 坐标轴区域背景色
             
             # 设置坐标轴颜色
-            self.temp_chart.axes.tick_params(colors='#9ca3af', labelsize=10)  # 刻度颜色和大小
-            self.temp_chart.axes.spines['bottom'].set_color('#374151')  # x轴颜色
-            self.temp_chart.axes.spines['top'].set_color('#374151')
-            self.temp_chart.axes.spines['left'].set_color('#374151')  # y轴颜色
-            self.temp_chart.axes.spines['right'].set_color('#374151')
+            ax.tick_params(colors='#9ca3af', labelsize=10)  # 刻度颜色和大小
+            ax.spines['bottom'].set_color('#374151')  # x轴颜色
+            ax.spines['top'].set_color('#374151')
+            ax.spines['left'].set_color('#374151')  # y轴颜色
+            ax.spines['right'].set_color('#374151')
             
             # 设置标签颜色
-            self.temp_chart.axes.set_xlabel("时间 (ms)", color='#e5e7eb', fontsize=11)
-            self.temp_chart.axes.set_ylabel("温度 (K)", color='#e5e7eb', fontsize=11)
-            self.temp_chart.axes.set_title("爆炸温度变化", color='#38bdf8', fontsize=12, fontweight='bold')
+            ax.set_xlabel("时间 (ms)", color='#e5e7eb', fontsize=11)
+            ax.set_ylabel("温度 (K)", color='#e5e7eb', fontsize=11)
+            ax.set_title("爆炸温度变化", color='#38bdf8', fontsize=12, fontweight='bold')
             
-            # 绘制曲线
-            self.temp_chart.axes.plot(t_ms, T_K, color='#38bdf8', linewidth=2)
+            # 设置坐标轴范围
+            ax.set_xlim(0, 140)
+            ax.set_ylim(1000, 1600)
+            
+            # 显示网格
+            ax.grid(True, alpha=0.3, color='#374151')
+            
+            # 显示提示文本
+            ax.text(70, 1300, "请导入温度时间序列数据", 
+                   ha='center', va='center', 
+                   color='#9ca3af', fontsize=12,
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor='#1f2937', alpha=0.8))
             
             # 调整布局，确保标签完全显示
             self.temp_chart.figure.tight_layout(pad=1.5)
             
             # 刷新显示
-            self.temp_chart.draw()
+            self.temp_chart.canvas.draw()
+            
+        except Exception as e:
+            print(f"初始化温度图表失败: {e}")
+    
+    def update_temperature_chart(self, time_data=None, temp_data=None):
+        """更新温度图表（绘制曲线）"""
+        try:
+            print(f"update_temperature_chart 被调用: time_data={time_data is not None}, temp_data={temp_data is not None}")
+            
+            if time_data is not None and temp_data is not None:
+                # 使用导入的数据绘制曲线
+                print(f"绘制导入的数据曲线: {len(time_data)} 个点")
+                self.temp_chart.plot_line(
+                    time_data, temp_data,
+                    title="爆炸温度变化",
+                    xlabel="时间 (ms)",
+                    ylabel="温度 (K)",
+                    color='#38bdf8'
+                )
+            else:
+                # 使用默认计算数据绘制曲线
+                print("绘制默认计算数据曲线")
+                t_ms = np.linspace(0, 140, 800)
+                temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
+                T_K = temp_calc.temperature_modified(t_ms)
+                self.temp_chart.plot_line(
+                    t_ms, T_K,
+                    title="爆炸温度变化",
+                    xlabel="时间 (ms)",
+                    ylabel="温度 (K)",
+                    color='#38bdf8'
+                )
+            
+            print("温度图表绘制完成")
             
         except Exception as e:
             print(f"更新温度图表失败: {e}")
+            import traceback
+            traceback.print_exc()
     
     def update_parameters_display(self, material_type="40% Al / Rubber", equivalent="10", 
                                  al_percent="30", env_temp="24", env_humidity="48", 
@@ -299,7 +348,7 @@ class InputTab(QWidget):
                 "files": {
                     "image_folder": self.image_folder_path if self.image_folder_path else "未设置",
                     "video_file": self.video_file_path if self.video_file_path else "未设置",
-                    "temperature_file": "未设置"  # 这里可以从侧边栏获取
+                    "temperature_file": getattr(self, 'temperature_file_path', "未设置")
                 },
                 "temperature_data": {
                     "time_range": "0-140 ms",
@@ -594,7 +643,139 @@ class InputTab(QWidget):
             "", "CSV文件 (*.csv);;JSON文件 (*.json);;文本文件 (*.txt);;所有文件 (*)"
         )
         if files:
-            self.input_status.setText(f"已导入温度序列文件: {files[0]}")
+            try:
+                # 读取温度数据文件
+                file_path = files[0]
+                print(f"正在读取温度数据文件: {file_path}")
+                time_data, temp_data = self.load_temperature_data(file_path)
+                
+                if time_data is not None and temp_data is not None:
+                    print(f"成功读取数据: 时间点 {len(time_data)} 个, 温度点 {len(temp_data)} 个")
+                    print(f"时间范围: {min(time_data)} - {max(time_data)} ms")
+                    print(f"温度范围: {min(temp_data)} - {max(temp_data)} K")
+                    
+                    # 保存温度文件路径
+                    self.temperature_file_path = file_path
+                    
+                    # 更新温度图表
+                    self.update_temperature_chart(time_data, temp_data)
+                    self.input_status.setText(f"已导入温度序列文件: {os.path.basename(file_path)}")
+                    print("温度图表已更新")
+                else:
+                    print("读取温度数据失败: 返回None")
+                    QMessageBox.warning(self, "警告", "无法读取温度数据文件！")
+                    
+            except Exception as e:
+                print(f"读取温度数据文件时出错: {e}")
+                QMessageBox.critical(self, "错误", f"读取温度数据文件失败:\n{str(e)}")
+    
+    def load_temperature_data(self, file_path):
+        """加载温度数据文件"""
+        try:
+            if file_path.endswith('.csv'):
+                # 使用pandas读取CSV文件
+                try:
+                    import pandas as pd
+                    df = pd.read_csv(file_path)
+                    
+                    # 查找时间和温度列
+                    time_col = None
+                    temp_col = None
+                    
+                    for col in df.columns:
+                        col_lower = col.lower()
+                        if 'time' in col_lower or '时间' in col_lower or 'ms' in col_lower:
+                            time_col = col
+                        elif 'temp' in col_lower or '温度' in col_lower or 'k' in col_lower:
+                            temp_col = col
+                    
+                    if time_col is None or temp_col is None:
+                        # 如果找不到列名，使用前两列
+                        time_col = df.columns[0]
+                        temp_col = df.columns[1]
+                    
+                    time_data = df[time_col].values
+                    temp_data = df[temp_col].values
+                    
+                    return time_data, temp_data
+                    
+                except ImportError:
+                    # 如果没有pandas，使用标准库读取CSV
+                    print("pandas未安装，使用标准库读取CSV文件")
+                    return self._read_csv_manual(file_path)
+                
+            elif file_path.endswith('.json'):
+                # 读取JSON文件
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                # 假设JSON格式为 {"time": [...], "temperature": [...]}
+                if 'time' in data and 'temperature' in data:
+                    return data['time'], data['temperature']
+                else:
+                    return None, None
+                    
+            else:
+                # 尝试读取文本文件
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                
+                time_data = []
+                temp_data = []
+                
+                for line in lines:
+                    if ',' in line:
+                        parts = line.strip().split(',')
+                        if len(parts) >= 2:
+                            try:
+                                time_data.append(float(parts[0]))
+                                temp_data.append(float(parts[1]))
+                            except ValueError:
+                                continue
+                
+                if time_data and temp_data:
+                    return time_data, temp_data
+                else:
+                    return None, None
+                    
+        except Exception as e:
+            print(f"加载温度数据失败: {e}")
+            return None, None
+    
+    def _read_csv_manual(self, file_path):
+        """手动读取CSV文件（不使用pandas）"""
+        try:
+            time_data = []
+            temp_data = []
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            # 跳过标题行
+            for i, line in enumerate(lines[1:], 1):
+                line = line.strip()
+                if line and ',' in line:
+                    parts = line.split(',')
+                    if len(parts) >= 2:
+                        try:
+                            time_val = float(parts[0])
+                            temp_val = float(parts[1])
+                            time_data.append(time_val)
+                            temp_data.append(temp_val)
+                        except ValueError as e:
+                            print(f"第{i+1}行数据格式错误: {line}, 错误: {e}")
+                            continue
+            
+            if time_data and temp_data:
+                print(f"成功读取 {len(time_data)} 个数据点")
+                return time_data, temp_data
+            else:
+                print("没有找到有效的数据")
+                return None, None
+                
+        except Exception as e:
+            print(f"手动读取CSV失败: {e}")
+            return None, None
     
     def clear_inputs(self):
         """清空输入"""
@@ -602,6 +783,7 @@ class InputTab(QWidget):
         # 清空文件路径和图像序列
         self.image_folder_path = None
         self.video_file_path = None
+        self.temperature_file_path = None
         self.image_files = []
         self.current_image_index = 0
         
@@ -612,6 +794,9 @@ class InputTab(QWidget):
         
         # 清空图像预览
         self.image_preview.clear()
+        
+        # 重新初始化温度图表
+        self.init_temperature_chart()
     
     def on_duration_changed(self):
         """爆炸时长变化时的回调"""

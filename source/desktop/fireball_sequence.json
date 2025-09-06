@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "description": "爆炸火球分析采样序列",
+    "version": "1.0",
+    "created_at": "2025-09-06T09:57:12"
+  },
+  "parameters": {
+    "material_type": "40% Al / Rubber",
+    "equivalent": "10",
+    "al_percent": "30",
+    "env_temp": "24",
+    "env_humidity": "48",
+    "env_pressure": "2987.87",
+    "explosion_duration": "140",
+    "pixel_length": "0.01"
+  },
+  "files": {
+    "image_folder": "/Users/hbai/Desktop/火球数据文件/爆炸图像序列",
+    "video_file": "未设置",
+    "temperature_file": "/Users/hbai/Desktop/火球数据文件/temp.csv"
+  },
+  "temperature_data": {
+    "time_range": "0-140 ms",
+    "data_points": 800,
+    "note": "温度数据基于当前参数计算"
+  },
+  "image_sequence_info": {
+    "folder_path": "/Users/hbai/Desktop/火球数据文件/爆炸图像序列",
+    "note": "图像序列文件夹路径"
+  }
+}
