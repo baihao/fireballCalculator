@@ -6,7 +6,7 @@
 
 import numpy as np
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                               QPushButton, QSplitter, QSlider)
+                               QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
 
@@ -75,3 +75,41 @@ class ExtractTab(QWidget):
         
         layout.addWidget(splitter)
         self.setLayout(layout)
+    
+    def get_sidebar_widget(self):
+        """获取特征提取模块的侧边栏组件"""
+        if not hasattr(self, '_sidebar_widget'):
+            from PySide6.QtWidgets import QGroupBox, QComboBox, QLineEdit
+            
+            self._sidebar_widget = QGroupBox("特征提取")
+            layout = QVBoxLayout()
+            layout.setAlignment(Qt.AlignTop)  # 只向上对齐
+            
+            layout.addWidget(QLabel("点位/掩膜辅助（可选，JSON/GeoJSON/自定义）"))
+            self.hints_btn = QPushButton("选择辅助文件")
+            layout.addWidget(self.hints_btn)
+            
+            layout.addWidget(QLabel("模型选择"))
+            self.extract_model = QComboBox()
+            self.extract_model.addItems(["U-Net 分割", "DeepLabV3", "SAM"])
+            layout.addWidget(self.extract_model)
+            
+            layout.addWidget(QLabel("批处理大小"))
+            self.batch_size = QLineEdit("8")
+            layout.addWidget(self.batch_size)
+            
+            button_layout = QHBoxLayout()
+            self.extract_btn = QPushButton("开始特征提取")
+            self.extract_btn.setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
+            self.cancel_extract_btn = QPushButton("取消")
+            button_layout.addWidget(self.extract_btn)
+            button_layout.addWidget(self.cancel_extract_btn)
+            button_layout.addStretch()
+            self.extract_status = QLabel("待开始")
+            self.extract_status.setStyleSheet("color: #9ca3af; font-size: 12px;")
+            button_layout.addWidget(self.extract_status)
+            layout.addLayout(button_layout)
+            
+            self._sidebar_widget.setLayout(layout)
+        
+        return self._sidebar_widget

@@ -6,7 +6,7 @@
 
 import numpy as np
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                               QGridLayout)
+                               QGridLayout, QPushButton, QComboBox, QLineEdit, QGroupBox)
 from framework import MatplotlibWidget
 from fireball_radius_calculator import FireballCalculator
 from fireball_temperature_calculator import FireballTemperatureCalculator
@@ -124,3 +124,72 @@ class ModelTab(QWidget):
             
         except Exception as e:
             print(f"更新预测图表失败: {e}")
+    
+    def get_sidebar_widget(self):
+        """获取建模与预测模块的侧边栏组件"""
+        if not hasattr(self, '_sidebar_widget'):
+            from PySide6.QtWidgets import QGroupBox, QComboBox, QLineEdit
+            from PySide6.QtCore import Qt
+            
+            self._sidebar_widget = QGroupBox("建模与预测")
+            layout = QVBoxLayout()
+            layout.setAlignment(Qt.AlignTop)  # 只向上对齐
+            
+            # 训练部分
+            layout.addWidget(QLabel("建模 - 训练"))
+            layout.addWidget(QLabel("选择训练时间序列（可多选）"))
+            self.train_series_btn = QPushButton("选择训练文件")
+            layout.addWidget(self.train_series_btn)
+            
+            layout.addWidget(QLabel("算法"))
+            self.algo = QComboBox()
+            self.algo.addItems(["工程进算法", "T-Transformer"])
+            layout.addWidget(self.algo)
+            
+            # 学习率和轮次
+            lr_layout = QHBoxLayout()
+            lr_layout.addWidget(QLabel("学习率:"))
+            self.lr = QLineEdit("0.0005")
+            lr_layout.addWidget(self.lr)
+            lr_layout.addWidget(QLabel("轮次:"))
+            self.epochs = QLineEdit("50")
+            lr_layout.addWidget(self.epochs)
+            layout.addLayout(lr_layout)
+            
+            self.train_btn = QPushButton("开始训练")
+            self.train_btn.setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
+            layout.addWidget(self.train_btn)
+            
+            # 预测部分
+            layout.addWidget(QLabel("预测 - 运行"))
+            layout.addWidget(QLabel("选择已训练模型"))
+            self.model_list = QComboBox()
+            self.model_list.addItems(["示例模型 v1"])
+            layout.addWidget(self.model_list)
+            
+            # 预测参数
+            pred_layout = QHBoxLayout()
+            pred_layout.addWidget(QLabel("当量:"))
+            self.p_eq = QLineEdit("10")
+            pred_layout.addWidget(self.p_eq)
+            pred_layout.addWidget(QLabel("含铝量:"))
+            self.p_al = QLineEdit("30")
+            pred_layout.addWidget(self.p_al)
+            layout.addLayout(pred_layout)
+            
+            sim_layout = QHBoxLayout()
+            sim_layout.addWidget(QLabel("仿真步长:"))
+            self.p_step = QLineEdit("1")
+            sim_layout.addWidget(self.p_step)
+            sim_layout.addWidget(QLabel("仿真时长:"))
+            self.p_duration = QLineEdit("140")
+            sim_layout.addWidget(self.p_duration)
+            layout.addLayout(sim_layout)
+            
+            self.predict_btn = QPushButton("开始预测")
+            self.predict_btn.setStyleSheet("QPushButton { background-color: #10b981; color: white; }")
+            layout.addWidget(self.predict_btn)
+            
+            self._sidebar_widget.setLayout(layout)
+        
+        return self._sidebar_widget
