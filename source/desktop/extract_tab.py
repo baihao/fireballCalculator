@@ -8,11 +8,16 @@ import numpy as np
 import json
 import os
 import glob
+import sys
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
                                QFileDialog, QMessageBox)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
+
+# 添加路径以导入火球计算器
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from fireball_radius_calculator import FireballCalculator
 
 
 class ExtractTab(QWidget):
@@ -26,6 +31,10 @@ class ExtractTab(QWidget):
         self.sequence_folder_path = None  # 序列文件夹路径
         self.sequence_data = None  # 序列数据
         self.explosion_duration = 140  # 爆炸时长（毫秒）
+        
+        # 初始化火球计算器
+        self.fireball_calculator = FireballCalculator()
+        
         self.init_ui()
         self.setup_connections()
         self.init_charts()
@@ -169,6 +178,10 @@ class ExtractTab(QWidget):
     def setup_connections(self):
         """设置信号连接"""
         self.extract_slider.valueChanged.connect(self.on_time_changed)
+        
+        # 连接特征提取按钮
+        if hasattr(self, 'extract_btn'):
+            self.extract_btn.clicked.connect(self.start_feature_extraction)
     
     def get_sidebar_widget(self):
         """获取特征提取模块的侧边栏组件"""
@@ -208,6 +221,7 @@ class ExtractTab(QWidget):
             
             # 设置信号连接
             self.sequence_btn.clicked.connect(self.select_sequence_folder)
+            self.extract_btn.clicked.connect(self.start_feature_extraction)
         
         return self._sidebar_widget
     
@@ -562,3 +576,87 @@ class ExtractTab(QWidget):
             print(f"❌ 更新直径图表失败: {e}")
             import traceback
             traceback.print_exc()
+    
+    def start_feature_extraction(self):
+        """开始特征提取"""
+        try:
+            print("🔥 开始特征提取...")
+            self.extract_status.setText("正在提取特征...")
+            self.extract_btn.setEnabled(False)
+            
+            # 检查是否有序列数据
+            if not self.sequence_data:
+                QMessageBox.warning(self, "警告", "请先加载火球爆炸序列文件！")
+                self.extract_status.setText("请先加载序列文件")
+                self.extract_btn.setEnabled(True)
+                return
+            
+            # 获取材料类型（从序列数据中获取）
+            material_type = self.sequence_data.get('parameters', {}).get('material_type', '40%Al/Rubber')
+            
+            # 映射材料类型到计算器中的名称
+            material_mapping = {
+                '40% Al / Rubber': '40%Al/Rubber',
+                '30% Al / Rubber': '30%Al/Rubber', 
+                '50% Al / Rubber': '50%Al/Rubber',
+                '60% Al / Rubber': '60%Al/Rubber',
+                'Polyurethane': 'Polyurethane'
+            }
+            
+            material_name = material_mapping.get(material_type, '40%Al/Rubber')
+            print(f"使用材料类型: {material_name}")
+            
+            # 计算火球直径随时间变化
+            self.calculate_fireball_diameter_curve(material_name)
+            
+            # 更新状态
+            self.extract_status.setText("特征提取完成")
+            self.save_button.setEnabled(True)
+            self.extract_btn.setEnabled(True)
+            
+            print("✅ 特征提取完成！")
+            
+        except Exception as e:
+            print(f"❌ 特征提取失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.extract_status.setText("特征提取失败")
+            self.extract_btn.setEnabled(True)
+            QMessageBox.critical(self, "错误", f"特征提取失败:\n{str(e)}")
+    
+    def calculate_fireball_diameter_curve(self, material_name):
+        """计算火球直径随时间变化的曲线"""
+        try:
+            print(f"计算 {material_name} 材料的火球直径曲线...")
+            
+            # 生成时间序列 (0-140ms)
+            time_points = 100  # 时间点数量
+            t_ms = np.linspace(0, self.explosion_duration, time_points)  # 毫秒
+            t_s = t_ms / 1000.0  # 转换为秒
+            
+            # 计算直径
+            diameter_data = []
+            for t in t_s:
+                diameter = self.fireball_calculator.calculate_diameter(t, material_name)
+                diameter_data.append(diameter)
+            
+            print(f"✅ 火球直径计算完成: {len(diameter_data)} 个数据点")
+            print(f"   时间范围: {min(t_ms)} - {max(t_ms)} ms")
+            print(f"   直径范围: {min(diameter_data):.3f} - {max(diameter_data):.3f} m")
+            
+            # 更新直径图表
+            self.update_diameter_chart(t_ms, diameter_data)
+            
+            # 保存计算结果
+            self.extraction_results = {
+                'time_ms': t_ms.tolist(),
+                'diameter_m': diameter_data,
+                'material': material_name,
+                'explosion_duration': self.explosion_duration
+            }
+            
+        except Exception as e:
+            print(f"❌ 计算火球直径曲线失败: {e}")
+            import traceback
+            traceback.print_exc()
+            raise e
