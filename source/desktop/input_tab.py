@@ -227,13 +227,31 @@ class InputTab(QWidget):
             temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
             T_K = temp_calc.temperature_modified(t_ms)
             
-            self.temp_chart.plot_line(
-                t_ms, T_K,
-                title="爆炸温度变化",
-                xlabel="时间 (ms)",
-                ylabel="温度 (K)",
-                color='#38bdf8'
-            )
+            # 设置图表样式
+            self.temp_chart.figure.patch.set_facecolor('#111827')  # 背景色
+            self.temp_chart.axes.set_facecolor('#111827')  # 坐标轴区域背景色
+            
+            # 设置坐标轴颜色
+            self.temp_chart.axes.tick_params(colors='#9ca3af', labelsize=10)  # 刻度颜色和大小
+            self.temp_chart.axes.spines['bottom'].set_color('#374151')  # x轴颜色
+            self.temp_chart.axes.spines['top'].set_color('#374151')
+            self.temp_chart.axes.spines['left'].set_color('#374151')  # y轴颜色
+            self.temp_chart.axes.spines['right'].set_color('#374151')
+            
+            # 设置标签颜色
+            self.temp_chart.axes.set_xlabel("时间 (ms)", color='#e5e7eb', fontsize=11)
+            self.temp_chart.axes.set_ylabel("温度 (K)", color='#e5e7eb', fontsize=11)
+            self.temp_chart.axes.set_title("爆炸温度变化", color='#38bdf8', fontsize=12, fontweight='bold')
+            
+            # 绘制曲线
+            self.temp_chart.axes.plot(t_ms, T_K, color='#38bdf8', linewidth=2)
+            
+            # 调整布局，确保标签完全显示
+            self.temp_chart.figure.tight_layout(pad=1.5)
+            
+            # 刷新显示
+            self.temp_chart.draw()
+            
         except Exception as e:
             print(f"更新温度图表失败: {e}")
     
