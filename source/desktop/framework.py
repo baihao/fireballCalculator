@@ -244,18 +244,15 @@ class FireballAnalysisApp(QMainWindow):
         from input_tab import InputTab
         from extract_tab import ExtractTab
         from model_tab import ModelTab
-        from export_tab import ExportTab
         
         # 创建各个标签页
         self.input_tab = InputTab()
         self.extract_tab = ExtractTab()
         self.model_tab = ModelTab()
-        self.export_tab = ExportTab()
         
         self.tab_widget.addTab(self.input_tab, "输入")
         self.tab_widget.addTab(self.extract_tab, "特征提取")
         self.tab_widget.addTab(self.model_tab, "建模与预测")
-        self.tab_widget.addTab(self.export_tab, "导出")
         
         main_layout.addWidget(self.tab_widget)
         
@@ -352,8 +349,6 @@ class FireballAnalysisApp(QMainWindow):
             self.sidebar.set_sidebar_content(self.extract_tab.get_sidebar_widget())
         elif index == 2:  # 建模与预测
             self.sidebar.set_sidebar_content(self.model_tab.get_sidebar_widget())
-        elif index == 3:  # 导出
-            self.sidebar.set_sidebar_content(self.export_tab.get_sidebar_widget())
     
     def _load_all_sidebars(self):
         """预加载所有侧边栏内容"""
@@ -361,19 +356,16 @@ class FireballAnalysisApp(QMainWindow):
         input_sidebar = self.input_tab.get_sidebar_widget()
         extract_sidebar = self.extract_tab.get_sidebar_widget()
         model_sidebar = self.model_tab.get_sidebar_widget()
-        export_sidebar = self.export_tab.get_sidebar_widget()
         
         # 将所有侧边栏添加到布局中（初始隐藏）
         layout = QVBoxLayout()
         layout.addWidget(input_sidebar)
         layout.addWidget(extract_sidebar)
         layout.addWidget(model_sidebar)
-        layout.addWidget(export_sidebar)
         
         # 隐藏除输入外的所有侧边栏
         extract_sidebar.hide()
         model_sidebar.hide()
-        export_sidebar.hide()
         
         # 显示输入侧边栏
         input_sidebar.show()
