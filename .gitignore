@@ -19,6 +19,13 @@ build/
 dist/
 *.egg-info/
 
+# PyInstaller打包文件
+*.spec
+*.pkg
+*.exe
+*.app
+FireballAnalysis*
+
 # Testing/coverage
 .pytest_cache/
 .coverage*
