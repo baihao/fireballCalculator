@@ -164,14 +164,20 @@ class ModelTab(QWidget):
             step = float(self.p_step.text()) if self.p_step.text() else 1.0
             duration = float(self.p_duration.text()) if self.p_duration.text() else 140.0
             
+            # 获取环境参数
+            env_temp = float(self.p_env_temp.text()) if self.p_env_temp.text() else 24.0
+            env_humidity = float(self.p_env_humidity.text()) if self.p_env_humidity.text() else 48.0
+            env_pressure = float(self.p_env_pressure.text()) if self.p_env_pressure.text() else 2987.87
+            
             print(f"预测参数: 当量={equivalent}, 含铝量={al_content}%, 步长={step}, 时长={duration}ms")
+            print(f"环境参数: 温度={env_temp}°C, 湿度={env_humidity}%, 气压={env_pressure}Pa")
             
             # 根据含铝量选择材料类型
             material_name = self.get_material_by_al_content(al_content)
             print(f"选择材料: {material_name}")
             
             # 生成预测曲线
-            self.generate_prediction_curves(material_name, duration)
+            self.generate_prediction_curves(material_name, duration, env_temp, env_humidity, env_pressure)
             
             # 更新状态
             self.modeling_status.setText("预测完成")
@@ -201,7 +207,7 @@ class ModelTab(QWidget):
         else:
             return '40%Al/Rubber'  # 默认
     
-    def generate_prediction_curves(self, material_name, duration):
+    def generate_prediction_curves(self, material_name, duration, env_temp=24.0, env_humidity=48.0, env_pressure=2987.87):
         """生成预测曲线"""
         try:
             print(f"生成 {material_name} 材料的预测曲线...")
@@ -217,6 +223,9 @@ class ModelTab(QWidget):
                 'time_s': t_s,
                 'material_name': material_name,
                 'duration': duration,
+                'env_temp': env_temp,
+                'env_humidity': env_humidity,
+                'env_pressure': env_pressure,
                 'diameter_data': None,
                 'temperature_data': None,
                 'heat_flux_data': {},
@@ -266,8 +275,15 @@ class ModelTab(QWidget):
             distances = [4.0, 4.5, 5.0, 5.5, 6.0]
             heat_flux_data = {}
             
+            # 创建传输率参数对象
+            transmissivity_params = TransmissivityParams(
+                Ta_K=env_temp + 273.15,  # 转换为开尔文
+                RH_percent=env_humidity,
+                PwSat_Pa=env_pressure
+            )
+            
             for dist in distances:
-                q_t = compute_heat_flux_over_time(dist, t_ms, T_K, D_m, TransmissivityParams())
+                q_t = compute_heat_flux_over_time(dist, t_ms, T_K, D_m, transmissivity_params)
                 heat_flux_data[f'x = {dist:.1f} m'] = (t_ms, q_t)
                 self.prediction_data['heat_flux_data'][f'{dist:.1f}'] = q_t
             
@@ -291,7 +307,7 @@ class ModelTab(QWidget):
             H_values = []
             
             for x in x_values:
-                q_t = compute_heat_flux_over_time(x, t_ms, T_K, D_m, TransmissivityParams())
+                q_t = compute_heat_flux_over_time(x, t_ms, T_K, D_m, transmissivity_params)
                 H = integrate_heat_radiation(q_t, t_ms)
                 H_values.append(H)
             
@@ -344,6 +360,11 @@ class ModelTab(QWidget):
             al_content = float(self.p_al.text()) if self.p_al.text() else 30.0
             step = float(self.p_step.text()) if self.p_step.text() else 1.0
             duration = float(self.p_duration.text()) if self.p_duration.text() else 140.0
+            
+            # 获取环境参数
+            env_temp = float(self.p_env_temp.text()) if self.p_env_temp.text() else 24.0
+            env_humidity = float(self.p_env_humidity.text()) if self.p_env_humidity.text() else 48.0
+            env_pressure = float(self.p_env_pressure.text()) if self.p_env_pressure.text() else 2987.87
             
             # 写入CSV文件
             with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
@@ -417,9 +438,9 @@ class ModelTab(QWidget):
                 # 写入环境参数
                 writer.writerow(['# 环境参数'])
                 writer.writerow(['参数名称', '数值', '单位'])
-                writer.writerow(['环境温度', '24', '°C'])
-                writer.writerow(['相对湿度', '48', '%'])
-                writer.writerow(['水饱和气压', '2987.87', 'Pa'])
+                writer.writerow(['环境温度', env_temp, '°C'])
+                writer.writerow(['相对湿度', env_humidity, '%'])
+                writer.writerow(['水饱和气压', env_pressure, 'Pa'])
                 writer.writerow(['火球表面比辐射率', '0.9', ''])
                 writer.writerow(['斯蒂芬-波尔茨曼常数', '5.67e-8', 'W/(m²·K⁴)'])
             
@@ -549,6 +570,23 @@ class ModelTab(QWidget):
             self.p_al = QLineEdit("30")
             pred_layout.addWidget(self.p_al)
             layout.addLayout(pred_layout)
+            
+            # 环境参数
+            env_layout = QHBoxLayout()
+            env_layout.addWidget(QLabel("环境温度:"))
+            self.p_env_temp = QLineEdit("24")
+            env_layout.addWidget(self.p_env_temp)
+            env_layout.addWidget(QLabel("相对湿度:"))
+            self.p_env_humidity = QLineEdit("48")
+            env_layout.addWidget(self.p_env_humidity)
+            layout.addLayout(env_layout)
+            
+            pressure_layout = QHBoxLayout()
+            pressure_layout.addWidget(QLabel("水饱和气压:"))
+            self.p_env_pressure = QLineEdit("2987.87")
+            pressure_layout.addWidget(self.p_env_pressure)
+            pressure_layout.addStretch()
+            layout.addLayout(pressure_layout)
             
             sim_layout = QHBoxLayout()
             sim_layout.addWidget(QLabel("仿真步长:"))

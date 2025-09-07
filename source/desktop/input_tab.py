@@ -113,12 +113,9 @@ class InputTab(QWidget):
         params_layout.setAlignment(Qt.AlignTop)  # 标签顶部对齐
         
         # 创建只读标签显示参数
-        self.material_label = QLabel("炸药类别: 40% Al / Rubber")
-        self.equivalent_label = QLabel("当量: 10 kg TNT")
+        self.material_label = QLabel("炸药类别: 温压弹")
+        self.equivalent_label = QLabel("当量: 1 kg TNT")
         self.al_percent_label = QLabel("含铝量: 30%")
-        self.env_temp_label = QLabel("环境温度: 24°C")
-        self.env_humidity_label = QLabel("相对湿度: 48%")
-        self.env_pressure_label = QLabel("水饱和气压: 2987.87 Pa")
         
         # 设置标签样式，参考HTML设计
         label_style = """
@@ -132,16 +129,10 @@ class InputTab(QWidget):
         self.material_label.setStyleSheet(label_style)
         self.equivalent_label.setStyleSheet(label_style)
         self.al_percent_label.setStyleSheet(label_style)
-        self.env_temp_label.setStyleSheet(label_style)
-        self.env_humidity_label.setStyleSheet(label_style)
-        self.env_pressure_label.setStyleSheet(label_style)
         
         params_layout.addWidget(self.material_label)
         params_layout.addWidget(self.equivalent_label)
         params_layout.addWidget(self.al_percent_label)
-        params_layout.addWidget(self.env_temp_label)
-        params_layout.addWidget(self.env_humidity_label)
-        params_layout.addWidget(self.env_pressure_label)
         
         params_group.setLayout(params_layout)
         right_layout.addWidget(params_group)
@@ -179,6 +170,9 @@ class InputTab(QWidget):
         
         # 初始化图表（不绘制曲线）
         self.init_temperature_chart()
+        
+        # 初始化参数显示（与侧边栏默认值同步）
+        self.update_parameters_display()
         
     def setup_connections(self):
         """设置信号连接"""
@@ -304,17 +298,12 @@ class InputTab(QWidget):
             import traceback
             traceback.print_exc()
     
-    def update_parameters_display(self, material_type="40% Al / Rubber", equivalent="10", 
-                                 al_percent="30", env_temp="24", env_humidity="48", 
-                                 env_pressure="2987.87", explosion_duration="140", pixel_length="0.01"):
+    def update_parameters_display(self, material_type="温压弹", equivalent="1", 
+                                 al_percent="30", explosion_duration="140", pixel_length="0.01"):
         """更新右侧参数显示"""
         self.material_label.setText(f"炸药类别: {material_type}")
         self.equivalent_label.setText(f"当量: {equivalent} kg TNT")
         self.al_percent_label.setText(f"含铝量: {al_percent}%")
-        self.env_temp_label.setText(f"环境温度: {env_temp}°C")
-        self.env_humidity_label.setText(f"相对湿度: {env_humidity}%")
-        self.env_pressure_label.setText(f"水饱和气压: {env_pressure} Pa")
-        # 注意：这里可以添加新参数的显示，但右侧面板目前没有对应的标签
     
     def save_sequence(self):
         """保存采样序列到JSON文件"""
@@ -339,9 +328,6 @@ class InputTab(QWidget):
                     "material_type": self.material_label.text().split(": ")[1],
                     "equivalent": self.equivalent_label.text().split(": ")[1].split(" ")[0],
                     "al_percent": self.al_percent_label.text().split(": ")[1].replace("%", ""),
-                    "env_temp": self.env_temp_label.text().split(": ")[1].replace("°C", ""),
-                    "env_humidity": self.env_humidity_label.text().split(": ")[1].replace("%", ""),
-                    "env_pressure": self.env_pressure_label.text().split(": ")[1].replace(" Pa", ""),
                     "explosion_duration": self.explosion_duration.text(),
                     "pixel_length": self.pixel_length.text()
                 },
@@ -389,18 +375,12 @@ class InputTab(QWidget):
             
             # 参数组控件
             self.explosive_type = QComboBox()
-            self.explosive_type.addItems(["TNT", "Polyurethane", "30% Al / Rubber", 
-                                        "40% Al / Rubber", "50% Al / Rubber", "60% Al / Rubber"])
-            self.explosive_type.setCurrentText("40% Al / Rubber")
+            self.explosive_type.addItems(["温压弹"])
+            self.explosive_type.setCurrentText("温压弹")
             
             # 当量和含铝量
-            self.equivalent = QLineEdit("10")
+            self.equivalent = QLineEdit("1")
             self.al_percent = QLineEdit("30")
-            
-            # 环境参数
-            self.env_temp = QLineEdit("24")
-            self.env_humidity = QLineEdit("48")
-            self.env_pressure = QLineEdit("2987.87")
             
             # 控制按钮
             self.clear_btn = QPushButton("清空输入")
@@ -524,22 +504,6 @@ class InputTab(QWidget):
             param_layout.addWidget(al_percent_label)
             param_layout.addWidget(self.al_percent)
             
-            # 环境参数
-            env_temp_label = QLabel("环境温度 Ta（°C）")
-            env_temp_label.setStyleSheet(param_label_style)
-            param_layout.addWidget(env_temp_label)
-            param_layout.addWidget(self.env_temp)
-            
-            env_humidity_label = QLabel("相对湿度 RH（%）")
-            env_humidity_label.setStyleSheet(param_label_style)
-            param_layout.addWidget(env_humidity_label)
-            param_layout.addWidget(self.env_humidity)
-            
-            env_pressure_label = QLabel("水饱和气压 PwSat(Ta)（Pa）")
-            env_pressure_label.setStyleSheet(param_label_style)
-            param_layout.addWidget(env_pressure_label)
-            param_layout.addWidget(self.env_pressure)
-            
             param_group.setLayout(param_layout)
             layout.addWidget(param_group)
             
@@ -570,9 +534,6 @@ class InputTab(QWidget):
         self.explosive_type.currentTextChanged.connect(self.on_parameter_changed)
         self.equivalent.textChanged.connect(self.on_parameter_changed)
         self.al_percent.textChanged.connect(self.on_parameter_changed)
-        self.env_temp.textChanged.connect(self.on_parameter_changed)
-        self.env_humidity.textChanged.connect(self.on_parameter_changed)
-        self.env_pressure.textChanged.connect(self.on_parameter_changed)
         self.explosion_duration.textChanged.connect(self.on_parameter_changed)
         self.explosion_duration.textChanged.connect(self.on_duration_changed)
         self.pixel_length.textChanged.connect(self.on_parameter_changed)
@@ -812,9 +773,6 @@ class InputTab(QWidget):
             self.explosive_type.currentText(),
             self.equivalent.text(),
             self.al_percent.text(),
-            self.env_temp.text(),
-            self.env_humidity.text(),
-            self.env_pressure.text(),
             self.explosion_duration.text(),
             self.pixel_length.text()
         )
