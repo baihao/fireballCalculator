@@ -78,7 +78,12 @@ class ExtractTab(QWidget):
         preview_group_layout.setSpacing(8)
         
         self.extract_preview = ImagePreviewWidget()
-        preview_group_layout.addWidget(self.extract_preview)
+        # 创建水平布局来居中图像预览
+        image_layout = QHBoxLayout()
+        image_layout.addStretch()
+        image_layout.addWidget(self.extract_preview)
+        image_layout.addStretch()
+        preview_group_layout.addLayout(image_layout)
         
         # 时间轴
         timeline_layout = QHBoxLayout()

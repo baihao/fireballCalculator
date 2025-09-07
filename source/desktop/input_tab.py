@@ -62,7 +62,12 @@ class InputTab(QWidget):
         
         # 图像预览
         self.image_preview = ImagePreviewWidget()
-        preview_layout.addWidget(self.image_preview)
+        # 创建水平布局来居中图像预览
+        image_layout = QHBoxLayout()
+        image_layout.addStretch()
+        image_layout.addWidget(self.image_preview)
+        image_layout.addStretch()
+        preview_layout.addLayout(image_layout)
         
         # 时间轴
         timeline_layout = QHBoxLayout()
