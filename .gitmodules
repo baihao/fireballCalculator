@@ -1,0 +1,6 @@
+[submodule "source/third_party/segment-anything"]
+	path = source/third_party/segment-anything
+	url = git@github.com:facebookresearch/segment-anything.git
+[submodule "source/third_party/sam2"]
+	path = source/third_party/sam2
+	url = git@github.com:facebookresearch/sam2.git

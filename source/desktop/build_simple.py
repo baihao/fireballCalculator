@@ -68,6 +68,8 @@ def main():
         '--hidden-import=scipy',
         '--hidden-import=scipy.integrate',
         '--hidden-import=scipy.interpolate',
+        '--hidden-import=segment_anything',
+        '--hidden-import=sam2',
         'app.py'
     ]
     

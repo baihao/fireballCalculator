@@ -1,0 +1,15 @@
+name: fireball_calculator
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - numpy>=1.21.0
+  - matplotlib>=3.5.0
+  - pandas>=1.3.0
+  - opencv>=4.5.0
+  - pillow>=8.0.0
+  - scipy>=1.9.0
+  - pip:
+    - PySide6>=6.5.0
