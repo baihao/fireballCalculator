@@ -19,6 +19,8 @@ echo "✓ Conda 已安装: $(conda --version)"
 # 检查Python版本要求
 PYTHON_VERSION="3.10"
 ENV_NAME="fireball_calculator"
+ENV_PYTHON_PATH="/Users/hbai/miniconda3/envs/${ENV_NAME}/bin/python"
+ENV_PIP_PATH="/Users/hbai/miniconda3/envs/${ENV_NAME}/bin/pip"
 
 echo "✓ 将使用 Python ${PYTHON_VERSION} 创建环境: ${ENV_NAME}"
 
@@ -58,28 +60,51 @@ conda activate ${ENV_NAME}
 
 if [ $? -eq 0 ]; then
     echo "✓ Conda环境激活成功"
-    echo "当前Python路径: $(which python)"
-    echo "当前Python版本: $(python --version)"
+    echo "环境Python路径: ${ENV_PYTHON_PATH}"
+    echo "环境Python版本: $(${ENV_PYTHON_PATH} --version)"
+    echo "环境pip路径: ${ENV_PIP_PATH}"
 else
     echo "错误: Conda环境激活失败"
     exit 1
 fi
 
+# 检查pip模块是否已安装
+echo ""
+echo "正在检查pip模块..."
+if ! ${ENV_PYTHON_PATH} -c "import pip" 2>/dev/null; then
+    echo "pip模块未安装，正在安装..."
+    ${ENV_PYTHON_PATH} -m ensurepip --upgrade
+    if [ $? -eq 0 ]; then
+        echo "✓ pip模块安装成功"
+    else
+        echo "错误: pip模块安装失败"
+        exit 1
+    fi
+else
+    echo "✓ pip模块已存在"
+fi
+
 # 升级pip
 echo ""
 echo "正在升级pip..."
-pip install --upgrade pip
+${ENV_PIP_PATH} install --upgrade pip
 
-# 安装依赖
+# 安装额外依赖（如果requirements.txt存在且与environment.yml不同）
 echo ""
-echo "正在安装依赖包..."
-pip install -r requirements.txt
-
-if [ $? -eq 0 ]; then
-    echo "✓ 依赖包安装成功"
+echo "正在检查额外依赖..."
+if [ -f "requirements.txt" ]; then
+    echo "检测到 requirements.txt 文件"
+    echo "注意: 基础依赖已通过 environment.yml 安装"
+    echo "正在安装 requirements.txt 中的额外依赖..."
+    ${ENV_PIP_PATH} install -r requirements.txt
+    
+    if [ $? -eq 0 ]; then
+        echo "✓ 额外依赖安装成功"
+    else
+        echo "⚠️ 部分依赖安装失败，但环境仍可使用"
+    fi
 else
-    echo "错误: 依赖包安装失败"
-    exit 1
+    echo "未检测到 requirements.txt 文件，跳过额外依赖安装"
 fi
 
 # 如存在本地子模块 segment-anything，则以可编辑模式安装
@@ -87,7 +112,7 @@ if [ -d "third_party/segment-anything" ]; then
     echo ""
     echo "检测到本地子模块: third_party/segment-anything"
     echo "正在以可编辑模式安装 Segment Anything ..."
-    pip install -e third_party/segment-anything
+    ${ENV_PIP_PATH} install -e third_party/segment-anything
     if [ $? -eq 0 ]; then
         echo "✓ Segment Anything 安装成功 (editable)"
     else
@@ -109,12 +134,12 @@ if [ -d "third_party/sam2" ]; then
     echo "正在以可编辑模式安装 SAM2 ..."
     
     # 检查Python版本是否满足SAM2要求
-    PYTHON_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    PYTHON_MAJOR=$(python -c "import sys; print(sys.version_info.major)")
-    PYTHON_MINOR=$(python -c "import sys; print(sys.version_info.minor)")
+    PYTHON_VER=$(${ENV_PYTHON_PATH} -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    PYTHON_MAJOR=$(${ENV_PYTHON_PATH} -c "import sys; print(sys.version_info.major)")
+    PYTHON_MINOR=$(${ENV_PYTHON_PATH} -c "import sys; print(sys.version_info.minor)")
     
     if [ $PYTHON_MAJOR -gt 3 ] || ([ $PYTHON_MAJOR -eq 3 ] && [ $PYTHON_MINOR -ge 10 ]); then
-        pip install -e third_party/sam2
+        ${ENV_PIP_PATH} install -e third_party/sam2
         if [ $? -eq 0 ]; then
             echo "✓ SAM2 安装成功 (editable)"
         else
@@ -133,10 +158,25 @@ else
     echo "然后重新运行本脚本。"
 fi
 
+# 检查并修复Qt库冲突
+echo ""
+echo "正在检查Qt库冲突..."
+if [ -f "./check_qt_conflict.sh" ]; then
+    echo "运行Qt冲突检测脚本..."
+    ./check_qt_conflict.sh
+    if [ $? -eq 0 ]; then
+        echo "✓ Qt冲突检查完成"
+    else
+        echo "⚠️ Qt冲突检测或修复失败，但环境仍可使用"
+    fi
+else
+    echo "未检测到Qt冲突检测脚本，跳过Qt检查"
+fi
+
 # 验证安装
 echo ""
 echo "正在验证安装..."
-python -c "import numpy; import matplotlib; print('✓ 所有依赖包导入成功')"
+${ENV_PYTHON_PATH} -c "import numpy; import matplotlib; print('✓ 所有依赖包导入成功')"
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -144,17 +184,42 @@ if [ $? -eq 0 ]; then
     echo "环境设置完成！"
     echo "=========================================="
     echo ""
-    echo "使用方法:"
+    echo "✓ 环境信息:"
+    echo "  环境名称: ${ENV_NAME}"
+    echo "  Python版本: $(${ENV_PYTHON_PATH} --version)"
+    echo "  Python路径: ${ENV_PYTHON_PATH}"
+    echo "  pip路径: ${ENV_PIP_PATH}"
+    echo ""
+    
+    # 设置当前会话的别名
+    echo "正在设置当前会话的别名..."
+    alias python310="${ENV_PYTHON_PATH}"
+    alias pip310="${ENV_PIP_PATH}"
+    echo "✓ 别名设置成功！"
+    echo ""
+    
+    echo "✓ 快速使用命令:"
     echo "1. 激活conda环境: conda activate ${ENV_NAME}"
-    echo "2. 运行计算器: python fireball_radius_calculator.py"
-    echo "3. 退出conda环境: conda deactivate"
+    echo "2. 设置别名: source ./setup_aliases.sh"
+    echo "3. 使用环境Python: python310 fireball_radius_calculator.py"
+    echo "4. 使用环境pip: pip310 install package_name"
+    echo "5. 退出conda环境: conda deactivate"
     echo ""
-    echo "注意: 每次使用前都需要先激活conda环境"
-    echo ""
-    echo "环境管理命令:"
+    echo "✓ 环境管理命令:"
     echo "- 查看所有环境: conda env list"
     echo "- 删除环境: conda env remove -n ${ENV_NAME}"
     echo "- 导出环境: conda env export > environment.yml"
+    echo "- 重新创建环境: ./setup.sh"
+    echo "- 设置别名: source ./setup_aliases.sh"
+    echo ""
+    echo "✓ 永久别名设置 (添加到 ~/.zshrc 或 ~/.bashrc):"
+    echo "  alias python310='${ENV_PYTHON_PATH}'"
+    echo "  alias pip310='${ENV_PIP_PATH}'"
+    echo ""
+    echo "✓ 注意事项:"
+    echo "- 每次使用前都需要先激活conda环境"
+    echo "- 当前会话已设置 python310 和 pip310 别名"
+    echo "- 如果遇到Python版本问题，请使用完整路径: ${ENV_PYTHON_PATH}"
     echo ""
 else
     echo "错误: 依赖包验证失败"

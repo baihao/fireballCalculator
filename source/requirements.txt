@@ -1,17 +1,6 @@
-# 火球计算器项目依赖包
-# 合并自 source/, source/desktop/, source/experiment/ 三个requirements.txt
-
-# 核心科学计算库
-numpy>=1.21.0
-matplotlib>=3.5.0
-
-# 桌面应用依赖
-PySide6>=6.5.0
-pandas>=1.3.0
-
-# 图像处理和计算机视觉
-opencv-python>=4.5.0
-Pillow>=8.0.0
+# 火球计算器项目额外依赖包
+# 注意：基础依赖已通过 environment.yml 安装
+# 此文件仅包含额外的、不在 environment.yml 中的依赖
 
 # 可选：深度学习相关（如果需要使用SAM或U-Net）
 # torch>=1.12.0
@@ -21,3 +10,12 @@ Pillow>=8.0.0
 # 可选：其他科学计算库
 # scipy>=1.9.0
 # scikit-learn>=1.1.0
+
+# 可选：开发和调试工具
+# jupyter>=1.0.0
+# ipython>=8.0.0
+# pytest>=7.0.0
+
+# 可选：其他工具
+# tqdm>=4.60.0
+# requests>=2.25.0
