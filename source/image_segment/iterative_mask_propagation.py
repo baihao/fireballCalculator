@@ -12,8 +12,6 @@ import torch
 from typing import List, Tuple, Optional, Dict, Any
 import matplotlib.pyplot as plt
 from pathlib import Path
-from scipy import ndimage
-from scipy.interpolate import interp1d
 
 try:
     from segment_anything import sam_model_registry, SamPredictor
@@ -582,39 +580,7 @@ class IterativeMaskPropagationSegmenter:
         except Exception as e:
             return f"分析过程出错: {str(e)}"
 
-    def _propagate_mask_with_optical_flow(self, reference_image: np.ndarray, reference_mask: np.ndarray, 
-                                        target_image: np.ndarray) -> Optional[np.ndarray]:
-        """使用光流传播掩码"""
-        try:
-            # 转换为灰度图
-            ref_gray = cv2.cvtColor(reference_image, cv2.COLOR_RGB2GRAY)
-            target_gray = cv2.cvtColor(target_image, cv2.COLOR_RGB2GRAY)
-            
-            # 计算光流
-            flow = cv2.calcOpticalFlowPyrLK(
-                ref_gray, target_gray, 
-                None, None,
-                winSize=(15, 15),
-                maxLevel=2,
-                criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
-            )
-            
-            # 简化版本：使用简单的仿射变换
-            # 在实际应用中，这里应该使用更复杂的光流算法
-            h, w = reference_mask.shape
-            target_h, target_w = target_image.shape[:2]
-            
-            # 调整掩码尺寸
-            if (h, w) != (target_h, target_w):
-                propagated_mask = cv2.resize(reference_mask, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
-            else:
-                propagated_mask = reference_mask.copy()
-            
-            return propagated_mask
-            
-        except Exception as e:
-            print(f"    ⚠️ 光流传播失败: {e}")
-            return None
+    # 已废弃：早期尝试的光流传播，现改为RGB相似点生成策略
     
     def _prepare_mask_input(self, mask: np.ndarray) -> np.ndarray:
         """准备掩码输入，调整到SAM要求的尺寸"""
