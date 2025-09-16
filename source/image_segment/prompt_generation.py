@@ -7,7 +7,7 @@ Prompt点生成模块
 
 import cv2
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 
 
 class PromptPointGenerator:
@@ -25,7 +25,8 @@ class PromptPointGenerator:
         self.similar_threshold = similar_threshold
     
     def generate_points_with_rgb_similarity(self, reference_image: np.ndarray, reference_mask: np.ndarray, 
-                                          target_image: np.ndarray) -> Tuple[List[Tuple[int, int]], List[int]]:
+                                          target_image: np.ndarray, return_debug_info: bool = False,
+                                          predefined_reference_points: Optional[Dict[str, List[Tuple[int, int]]]] = None) -> Tuple[List[Tuple[int, int]], List[int]]:
         """
         基于RGB相似性生成目标图片的正负点
         
@@ -38,11 +39,18 @@ class PromptPointGenerator:
             Tuple[List[Tuple[int, int]], List[int]]: (点坐标列表, 点标签列表)
         """
         try:
-            # 1. 从参考图片的掩码内部选取10个正点候选
-            positive_candidates = self.sample_points_from_mask(reference_mask, num_points=10, inside_mask=True)
-            
-            # 2. 从参考图片的掩码外部选取6个负点候选
-            negative_candidates = self.sample_points_from_mask(reference_mask, num_points=6, inside_mask=False)
+            # 1. 使用预定义的采样点或重新采样
+            if predefined_reference_points is not None:
+                positive_candidates = predefined_reference_points['positive']
+                negative_candidates = predefined_reference_points['negative']
+                print(f"    使用预定义的参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}")
+            else:
+                # 从参考图片的掩码内部选取10个正点候选
+                positive_candidates = self.sample_points_from_mask(reference_mask, num_points=10, inside_mask=True)
+                
+                # 从参考图片的掩码外部选取6个负点候选
+                negative_candidates = self.sample_points_from_mask(reference_mask, num_points=6, inside_mask=False)
+                print(f"    重新采样参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}")
             
             # 3. 将候选点映射到目标图片上
             target_positive_candidates = self.map_points_to_target(reference_image, positive_candidates, target_image)
@@ -67,7 +75,17 @@ class PromptPointGenerator:
             
             print(f"    生成了 {len(target_positive_points)} 个正点和 {len(target_negative_points)} 个负点")
             
-            return final_points, final_labels
+            if return_debug_info:
+                return final_points, final_labels, {
+                    'reference_positive': positive_candidates,
+                    'reference_negative': negative_candidates,
+                    'mapped_positive': target_positive_candidates,
+                    'mapped_negative': target_negative_candidates,
+                    'filtered_positive': target_positive_points,
+                    'filtered_negative': target_negative_points
+                }
+            else:
+                return final_points, final_labels
             
         except Exception as e:
             print(f"    ⚠️ 点生成失败: {e}")
@@ -113,14 +131,65 @@ class PromptPointGenerator:
         if len(x_coords) == 0:
             return []
         
-        # 随机采样指定数量的点
-        if len(x_coords) <= num_points:
-            indices = np.arange(len(x_coords))
-        else:
-            indices = np.random.choice(len(x_coords), num_points, replace=False)
-        
-        points = [(int(x_coords[i]), int(y_coords[i])) for i in indices]
-        return points
+        # 基于网格的分层均匀采样（优先均匀分布，其次再随机补齐）
+        total_candidates = len(x_coords)
+        if total_candidates == 0:
+            return []
+
+        # 候选点数组
+        candidates = np.stack([x_coords, y_coords], axis=1)
+
+        # 计算网格行列数，使 cell 数约等于 num_points
+        grid_rows = max(1, int(np.sqrt(num_points)))
+        grid_cols = max(1, int(np.ceil(num_points / grid_rows)))
+
+        cell_w = max(1, w // grid_cols)
+        cell_h = max(1, h // grid_rows)
+
+        selected = []
+        used_idx = set()
+
+        # 遍历每个网格单元，选择距离单元中心最近的候选点
+        for r in range(grid_rows):
+            if len(selected) >= num_points:
+                break
+            y0 = r * cell_h
+            y1 = h if r == grid_rows - 1 else (r + 1) * cell_h
+            for c in range(grid_cols):
+                if len(selected) >= num_points:
+                    break
+                x0 = c * cell_w
+                x1 = w if c == grid_cols - 1 else (c + 1) * cell_w
+
+                # 找出落在该 cell 内的候选索引
+                in_cell = np.where(
+                    (candidates[:, 0] >= x0) & (candidates[:, 0] < x1) &
+                    (candidates[:, 1] >= y0) & (candidates[:, 1] < y1)
+                )[0]
+
+                if in_cell.size == 0:
+                    continue
+
+                # 选择与 cell 中心最近的点
+                cx = (x0 + x1) / 2.0
+                cy = (y0 + y1) / 2.0
+                pts = candidates[in_cell]
+                d2 = (pts[:, 0] - cx) ** 2 + (pts[:, 1] - cy) ** 2
+                pick_local = in_cell[np.argmin(d2)]
+                if pick_local not in used_idx:
+                    used_idx.add(pick_local)
+                    selected.append((int(candidates[pick_local, 0]), int(candidates[pick_local, 1])))
+
+        # 若不足 num_points，再从未用候选中随机补齐
+        if len(selected) < num_points:
+            remaining = [i for i in range(total_candidates) if i not in used_idx]
+            if remaining:
+                need = min(num_points - len(selected), len(remaining))
+                extra_idx = np.random.choice(remaining, need, replace=False)
+                for i in extra_idx:
+                    selected.append((int(candidates[i, 0]), int(candidates[i, 1])))
+
+        return selected[:num_points]
     
     def map_points_to_target(self, reference_image: np.ndarray, points: List[Tuple[int, int]], 
                             target_image: np.ndarray) -> List[Tuple[int, int]]:

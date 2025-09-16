@@ -48,58 +48,11 @@ def create_test_images():
     
     return image_paths
 
-def visualize_points_on_image(image, positive_points, negative_points, output_path):
+def generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data):
     """
-    在图像上可视化正负点
-    
-    Args:
-        image: 目标图像 (RGB格式)
-        positive_points: 正点坐标列表 [(x, y), ...]
-        negative_points: 负点坐标列表 [(x, y), ...]
-        output_path: 输出图像路径
-    """
-    # 创建图像副本
-    vis_image = image.copy()
-    
-    # 绘制正点（红色）
-    for x, y in positive_points:
-        cv2.circle(vis_image, (x, y), 5, (255, 0, 0), -1)  # 红色实心圆
-        cv2.circle(vis_image, (x, y), 8, (255, 255, 255), 2)  # 白色边框
-    
-    # 绘制负点（蓝色）
-    for x, y in negative_points:
-        cv2.circle(vis_image, (x, y), 5, (0, 0, 255), -1)  # 蓝色实心圆
-        cv2.circle(vis_image, (x, y), 8, (255, 255, 255), 2)  # 白色边框
-    
-    # 保存图像
-    cv2.imwrite(output_path, cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
-    print(f"   保存带prompt点的图像: {output_path}")
-    
-    # 创建matplotlib可视化
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-    
-    # 显示原图
-    axes[0].imshow(image)
-    axes[0].set_title("原图")
-    axes[0].axis('off')
-    
-    # 显示带点的图像
-    axes[1].imshow(vis_image)
-    axes[1].set_title(f"带Prompt点的图像\n红点: 正点({len(positive_points)}个), 蓝点: 负点({len(negative_points)}个)")
-    axes[1].axis('off')
-    
-    plt.tight_layout()
-    
-    # 保存matplotlib图像
-    matplotlib_path = output_path.replace('.png', '_matplotlib.png')
-    plt.savefig(matplotlib_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    
-    print(f"   保存matplotlib可视化: {matplotlib_path}")
-
-def generate_propagation_points_visualization(segmenter, image_paths, masks, prompt_data):
-    """
-    为传播的图片生成prompt点可视化
+    生成合并的debug可视化图片
+    有prompt点的图片: prompt_points, segmentation_result, next_iteration_sampling
+    传播的图片: segmentation_result, next_iteration_sampling
     
     Args:
         segmenter: 分割器实例
@@ -108,122 +61,197 @@ def generate_propagation_points_visualization(segmenter, image_paths, masks, pro
         prompt_data: prompt数据
     """
     try:
-        # 为每张非prompt图片生成三阶段点可视化（参考→映射→筛选），并在失败时强制画掩码
+        # 设置中文字体支持
+        plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+        
+        # 为每张图片生成合并的debug可视化
         for i, image_path in enumerate(image_paths):
-            if i in prompt_data:
-                continue
-            print(f"   为图片 {i+1} 生成传播点三阶段可视化...")
-
-            # 读取目标图
+            print(f"   为图片 {i+1} 生成合并debug可视化...")
+            
+            # 读取目标图片
             image = cv2.imread(image_path)
             if image is None:
                 continue
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # 根据是否为prompt图片创建不同的布局
+            if i in prompt_data:
+                # 有prompt点的图片：创建1x3布局
+                fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+                
+                # 1. prompt points (显示prompt点)
+                points = prompt_data[i]['points']
+                labels = prompt_data[i]['labels']
+                pos_points = [p for p, l in zip(points, labels) if l == 1]
+                neg_points = [p for p, l in zip(points, labels) if l == 0]
+                
+                axes[0].imshow(image_rgb)
+                for x, y in pos_points:
+                    axes[0].scatter(x, y, c='red', s=50, marker='o', edgecolors='white', linewidth=2)
+                for x, y in neg_points:
+                    axes[0].scatter(x, y, c='blue', s=50, marker='o', edgecolors='white', linewidth=2)
+                axes[0].set_title(f"Prompt Points\nImage {i+1}\nPos: {len(pos_points)}, Neg: {len(neg_points)}")
+                axes[0].axis('off')
+                
+                # 2. segmentation result (显示分割结果)
+                axes[1].imshow(image_rgb)
+                if masks[i] is not None:
+                    axes[1].imshow(masks[i], alpha=0.5, cmap='Reds')
+                    mask_area = int(np.sum(masks[i]))
+                    mask_quality = segmenter.mask_analyzer.calculate_mask_quality(masks[i]) if masks[i] is not None else 0.0
+                    axes[1].set_title(f"Segmentation Result\nImage {i+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}")
+                else:
+                    axes[1].text(0.5, 0.5, "Segmentation Failed", ha='center', va='center', transform=axes[1].transAxes)
+                    axes[1].set_title(f"Segmentation Result\nImage {i+1}\nFailed")
+                axes[1].axis('off')
+                
+                # 3. sampling points for next iteration (为下次迭代选定的采样点)
+                axes[2].imshow(image_rgb)
+                if masks[i] is not None:
+                    # 使用保存的下次迭代采样点
+                    if (hasattr(segmenter, 'propagation_details') and 
+                        i in segmenter.propagation_details and 
+                        'next_iteration_points' in segmenter.propagation_details[i]):
+                        
+                        next_pos_points = segmenter.propagation_details[i]['next_iteration_points']['positive']
+                        next_neg_points = segmenter.propagation_details[i]['next_iteration_points']['negative']
+                        print(f"     使用保存的下次迭代采样点")
+                    else:
+                        # 回退：重新采样
+                        next_pos_points = segmenter.prompt_generator.sample_points_from_mask(masks[i], 10, True)
+                        next_neg_points = segmenter.prompt_generator.sample_points_from_mask(masks[i], 6, False)
+                        print(f"     重新采样下次迭代点")
+                    
+                    for x, y in next_pos_points:
+                        axes[2].scatter(x, y, c='red', s=50, marker='o', edgecolors='white', linewidth=2)
+                    for x, y in next_neg_points:
+                        axes[2].scatter(x, y, c='blue', s=50, marker='o', edgecolors='white', linewidth=2)
+                    axes[2].set_title(f"Next Iteration Sampling\nImage {i+1}\nPos: {len(next_pos_points)}, Neg: {len(next_neg_points)}")
+                else:
+                    axes[2].text(0.5, 0.5, "No mask for sampling", ha='center', va='center', transform=axes[2].transAxes)
+                    axes[2].set_title(f"Next Iteration Sampling\nImage {i+1}\nNo mask")
+                axes[2].axis('off')
+                
+            else:
+                # 传播的图片：创建2x3布局（显示完整的传播过程）
+                if not hasattr(segmenter, 'propagation_details') or i not in segmenter.propagation_details:
+                    continue
+                debug_data = segmenter.propagation_details[i]
+                if debug_data['status'] == 'unprocessed':
+                    continue
+                
+                fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+                
+                # 1. reference_segmentation (参考图片分割结果)
+                ref_idx = debug_data['reference_image_idx']
+                if ref_idx is not None and 0 <= ref_idx < len(image_paths):
+                    ref_image = cv2.imread(image_paths[ref_idx])
+                    if ref_image is not None:
+                        ref_image_rgb = cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB)
+                        axes[0, 0].imshow(ref_image_rgb)
+                        if masks[ref_idx] is not None:
+                            axes[0, 0].imshow(masks[ref_idx], alpha=0.5, cmap='Reds')
+                        axes[0, 0].set_title(f"Reference Segmentation\nImage {ref_idx+1}")
+                    else:
+                        axes[0, 0].text(0.5, 0.5, "Failed to load ref image", ha='center', va='center', transform=axes[0, 0].transAxes)
+                        axes[0, 0].set_title("Reference Segmentation")
+                else:
+                    axes[0, 0].text(0.5, 0.5, "No reference image", ha='center', va='center', transform=axes[0, 0].transAxes)
+                    axes[0, 0].set_title("Reference Segmentation")
+                axes[0, 0].axis('off')
+                
+                # 2. reference_points (参考图片的采样点)
+                if ref_idx is not None and 0 <= ref_idx < len(image_paths):
+                    ref_image = cv2.imread(image_paths[ref_idx])
+                    if ref_image is not None:
+                        ref_image_rgb = cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB)
+                        axes[0, 1].imshow(ref_image_rgb)
+                        
+                        ref_pos = debug_data['reference_points']['positive']
+                        ref_neg = debug_data['reference_points']['negative']
+                        for x, y in ref_pos:
+                            axes[0, 1].scatter(x, y, c='red', s=50, marker='o', edgecolors='white', linewidth=2)
+                        for x, y in ref_neg:
+                            axes[0, 1].scatter(x, y, c='blue', s=50, marker='o', edgecolors='white', linewidth=2)
+                        axes[0, 1].set_title(f"Reference Points\nImage {ref_idx+1}\nPos: {len(ref_pos)}, Neg: {len(ref_neg)}")
+                    else:
+                        axes[0, 1].text(0.5, 0.5, "Failed to load ref image", ha='center', va='center', transform=axes[0, 1].transAxes)
+                        axes[0, 1].set_title("Reference Points")
+                else:
+                    axes[0, 1].text(0.5, 0.5, "No reference image", ha='center', va='center', transform=axes[0, 1].transAxes)
+                    axes[0, 1].set_title("Reference Points")
+                axes[0, 1].axis('off')
+                
+                # 3. mapped_points (映射到目标图片的点)
+                axes[0, 2].imshow(image_rgb)
+                mapped_pos = debug_data['mapped_points']['positive']
+                mapped_neg = debug_data['mapped_points']['negative']
+                for x, y in mapped_pos:
+                    axes[0, 2].scatter(x, y, c='red', s=50, marker='o', edgecolors='white', linewidth=2)
+                for x, y in mapped_neg:
+                    axes[0, 2].scatter(x, y, c='blue', s=50, marker='o', edgecolors='white', linewidth=2)
+                axes[0, 2].set_title(f"Mapped Points\nImage {i+1}\nPos: {len(mapped_pos)}, Neg: {len(mapped_neg)}")
+                axes[0, 2].axis('off')
+                
+                # 4. filtered_points (筛选后的点)
+                axes[1, 0].imshow(image_rgb)
+                filtered_pos = debug_data['filtered_points']['positive']
+                filtered_neg = debug_data['filtered_points']['negative']
+                for x, y in filtered_pos:
+                    axes[1, 0].scatter(x, y, c='red', s=50, marker='o', edgecolors='white', linewidth=2)
+                for x, y in filtered_neg:
+                    axes[1, 0].scatter(x, y, c='blue', s=50, marker='o', edgecolors='white', linewidth=2)
+                axes[1, 0].set_title(f"Filtered Points\nImage {i+1}\nPos: {len(filtered_pos)}, Neg: {len(filtered_neg)}")
+                axes[1, 0].axis('off')
+                
+                # 5. segmentation (最终分割结果)
+                axes[1, 1].imshow(image_rgb)
+                if masks[i] is not None:
+                    axes[1, 1].imshow(masks[i], alpha=0.5, cmap='Reds')
+                    mask_area = int(np.sum(masks[i]))
+                    mask_quality = debug_data.get('mask_quality', 0.0) or 0.0
+                    axes[1, 1].set_title(f"Segmentation Result\nImage {i+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}")
+                else:
+                    axes[1, 1].text(0.5, 0.5, "Segmentation Failed", ha='center', va='center', transform=axes[1, 1].transAxes)
+                    axes[1, 1].set_title(f"Segmentation Result\nImage {i+1}\nFailed")
+                axes[1, 1].axis('off')
+                
+                # 6. debug信息文字
+                debug_text = f"""Debug Info:
+Status: {debug_data['status']}
+Iteration: {debug_data['iteration']}
+Ref Image: {debug_data['reference_image_idx'] + 1 if debug_data['reference_image_idx'] is not None else 'None'}
 
-            # 参考索引
-            reference_idx = find_reference_image_for_propagation(i, masks, prompt_data)
-            if reference_idx is None:
-                print("     未找到参考图片，跳过")
-                continue
-
-            ref_image = cv2.imread(image_paths[reference_idx])
-            if ref_image is None:
-                print("     参考图片读取失败，跳过")
-                continue
-            ref_image_rgb = cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB)
-            ref_mask = masks[reference_idx]
-            if ref_mask is None:
-                print("     参考掩码为空，跳过")
-                continue
-
-            # 1) 在参考图上采样正负点
-            ref_pos = segmenter.prompt_generator.sample_points_from_mask(ref_mask, 10, True)
-            ref_neg = segmenter.prompt_generator.sample_points_from_mask(ref_mask, 6, False)
-
-            # 可视化参考点
+Point Statistics:
+- Ref Positive: {len(debug_data['reference_points']['positive']) if debug_data['reference_points'] else 0}
+- Ref Negative: {len(debug_data['reference_points']['negative']) if debug_data['reference_points'] else 0}
+- Mapped Positive: {len(debug_data['mapped_points']['positive']) if debug_data['mapped_points'] else 0}
+- Mapped Negative: {len(debug_data['mapped_points']['negative']) if debug_data['mapped_points'] else 0}
+- Filtered Positive: {len(filtered_pos)}
+- Filtered Negative: {len(filtered_neg)}"""
+                
+                axes[1, 2].text(0.05, 0.95, debug_text, transform=axes[1, 2].transAxes, 
+                               fontsize=10, verticalalignment='top', fontfamily='monospace')
+                axes[1, 2].set_title("Debug Information")
+                axes[1, 2].axis('off')
+            
+            # 保存合并的debug图片
             vis_dir = Path("test_output/visualization")
             vis_dir.mkdir(parents=True, exist_ok=True)
             base_name = Path(image_paths[i]).stem
-            ref_points_png = str(vis_dir / f"{base_name}_ref_points.png")
-            visualize_points_on_image(ref_image_rgb, ref_pos, ref_neg, ref_points_png)
-
-            # 2) 将参考点映射到目标图
-            mapped_pos = segmenter.prompt_generator.map_points_to_target(ref_image_rgb, ref_pos, image_rgb)
-            mapped_neg = segmenter.prompt_generator.map_points_to_target(ref_image_rgb, ref_neg, image_rgb)
-            mapped_points_png = str(vis_dir / f"{base_name}_mapped_points.png")
-            visualize_points_on_image(image_rgb, mapped_pos, mapped_neg, mapped_points_png)
-
-            # 3) 生成筛选后的目标点
-            points, labels = segmenter.prompt_generator.generate_points_with_rgb_similarity(
-                ref_image_rgb, ref_mask, image_rgb
-            )
-            pos_points = [p for p, l in zip(points, labels) if l == 1]
-            neg_points = [p for p, l in zip(points, labels) if l == 0]
-            filtered_points_png = str(vis_dir / f"{base_name}_filtered_points.png")
-            visualize_points_on_image(image_rgb, pos_points, neg_points, filtered_points_png)
-            print(f"     参考点: 正{len(ref_pos)} 负{len(ref_neg)} | 映射后: 正{len(mapped_pos)} 负{len(mapped_neg)} | 筛选后: 正{len(pos_points)} 负{len(neg_points)}")
-
-            # 即使失败也尝试用筛选后的点强制画掩码
-            try:
-                if len(points) > 0:
-                    segmenter.predictor.set_image(image_rgb)
-                    point_coords = np.array(points)
-                    point_labels = np.array(labels)
-                    masks_pred, scores, logits = segmenter.predictor.predict(
-                        point_coords=point_coords,
-                        point_labels=point_labels,
-                        multimask_output=True,
-                    )
-                    if len(masks_pred) > 0:
-                        best_mask = segmenter._select_best_mask(masks_pred)
-                        forced_vis_path = str(vis_dir / f"{base_name}_forced_mask.png")
-                        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-                        axes[0].imshow(image_rgb)
-                        axes[0].set_title(f"原图 {i + 1}")
-                        axes[0].axis('off')
-                        axes[1].imshow(image_rgb)
-                        axes[1].imshow(best_mask, alpha=0.5, cmap='Reds')
-                        axes[1].set_title(f"强制掩码 {i + 1}\n点: 正{len(pos_points)} 负{len(neg_points)}")
-                        axes[1].axis('off')
-                        plt.tight_layout()
-                        plt.savefig(forced_vis_path, dpi=150, bbox_inches='tight')
-                        plt.close()
-
-                        mask_area = int(np.sum(best_mask))
-                        mask_quality = segmenter._calculate_mask_quality(best_mask)
-                        print(f"     强制掩码: 面积={mask_area}, 质量={mask_quality:.3f}, 输出: {forced_vis_path}")
-                else:
-                    print("     无筛选点，跳过强制掩码")
-            except Exception as e:
-                print(f"     ⚠️ 强制掩码可视化失败: {e}")
-    
+            debug_path = str(vis_dir / f"{base_name}_merged_debug.png")
+            
+            plt.tight_layout()
+            plt.savefig(debug_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            
+            print(f"     Saved merged debug image: {debug_path}")
+            
     except Exception as e:
-        print(f"   ⚠️ 生成传播点可视化失败: {e}")
-
-def find_reference_image_for_propagation(target_idx, masks, prompt_data):
-    """
-    为传播的图片找到参考图片
-    
-    Args:
-        target_idx: 目标图片索引
-        masks: 掩码列表
-        prompt_data: prompt数据
-        
-    Returns:
-        int: 参考图片索引，如果没找到返回None
-    """
-    # 优先选择相邻的有掩码的图片
-    for offset in [1, -1, 2, -2, 3, -3]:
-        ref_idx = target_idx + offset
-        if 0 <= ref_idx < len(masks) and masks[ref_idx] is not None:
-            return ref_idx
-    
-    # 如果没找到相邻的，选择任意一个有掩码的图片
-    for i, mask in enumerate(masks):
-        if mask is not None and i != target_idx:
-            return i
-    
-    return None
+        print(f"   ⚠️ 生成合并debug可视化失败: {e}")
+        import traceback
+        traceback.print_exc()
 
 def test_complete_propagation():
     """测试完整的掩码传播流程"""
@@ -244,7 +272,6 @@ def test_complete_propagation():
         
         # 准备prompt数据（只给第1张和第3张图片添加prompt）
         print("\n3. 准备prompt数据...")
-        # 为提示帧添加正负点：中心正点 + 圆外若干负点，约束分割不外溢
         prompt_data = {
             0: {  # 第1张图片（中心(100,100)，半径≈30）
                 'points': [
@@ -272,30 +299,12 @@ def test_complete_propagation():
             prompt_data=prompt_data,
             output_dir="test_output",
             save_masks=True,
-            save_visualization=True
+            save_visualization=False  # 不需要单独的分割结果图片，只要合并的debug图片
         )
 
-        # 在提示帧上也叠加显示prompt点，避免用户只看到掩码不见点
-        try:
-            vis_dir = Path("test_output/visualization")
-            vis_dir.mkdir(parents=True, exist_ok=True)
-            for idx, info in prompt_data.items():
-                img = cv2.imread(image_paths[idx])
-                if img is None:
-                    continue
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                points = info.get('points', [])
-                labels = info.get('labels', [])
-                pos = [p for p, l in zip(points, labels) if l == 1]
-                neg = [p for p, l in zip(points, labels) if l == 0]
-                out_path = str(vis_dir / f"{Path(image_paths[idx]).stem}_prompt_points.png")
-                visualize_points_on_image(img_rgb, pos, neg, out_path)
-        except Exception as e:
-            print(f"   ⚠️ 提示帧点可视化失败: {e}")
-        
-        # 4.5. 为传播的图片生成点可视化
-        print("\n4.5. 生成传播图片的prompt点可视化...")
-        generate_propagation_points_visualization(segmenter, image_paths, masks, prompt_data)
+        # 4.5. 生成合并的debug可视化
+        print("\n4.5. 生成合并debug可视化...")
+        generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data)
         
         # 分析结果
         print("\n5. 分析分割结果...")
@@ -315,7 +324,7 @@ def test_complete_propagation():
         quality_scores = []
         for i, mask in enumerate(masks):
             if mask is not None:
-                quality = segmenter._calculate_mask_quality(mask)
+                quality = segmenter.mask_analyzer.calculate_mask_quality(mask)
                 quality_scores.append(quality)
                 print(f"   图片 {i+1}: 质量分数 = {quality:.3f}")
         
@@ -335,85 +344,22 @@ def test_complete_propagation():
         traceback.print_exc()
         return False
 
-def test_rgb_similarity_detailed():
-    """详细测试RGB相似性功能"""
-    print("\n" + "=" * 60)
-    print("详细测试RGB相似性功能")
-    print("=" * 60)
-    
-    try:
-        segmenter = create_iterative_segmenter()
-        
-        # 创建测试图片
-        ref_image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-        target_image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-        
-        # 设置特定的RGB值用于测试
-        ref_image[30:70, 30:70] = [100, 150, 200]  # 参考图片前景
-        target_image[30:70, 30:70] = [105, 155, 205]  # 目标图片相似区域
-        target_image[10:20, 10:20] = [200, 50, 100]   # 目标图片不相似区域
-        
-        # 创建掩码
-        mask = np.zeros((100, 100), dtype=np.uint8)
-        mask[30:70, 30:70] = 1
-        
-        print("1. 测试点生成...")
-        points, labels = segmenter.prompt_generator.generate_points_with_rgb_similarity(ref_image, mask, target_image)
-        
-        print(f"   生成了 {len(points)} 个点")
-        print(f"   正点数量: {sum(labels)}")
-        print(f"   负点数量: {len(labels) - sum(labels)}")
-        
-        # 验证点的分布
-        positive_points = [p for p, l in zip(points, labels) if l == 1]
-        negative_points = [p for p, l in zip(points, labels) if l == 0]
-        
-        print(f"   正点坐标: {positive_points}")
-        print(f"   负点坐标: {negative_points}")
-        
-        # 验证正点确实在相似区域
-        for x, y in positive_points:
-            rgb = target_image[y, x]
-            print(f"   正点 ({x}, {y}) RGB: {rgb}")
-        
-        # 验证负点确实在不相似区域
-        for x, y in negative_points:
-            rgb = target_image[y, x]
-            print(f"   负点 ({x}, {y}) RGB: {rgb}")
-        
-        # 2. 创建带有点的可视化图像
-        print("2. 创建带prompt点的可视化图像...")
-        visualize_points_on_image(target_image, positive_points, negative_points, "test_output/points_visualization.png")
-        
-        print("   ✓ RGB相似性功能测试完成")
-        return True
-        
-    except Exception as e:
-        print(f"❌ RGB相似性测试失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
 def main():
     """主测试函数"""
     print("基于RGB相似性的掩码传播完整测试")
     
-    # 测试RGB相似性功能
-    test1_passed = test_rgb_similarity_detailed()
-    
     # 测试完整传播流程
-    test2_passed = test_complete_propagation()
+    test_passed = test_complete_propagation()
     
     print(f"\n{'='*60}")
     print(f"测试总结:")
-    print(f"RGB相似性功能测试: {'通过' if test1_passed else '失败'}")
-    print(f"完整传播流程测试: {'通过' if test2_passed else '失败'}")
+    print(f"完整传播流程测试: {'通过' if test_passed else '失败'}")
     print(f"{'='*60}")
     
-    if test1_passed and test2_passed:
+    if test_passed:
         print("🎉 所有测试通过！基于RGB相似性的掩码传播功能正常工作。")
     else:
-        print("⚠️ 部分测试失败，请检查代码。")
+        print("⚠️ 测试失败，请检查代码。")
 
 if __name__ == "__main__":
     main()
