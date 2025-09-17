@@ -9,7 +9,7 @@ source/image_segment/test_image_*.png
 source/image_segment/*_test_output/
 source/image_segment/*_test_output/**
 
-# Mask and visualization outputs
+# All generated output directories and files
 source/image_segment/masks/
 source/image_segment/masks/**
 source/image_segment/visualization/
@@ -17,10 +17,44 @@ source/image_segment/visualization/**
 source/image_segment/contour_visualization/
 source/image_segment/contour_visualization/**
 
+# Any output directory with common patterns
+**/masks/
+**/visualization/
+**/contour_visualization/
+**/*_output/
+**/*_output/**
+
+# Generated images and masks
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tiff
+*.gif
+
+# But keep important reference images and icons
+!images/
+!images/**
+!source/desktop/icon/
+!source/desktop/icon/**
+!papers/
+!papers/**
+!document/
+!document/**
+
 # Processing logs and summaries
 source/image_segment/processing_log.txt
 source/image_segment/segmentation_summary.png
 source/image_segment/*_summary.png
+**/processing_log.txt
+**/*_summary.png
+
+# Generated data files
+*.csv
+*.json
+!example_data.json
+!fireball_sequence.json
+!source/desktop/fireball_sequence.json
 
 # Historical experiment outputs (if recreated by tests)
 source/image_segment/output_advanced/
