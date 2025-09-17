@@ -15,12 +15,12 @@ except ImportError:
     from prompt_generation import create_prompt_generator
 
 
-class MaskAnalyzer:
-    """掩码分析器"""
+class MaskValidator:
+    """掩码验证器（简化版）"""
     
     def __init__(self):
-        """初始化掩码分析器"""
-        self.prompt_generator = create_prompt_generator()
+        """初始化验证器"""
+        pass
     
     def calculate_mask_area(self, mask: np.ndarray) -> int:
         """计算掩码面积"""
@@ -28,59 +28,9 @@ class MaskAnalyzer:
             return 0
         return int(np.sum(mask))
     
-    def calculate_mask_quality(self, mask: np.ndarray) -> float:
-        """
-        计算掩码质量分数
-        
-        Args:
-            mask: 输入掩码
-            
-        Returns:
-            float: 质量分数 (0-1)，越高越好
-        """
-        if mask is None:
-            return 0.0
-        
-        # 基于面积和形状的质量分数
-        area = self.calculate_mask_area(mask)
-        if area == 0:
-            return 0.0
-        
-        total_area = mask.shape[0] * mask.shape[1]
-        area_ratio = area / total_area
-        
-        # 计算形状的紧凑性
-        compactness = self._calculate_compactness(mask)
-        
-        # 综合质量分数
-        quality = 0.6 * min(area_ratio * 10, 1.0) + 0.4 * compactness
-        
-        return quality
-    
-    def _calculate_compactness(self, mask: np.ndarray) -> float:
-        """计算掩码的紧凑性（形状规整度）"""
-        try:
-            contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if not contours:
-                return 0.0
-            
-            # 找到最大轮廓
-            largest_contour = max(contours, key=cv2.contourArea)
-            area = cv2.contourArea(largest_contour)
-            perimeter = cv2.arcLength(largest_contour, True)
-            
-            if perimeter > 0 and area > 0:
-                # 紧凑性公式：4π*面积/周长²，圆形为1，其他形状<1
-                compactness = 4 * np.pi * area / (perimeter ** 2)
-                return min(compactness, 1.0)  # 限制最大值为1
-            else:
-                return 0.0
-        except Exception:
-            return 0.0
-    
     def validate_mask_quality(self, mask: np.ndarray, min_area_ratio: float = 0.01, max_area_ratio: float = 0.9) -> bool:
         """
-        验证掩码质量是否符合要求
+        验证掩码质量是否符合基本要求
         
         Args:
             mask: 输入掩码
@@ -107,38 +57,6 @@ class MaskAnalyzer:
             return False
         
         return True
-    
-    def select_best_mask(self, masks: np.ndarray, strategy: str = "largest_area") -> np.ndarray:
-        """
-        从多个掩码中选择最佳的
-        
-        Args:
-            masks: 掩码数组
-            strategy: 选择策略 ("largest_area", "best_quality", "most_compact")
-            
-        Returns:
-            np.ndarray: 最佳掩码
-        """
-        if len(masks) == 0:
-            return None
-        if len(masks) == 1:
-            return masks[0]
-        
-        if strategy == "largest_area":
-            areas = [self.calculate_mask_area(mask) for mask in masks]
-            best_idx = np.argmax(areas)
-        elif strategy == "best_quality":
-            qualities = [self.calculate_mask_quality(mask) for mask in masks]
-            best_idx = np.argmax(qualities)
-        elif strategy == "most_compact":
-            compactness_scores = [self._calculate_compactness(mask) for mask in masks]
-            best_idx = np.argmax(compactness_scores)
-        else:
-            # 默认使用最大面积
-            areas = [self.calculate_mask_area(mask) for mask in masks]
-            best_idx = np.argmax(areas)
-        
-        return masks[best_idx]
     
     def compare_masks(self, mask1: np.ndarray, mask2: np.ndarray) -> Dict[str, float]:
         """
@@ -176,15 +94,15 @@ class MaskAnalyzer:
 class PropagationFailureAnalyzer:
     """传播失败分析器"""
     
-    def __init__(self, mask_analyzer: Optional[MaskAnalyzer] = None, prompt_generator=None):
+    def __init__(self, mask_validator: Optional[MaskValidator] = None, prompt_generator=None):
         """
         初始化失败分析器
         
         Args:
-            mask_analyzer: 掩码分析器实例
+            mask_validator: 掩码验证器实例
             prompt_generator: 点生成器实例
         """
-        self.mask_analyzer = mask_analyzer or MaskAnalyzer()
+        self.mask_validator = mask_validator or MaskValidator()
         self.prompt_generator = prompt_generator or create_prompt_generator()
     
     def analyze_failure(self, target_image_path: str, reference_image_path: str, 
@@ -214,10 +132,9 @@ class PropagationFailureAnalyzer:
             )
             reasons.extend(image_reasons)
             
-            # 3. 检查参考掩码质量
-            ref_quality = self.mask_analyzer.calculate_mask_quality(reference_mask)
-            if ref_quality < 0.5:
-                reasons.append(f"参考掩码质量不佳 (质量分数: {ref_quality:.3f})")
+            # 3. 检查参考掩码基本有效性
+            if not self.mask_validator.validate_mask_quality(reference_mask):
+                reasons.append("参考掩码质量不佳（面积比例不合理）")
             
             # 返回失败原因
             return "; ".join(reasons) if reasons else "未知原因"
@@ -234,13 +151,12 @@ class PropagationFailureAnalyzer:
             return reasons
         
         # 检查掩码质量
-        if not self.mask_analyzer.validate_mask_quality(result_mask):
-            quality_score = self.mask_analyzer.calculate_mask_quality(result_mask)
-            reasons.append(f"掩码质量不佳 (质量分数: {quality_score:.3f})")
+        if not self.mask_validator.validate_mask_quality(result_mask):
+            reasons.append("掩码质量不佳（面积比例不合理）")
         
         # 检查掩码面积比例
-        result_area = self.mask_analyzer.calculate_mask_area(result_mask)
-        ref_area = self.mask_analyzer.calculate_mask_area(reference_mask)
+        result_area = self.mask_validator.calculate_mask_area(result_mask)
+        ref_area = self.mask_validator.calculate_mask_area(reference_mask)
         
         if ref_area > 0:
             area_ratio = result_area / ref_area
@@ -334,11 +250,17 @@ class PropagationFailureAnalyzer:
         return reasons
 
 
-def create_mask_analyzer() -> MaskAnalyzer:
-    """创建掩码分析器的便捷函数"""
-    return MaskAnalyzer()
+def create_mask_validator() -> MaskValidator:
+    """创建掩码验证器的便捷函数"""
+    return MaskValidator()
 
 
-def create_failure_analyzer(mask_analyzer: Optional[MaskAnalyzer] = None, prompt_generator=None) -> PropagationFailureAnalyzer:
+def create_failure_analyzer(mask_validator: Optional[MaskValidator] = None, prompt_generator=None) -> PropagationFailureAnalyzer:
     """创建失败分析器的便捷函数"""
-    return PropagationFailureAnalyzer(mask_analyzer, prompt_generator)
+    return PropagationFailureAnalyzer(mask_validator, prompt_generator)
+
+
+# 向后兼容的别名
+def create_mask_analyzer() -> MaskValidator:
+    """向后兼容：创建掩码验证器（原掩码分析器的简化版）"""
+    return MaskValidator()

@@ -13,21 +13,24 @@ from typing import List, Tuple, Optional, Dict, Any
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+# 导入SAM初始化模块
 try:
-    from segment_anything import sam_model_registry, SamPredictor
-    SAM_AVAILABLE = True
+    from .sam_initialization import create_sam_manager, check_sam_availability
 except ImportError:
-    SAM_AVAILABLE = False
-    print("警告: Segment Anything未安装，请先运行 setup.sh 安装SAM")
+    from sam_initialization import create_sam_manager, check_sam_availability
 
 try:
     from .prompt_generation import create_prompt_generator
     from .adjacent_group_finder import create_adjacent_group_finder
     from .mask_utils import create_mask_analyzer, create_failure_analyzer
+    from .mask_postprocessing import create_contour_processor
+    from .output_manager import create_output_manager
 except ImportError:
     from prompt_generation import create_prompt_generator
     from adjacent_group_finder import create_adjacent_group_finder
     from mask_utils import create_mask_analyzer, create_failure_analyzer
+    from mask_postprocessing import create_contour_processor
+    from output_manager import create_output_manager
 
 
 class IterativeMaskPropagationSegmenter:
@@ -35,7 +38,8 @@ class IterativeMaskPropagationSegmenter:
     
     def __init__(self, model_type: str = "vit_l", 
                  checkpoint_path: Optional[str] = None,
-                 device: str = "auto"):
+                 device: str = "auto",
+                 enable_postprocessing: bool = True):
         """
         初始化分割器
         
@@ -43,25 +47,27 @@ class IterativeMaskPropagationSegmenter:
             model_type: SAM模型类型
             checkpoint_path: 模型检查点路径
             device: 设备类型
+            enable_postprocessing: 是否启用掩码后处理（轮廓过滤）
         """
-        if not SAM_AVAILABLE:
+        if not check_sam_availability():
             raise ImportError("Segment Anything未安装，请先运行 setup.sh 安装SAM")
         
-        self.model_type = model_type
-        self.device = self._get_device(device)
-        self.predictor = None
+        # 创建SAM管理器
+        self.sam_manager = create_sam_manager(model_type, checkpoint_path, device)
+        self.enable_postprocessing = enable_postprocessing
         
-        # 设置默认检查点路径
-        if checkpoint_path is None:
-            checkpoint_path = self._get_default_checkpoint_path()
-        
-        self.checkpoint_path = checkpoint_path
+        # 保持向后兼容的属性
+        self.model_type = self.sam_manager.model_type
+        self.device = self.sam_manager.device
+        self.checkpoint_path = self.sam_manager.checkpoint_path
         self._load_model()
         
         # 创建工具类
         self.prompt_generator = create_prompt_generator()
         self.mask_analyzer = create_mask_analyzer()
         self.failure_analyzer = create_failure_analyzer(self.mask_analyzer, self.prompt_generator)
+        self.contour_processor = create_contour_processor()
+        self.output_manager = create_output_manager(self.mask_analyzer)
         
         # 存储分割结果
         self.all_masks = []
@@ -69,50 +75,11 @@ class IterativeMaskPropagationSegmenter:
         self.failed_indices = set()     # 处理失败的图片索引
         self.prompt_indices = set()     # 有prompt点的图片索引
     
-    def _get_device(self, device: str) -> str:
-        """获取可用设备"""
-        if device == "auto":
-            if torch.cuda.is_available():
-                return "cuda"
-            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                return "mps"
-            else:
-                return "cpu"
-        return device
-    
-    def _get_default_checkpoint_path(self) -> str:
-        """获取默认检查点路径"""
-        sam_dir = Path(__file__).parent.parent / "third_party" / "segment-anything"
-        checkpoint_dir = sam_dir / "checkpoints"
-        
-        checkpoint_files = [
-            f"sam_{self.model_type}_0b3195.pth",
-            f"sam_{self.model_type}.pth",
-            f"sam_{self.model_type}_01ec64.pth"
-        ]
-        
-        for checkpoint_file in checkpoint_files:
-            checkpoint_path = checkpoint_dir / checkpoint_file
-            if checkpoint_path.exists():
-                return str(checkpoint_path)
-        
-        return str(checkpoint_dir / f"sam_{self.model_type}.pth")
-    
     def _load_model(self):
         """加载SAM模型"""
-        try:
-            print(f"正在加载SAM模型: {self.model_type}")
-            print(f"设备: {self.device}")
-            
-            sam = sam_model_registry[self.model_type](checkpoint=self.checkpoint_path)
-            sam.to(device=self.device)
-            self.predictor = SamPredictor(sam)
-            
-            print("✓ SAM模型加载成功")
-            
-        except Exception as e:
-            print(f"❌ SAM模型加载失败: {e}")
-            raise
+        self.sam_manager.load_model()
+        # 保持向后兼容
+        self.predictor = self.sam_manager.get_predictor()
     
     def segment_sequence_with_iterative_propagation(self, 
                                                   image_paths: List[str],
@@ -171,7 +138,9 @@ class IterativeMaskPropagationSegmenter:
         self._iterative_mask_propagation(image_paths, output_dir, save_masks, save_visualization)
         
         # 输出最终统计
-        self._print_final_statistics()
+        self.output_manager.print_segmentation_statistics(
+            self.all_masks, self.processed_indices, self.failed_indices, self.prompt_indices
+        )
         
         return self.all_masks
     
@@ -217,7 +186,7 @@ class IterativeMaskPropagationSegmenter:
                 },
                 'reference_image_idx': None,
                 'iteration': 0,
-                'mask_quality': self.mask_analyzer.calculate_mask_quality(mask),
+                'mask_quality': None,  # 不再使用自定义质量分数
                 'status': 'prompted'
             }
             
@@ -264,7 +233,7 @@ class IterativeMaskPropagationSegmenter:
                     'positive': next_positive_points,
                     'negative': next_negative_points
                 }
-                self.propagation_details[target_idx]['mask_quality'] = self.mask_analyzer.calculate_mask_quality(mask)
+                self.propagation_details[target_idx]['mask_quality'] = None  # 不再使用自定义质量分数
                 self.propagation_details[target_idx]['status'] = 'completed'
             
         except Exception as e:
@@ -281,7 +250,7 @@ class IterativeMaskPropagationSegmenter:
                     'positive': next_positive_points,
                     'negative': next_negative_points
                 }
-                self.propagation_details[target_idx]['mask_quality'] = self.mask_analyzer.calculate_mask_quality(mask)
+                self.propagation_details[target_idx]['mask_quality'] = None  # 不再使用自定义质量分数
                 self.propagation_details[target_idx]['status'] = 'completed'
             
         except Exception as e:
@@ -298,22 +267,25 @@ class IterativeMaskPropagationSegmenter:
             print(f"处理第 {idx+1}/{len(image_paths)} 张图片 (有prompt点): {os.path.basename(image_paths[idx])}")
             
             # 分割图片
-            masks = self._segment_with_prompts(image_paths[idx], prompt_data[idx])
+            result = self._segment_with_prompts(image_paths[idx], prompt_data[idx])
             
-            if masks is not None:
-                # 选择最佳掩码
-                best_mask = self.mask_analyzer.select_best_mask(masks)
+            if result is not None:
+                masks = result['masks']
+                scores = result['scores']
+                
+                # 选择最佳掩码（使用SAM的scores）
+                best_mask, sam_quality = self._select_best_mask_with_sam_score(masks, scores)
                 self.all_masks[idx] = best_mask
                 self.processed_indices.add(idx)
                 
                 # 保存prompt图片详情和下次迭代的采样点
                 self._save_prompted_image_details(idx, best_mask, prompt_data[idx])
                 
-                print(f"  ✓ 分割成功，选择最佳掩码 (质量分数: {self.mask_analyzer.calculate_mask_quality(best_mask):.3f})")
+                print(f"  ✓ 分割成功，选择最佳掩码 (SAM质量分数: {sam_quality:.3f})")
                 
                 # 保存结果
                 if output_dir:
-                    self._save_results(image_paths[idx], best_mask, idx, output_dir, save_masks, "prompted")
+                    self.output_manager.save_mask_results(image_paths[idx], best_mask, idx, output_dir, save_masks, "prompted")
             else:
                 self.failed_indices.add(idx)
                 print(f"  ❌ 分割失败，标记为失败")
@@ -385,12 +357,12 @@ class IterativeMaskPropagationSegmenter:
                         self.processed_indices.add(unprocessed_idx)
                         processed_this_iteration += 1
                         
-                        print(f"      ✓ 掩码传播成功 (质量分数: {self.mask_analyzer.calculate_mask_quality(mask):.3f})")
+                        print(f"      ✓ 掩码传播成功")
                         
                         # 保存结果
                         if output_dir:
-                            self._save_results(image_paths[unprocessed_idx], mask, unprocessed_idx, 
-                                             output_dir, save_masks, "propagated")
+                            self.output_manager.save_mask_results(image_paths[unprocessed_idx], mask, 
+                                                                unprocessed_idx, output_dir, save_masks, "propagated")
                     else:
                         self.failed_indices.add(unprocessed_idx)
                         failed_this_iteration += 1
@@ -415,6 +387,31 @@ class IterativeMaskPropagationSegmenter:
         if iteration > max_iterations:
             print(f"⚠️ 达到最大迭代次数 {max_iterations}，停止传播")
     
+    def _select_best_mask_with_sam_score(self, masks: np.ndarray, scores: np.ndarray) -> Tuple[np.ndarray, float]:
+        """
+        使用SAM的原生质量分数选择最佳掩码
+        
+        Args:
+            masks: SAM返回的掩码数组
+            scores: SAM返回的质量分数数组
+            
+        Returns:
+            Tuple[np.ndarray, float]: (最佳掩码, SAM质量分数)
+        """
+        if len(masks) == 0:
+            return None, 0.0
+        
+        if len(masks) == 1:
+            return masks[0], float(scores[0])
+        
+        # 使用SAM的scores选择最佳掩码
+        best_idx = np.argmax(scores)
+        best_mask = masks[best_idx]
+        sam_quality = float(scores[best_idx])
+        
+        print(f"    📊 SAM生成{len(masks)}个掩码，选择质量最高的（SAM分数: {sam_quality:.3f}）")
+        
+        return best_mask, sam_quality
     
     def _segment_with_prompts(self, image_path: str, prompt_info: Dict[str, Any]) -> Optional[np.ndarray]:
         """使用prompt点进行分割"""
@@ -451,7 +448,11 @@ class IterativeMaskPropagationSegmenter:
                 multimask_output=True,
             )
             
-            return masks if len(masks) > 0 else None
+            # 返回masks和对应的scores
+            if len(masks) > 0:
+                return {'masks': masks, 'scores': scores, 'logits': logits}
+            else:
+                return None
             
         except Exception as e:
             print(f"    ⚠️ 分割失败: {e}")
@@ -511,18 +512,55 @@ class IterativeMaskPropagationSegmenter:
             )
             
             if len(masks) > 0:
-                # 选择最佳掩码
-                best_mask = self.mask_analyzer.select_best_mask(masks)
+                # 选择最佳掩码（使用SAM的scores）
+                best_mask, sam_quality = self._select_best_mask_with_sam_score(masks, scores)
                 
-                # 记录掩码信息
-                mask_area = np.sum(best_mask)
-                mask_quality = self.mask_analyzer.calculate_mask_quality(best_mask)
-                print(f"    📊 生成掩码: 面积={mask_area}, 质量分数={mask_quality:.3f}")
+                # 记录原始掩码信息
+                original_area = np.sum(best_mask)
+                print(f"    📊 原始掩码: 面积={original_area}, SAM质量分数={sam_quality:.3f}")
                 
-                # 完成传播详情保存（添加最终结果）
-                self._complete_propagated_image_details(target_idx, best_mask)
+                # 可选的后处理：基于轮廓特征过滤碎片
+                if self.enable_postprocessing:
+                    cleaned_mask = self.contour_processor.filter_mask_by_contour_quality(best_mask, "fireball_optimized")
+                    
+                    # 记录清理后的信息
+                    cleaned_area = np.sum(cleaned_mask)
+                    area_retention = cleaned_area / original_area if original_area > 0 else 0
+                    
+                    print(f"    🧹 清理后掩码: 面积={cleaned_area}, 保留率={area_retention:.3f}")
+                    
+                    # 保存后处理对比信息到传播详情
+                    if target_idx in self.propagation_details:
+                        self.propagation_details[target_idx]['original_mask'] = best_mask
+                        self.propagation_details[target_idx]['cleaned_mask'] = cleaned_mask
+                        self.propagation_details[target_idx]['postprocessing_stats'] = {
+                            'original_area': original_area,
+                            'cleaned_area': cleaned_area,
+                            'area_retention': area_retention,
+                            'sam_quality': sam_quality  # SAM原生质量分数
+                        }
+                    
+                    final_mask = cleaned_mask
+                else:
+                    print(f"    ⚡ 跳过后处理，直接使用原始掩码")
+                    
+                    # 不进行后处理时的信息保存
+                    if target_idx in self.propagation_details:
+                        self.propagation_details[target_idx]['original_mask'] = best_mask
+                        self.propagation_details[target_idx]['cleaned_mask'] = best_mask  # 与原始掩码相同
+                        self.propagation_details[target_idx]['postprocessing_stats'] = {
+                            'original_area': original_area,
+                            'cleaned_area': original_area,  # 未清理，面积相同
+                            'area_retention': 1.0,  # 100%保留
+                            'sam_quality': sam_quality
+                        }
+                    
+                    final_mask = best_mask
                 
-                return best_mask
+                # 完成传播详情保存（使用最终掩码）
+                self._complete_propagated_image_details(target_idx, final_mask)
+                
+                return final_mask
             else:
                 print(f"    ⚠️ SAM未生成任何掩码")
                 return None
@@ -534,54 +572,12 @@ class IterativeMaskPropagationSegmenter:
             return None
     
     
-    def _save_results(self, image_path: str, mask: np.ndarray, image_idx: int, output_dir: str,
-                     save_masks: bool, prefix: str = ""):
-        """保存分割掩码文件"""
-        if not save_masks:
-            return
-        
-        os.makedirs(output_dir, exist_ok=True)
-        base_name = Path(image_path).stem
-        
-        # 保存掩码文件
-        mask_dir = os.path.join(output_dir, "masks")
-        os.makedirs(mask_dir, exist_ok=True)
-        
-        mask_path = os.path.join(mask_dir, f"{base_name}_{prefix}_mask.png")
-        cv2.imwrite(mask_path, (mask * 255).astype(np.uint8))
-    
-    def _print_final_statistics(self):
-        """打印最终统计信息"""
-        print(f"\n{'='*60}")
-        print(f"分割完成统计")
-        print(f"{'='*60}")
-        
-        total_images = len(self.all_masks)
-        processed_images = len(self.processed_indices)
-        failed_images = len(self.failed_indices)
-        successful_images = sum(1 for mask in self.all_masks if mask is not None)
-        
-        print(f"总图片数: {total_images}")
-        print(f"已处理图片数: {processed_images}")
-        print(f"处理失败图片数: {failed_images}")
-        print(f"成功分割图片数: {successful_images}")
-        print(f"处理成功率: {successful_images/total_images*100:.1f}%")
-        
-        if failed_images > 0:
-            print(f"失败图片索引: {sorted(self.failed_indices)}")
-        
-        if successful_images > 0:
-            # 计算平均质量分数
-            quality_scores = [self.mask_analyzer.calculate_mask_quality(mask) for mask in self.all_masks if mask is not None]
-            avg_quality = np.mean(quality_scores)
-            print(f"平均质量分数: {avg_quality:.3f}")
-        
-        print(f"{'='*60}")
 
 
 def create_iterative_segmenter(model_type: str = "vit_l", 
-                             checkpoint_path: Optional[str] = None,
-                             device: str = "auto") -> IterativeMaskPropagationSegmenter:
+                               checkpoint_path: Optional[str] = None,
+                               device: str = "auto",
+                               enable_postprocessing: bool = True) -> IterativeMaskPropagationSegmenter:
     """
     创建迭代掩码传播分割器的便捷函数
     
@@ -589,11 +585,12 @@ def create_iterative_segmenter(model_type: str = "vit_l",
         model_type: SAM模型类型
         checkpoint_path: 模型检查点路径
         device: 设备类型
+        enable_postprocessing: 是否启用掩码后处理（轮廓过滤）
         
     Returns:
         IterativeMaskPropagationSegmenter: 分割器实例
     """
-    return IterativeMaskPropagationSegmenter(model_type, checkpoint_path, device)
+    return IterativeMaskPropagationSegmenter(model_type, checkpoint_path, device, enable_postprocessing)
 
 
 if __name__ == "__main__":
