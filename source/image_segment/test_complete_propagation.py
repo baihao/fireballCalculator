@@ -160,7 +160,7 @@ def test_complete_propagation():
         
         # 执行分割
         print("\n4. 执行迭代掩码传播分割...")
-        masks = segmenter.segment_sequence_with_iterative_propagation(
+        masks, geometries = segmenter.segment_sequence_with_iterative_propagation(
             image_paths=image_paths,
             prompt_data=prompt_data,
             output_dir="test_output",
@@ -206,6 +206,15 @@ def test_complete_propagation():
         if areas:
             avg_area = np.mean(areas)
             print(f"   ✓ 平均掩码面积: {avg_area:.0f} 像素")
+        
+        # 显示几何信息
+        print("\n7. 几何信息分析...")
+        for i, geometry in enumerate(geometries):
+            if geometry is not None:
+                centroid = geometry['centroid']
+                max_radius = geometry['max_radius']
+                area = geometry['area']
+                print(f"   图片 {i+1}: 质心=({centroid[0]:.1f}, {centroid[1]:.1f}), 最大半径={max_radius:.1f}, 面积={area}")
         
         print("\n" + "=" * 60)
         print("测试完成！")
@@ -257,7 +266,7 @@ def test_from_json(json_path: str):
         
         # 执行分割
         print("\n4. 执行迭代掩码传播分割...")
-        masks = segmenter.segment_sequence_with_iterative_propagation(
+        masks, geometries = segmenter.segment_sequence_with_iterative_propagation(
             image_paths=image_paths,
             prompt_data=prompt_data,
             output_dir="json_test_output",
@@ -290,6 +299,15 @@ def test_from_json(json_path: str):
                 print(f"   图片 {i+1}: 面积={int(area)} 像素")
             else:
                 print(f"   图片 {i+1}: 分割失败")
+        
+        # 显示几何信息
+        print("\n8. 几何信息分析...")
+        for i, geometry in enumerate(geometries):
+            if geometry is not None:
+                centroid = geometry['centroid']
+                max_radius = geometry['max_radius']
+                area = geometry['area']
+                print(f"   图片 {i+1}: 质心=({centroid[0]:.1f}, {centroid[1]:.1f}), 最大半径={max_radius:.1f}, 面积={area}")
         
         print("\n" + "=" * 60)
         print("JSON测试完成！")

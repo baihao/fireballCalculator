@@ -142,7 +142,17 @@ class IterativeMaskPropagationSegmenter:
             self.all_masks, self.processed_indices, self.failed_indices, self.prompt_indices
         )
         
-        return self.all_masks
+        # 计算每个成功分割掩码的几何信息
+        mask_geometries = []
+        for i, mask in enumerate(self.all_masks):
+            if mask is not None:
+                geometry = self.mask_analyzer.analyze_mask_geometry(mask)
+                geometry['image_index'] = i
+                mask_geometries.append(geometry)
+            else:
+                mask_geometries.append(None)
+        
+        return self.all_masks, mask_geometries
     
     def _init_sampling_data(self, image_paths: List[str]):
         """初始化采样点数据结构"""
@@ -193,8 +203,8 @@ class IterativeMaskPropagationSegmenter:
         except Exception as e:
             print(f"    ⚠️ 保存prompt图片详情失败: {e}")
     
-    def _save_propagated_image_details(self, target_idx: int, reference_image_path: str, debug_info: Dict[str, Any], mask: Optional[np.ndarray] = None):
-        """保存传播图片的完整详情"""
+    def _save_propagated_image_details(self, target_idx: int, reference_image_path: str, debug_info: Dict[str, Any]):
+        """保存传播图片的初始详情（不包含最终结果）"""
         try:
             # 获取参考图片索引
             ref_idx = None
@@ -203,7 +213,7 @@ class IterativeMaskPropagationSegmenter:
                     ref_idx = i
                     break
             
-            # 保存完整的传播详情
+            # 保存传播详情（不包含最终结果，将在分割成功后由_complete_propagated_image_details完成）
             self.propagation_details[target_idx] = {
                 'reference_points': {
                     'positive': debug_info['reference_positive'],
@@ -217,24 +227,12 @@ class IterativeMaskPropagationSegmenter:
                     'positive': debug_info['filtered_positive'],
                     'negative': debug_info['filtered_negative']
                 },
-                'next_iteration_points': None,  # 将在分割成功后填充
+                'next_iteration_points': None,  # 将在_complete_propagated_image_details中填充
                 'reference_image_idx': ref_idx,
                 'iteration': self.current_iteration,
-                'mask_quality': None,  # 将在分割成功后填充
+                'mask_quality': None,  # 将在_complete_propagated_image_details中填充
                 'status': 'processing'
             }
-            
-            # 如果提供了mask，则完成详情保存
-            if mask is not None:
-                next_positive_points = self.prompt_generator.sample_points_from_mask(mask, 10, True)
-                next_negative_points = self.prompt_generator.sample_points_from_mask(mask, 6, False)
-                
-                self.propagation_details[target_idx]['next_iteration_points'] = {
-                    'positive': next_positive_points,
-                    'negative': next_negative_points
-                }
-                self.propagation_details[target_idx]['mask_quality'] = None  # 不再使用自定义质量分数
-                self.propagation_details[target_idx]['status'] = 'completed'
             
         except Exception as e:
             print(f"    ⚠️ 保存传播图片详情失败: {e}")
@@ -519,43 +517,10 @@ class IterativeMaskPropagationSegmenter:
                 original_area = np.sum(best_mask)
                 print(f"    📊 原始掩码: 面积={original_area}, SAM质量分数={sam_quality:.3f}")
                 
-                # 可选的后处理：基于轮廓特征过滤碎片
-                if self.enable_postprocessing:
-                    cleaned_mask = self.contour_processor.filter_mask_by_contour_quality(best_mask, "fireball_optimized")
-                    
-                    # 记录清理后的信息
-                    cleaned_area = np.sum(cleaned_mask)
-                    area_retention = cleaned_area / original_area if original_area > 0 else 0
-                    
-                    print(f"    🧹 清理后掩码: 面积={cleaned_area}, 保留率={area_retention:.3f}")
-                    
-                    # 保存后处理对比信息到传播详情
-                    if target_idx in self.propagation_details:
-                        self.propagation_details[target_idx]['original_mask'] = best_mask
-                        self.propagation_details[target_idx]['cleaned_mask'] = cleaned_mask
-                        self.propagation_details[target_idx]['postprocessing_stats'] = {
-                            'original_area': original_area,
-                            'cleaned_area': cleaned_area,
-                            'area_retention': area_retention,
-                            'sam_quality': sam_quality  # SAM原生质量分数
-                        }
-                    
-                    final_mask = cleaned_mask
-                else:
-                    print(f"    ⚡ 跳过后处理，直接使用原始掩码")
-                    
-                    # 不进行后处理时的信息保存
-                    if target_idx in self.propagation_details:
-                        self.propagation_details[target_idx]['original_mask'] = best_mask
-                        self.propagation_details[target_idx]['cleaned_mask'] = best_mask  # 与原始掩码相同
-                        self.propagation_details[target_idx]['postprocessing_stats'] = {
-                            'original_area': original_area,
-                            'cleaned_area': original_area,  # 未清理，面积相同
-                            'area_retention': 1.0,  # 100%保留
-                            'sam_quality': sam_quality
-                        }
-                    
-                    final_mask = best_mask
+                # 执行后处理
+                final_mask = self._apply_mask_postprocessing(
+                    best_mask, original_area, sam_quality, target_idx
+                )
                 
                 # 完成传播详情保存（使用最终掩码）
                 self._complete_propagated_image_details(target_idx, final_mask)
@@ -570,6 +535,60 @@ class IterativeMaskPropagationSegmenter:
             import traceback
             traceback.print_exc()
             return None
+    
+    def _apply_mask_postprocessing(self, best_mask: np.ndarray, original_area: int, 
+                                  sam_quality: float, target_idx: int) -> np.ndarray:
+        """
+        应用掩码后处理
+        
+        Args:
+            best_mask: 原始最佳掩码
+            original_area: 原始掩码面积
+            sam_quality: SAM质量分数
+            target_idx: 目标图像索引
+            
+        Returns:
+            np.ndarray: 处理后的最终掩码
+        """
+        if self.enable_postprocessing:
+            # 执行轮廓特征过滤
+            cleaned_mask = self.contour_processor.filter_mask_by_contour_quality(
+                best_mask, "fireball_optimized"
+            )
+            
+            # 记录清理后的信息
+            cleaned_area = np.sum(cleaned_mask)
+            area_retention = cleaned_area / original_area if original_area > 0 else 0
+            
+            print(f"    🧹 清理后掩码: 面积={cleaned_area}, 保留率={area_retention:.3f}")
+            
+            # 保存后处理对比信息到传播详情
+            if target_idx in self.propagation_details:
+                self.propagation_details[target_idx]['original_mask'] = best_mask
+                self.propagation_details[target_idx]['cleaned_mask'] = cleaned_mask
+                self.propagation_details[target_idx]['postprocessing_stats'] = {
+                    'original_area': original_area,
+                    'cleaned_area': cleaned_area,
+                    'area_retention': area_retention,
+                    'sam_quality': sam_quality  # SAM原生质量分数
+                }
+            
+            return cleaned_mask
+        else:
+            print(f"    ⚡ 跳过后处理，直接使用原始掩码")
+            
+            # 不进行后处理时的信息保存
+            if target_idx in self.propagation_details:
+                self.propagation_details[target_idx]['original_mask'] = best_mask
+                self.propagation_details[target_idx]['cleaned_mask'] = best_mask  # 与原始掩码相同
+                self.propagation_details[target_idx]['postprocessing_stats'] = {
+                    'original_area': original_area,
+                    'cleaned_area': original_area,  # 未清理，面积相同
+                    'area_retention': 1.0,  # 100%保留
+                    'sam_quality': sam_quality
+                }
+            
+            return best_mask
     
     
 

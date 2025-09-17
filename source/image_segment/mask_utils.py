@@ -28,6 +28,112 @@ class MaskValidator:
             return 0
         return int(np.sum(mask))
     
+    def calculate_mask_centroid(self, mask: np.ndarray) -> Tuple[float, float]:
+        """
+        计算掩码的质心坐标
+        
+        Args:
+            mask: 输入掩码 (二值图像)
+            
+        Returns:
+            Tuple[float, float]: 质心坐标 (x, y)，如果掩码为空返回 (0, 0)
+        """
+        if mask is None or np.sum(mask) == 0:
+            return (0.0, 0.0)
+        
+        # 使用cv2.moments计算质心
+        moments = cv2.moments(mask.astype(np.uint8))
+        
+        if moments['m00'] == 0:
+            return (0.0, 0.0)
+        
+        # 计算质心坐标
+        cx = moments['m10'] / moments['m00']
+        cy = moments['m01'] / moments['m00']
+        
+        return (float(cx), float(cy))
+    
+    def calculate_max_radius_from_centroid(self, mask: np.ndarray, centroid: Optional[Tuple[float, float]] = None) -> float:
+        """
+        计算从质心到掩码边界的最大半径
+        
+        Args:
+            mask: 输入掩码 (二值图像)
+            centroid: 质心坐标，如果为None则自动计算
+            
+        Returns:
+            float: 最大半径，如果掩码为空返回 0.0
+        """
+        if mask is None or np.sum(mask) == 0:
+            return 0.0
+        
+        # 获取质心坐标
+        if centroid is None:
+            centroid = self.calculate_mask_centroid(mask)
+        
+        cx, cy = centroid
+        
+        # 找到所有掩码像素的坐标
+        y_coords, x_coords = np.where(mask > 0)
+        
+        if len(x_coords) == 0:
+            return 0.0
+        
+        # 计算从质心到所有掩码像素的距离
+        distances = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
+        
+        # 返回最大距离
+        max_radius = float(np.max(distances))
+        
+        return max_radius
+    
+    def analyze_mask_geometry(self, mask: np.ndarray) -> Dict[str, Any]:
+        """
+        分析掩码的几何特征
+        
+        Args:
+            mask: 输入掩码
+            
+        Returns:
+            Dict: 包含几何特征的字典
+        """
+        if mask is None or np.sum(mask) == 0:
+            return {
+                'area': 0,
+                'centroid': (0.0, 0.0),
+                'max_radius': 0.0,
+                'bounding_box': (0, 0, 0, 0),
+                'aspect_ratio': 0.0
+            }
+        
+        # 基本信息
+        area = self.calculate_mask_area(mask)
+        centroid = self.calculate_mask_centroid(mask)
+        max_radius = self.calculate_max_radius_from_centroid(mask, centroid)
+        
+        # 边界框
+        y_coords, x_coords = np.where(mask > 0)
+        if len(x_coords) > 0:
+            min_x, max_x = int(np.min(x_coords)), int(np.max(x_coords))
+            min_y, max_y = int(np.min(y_coords)), int(np.max(y_coords))
+            bounding_box = (min_x, min_y, max_x - min_x, max_y - min_y)
+            
+            # 长宽比
+            width = max_x - min_x + 1
+            height = max_y - min_y + 1
+            aspect_ratio = float(min(width, height) / max(width, height)) if max(width, height) > 0 else 0.0
+        else:
+            bounding_box = (0, 0, 0, 0)
+            aspect_ratio = 0.0
+        
+        return {
+            'area': area,
+            'centroid': centroid,
+            'max_radius': max_radius,
+            'bounding_box': bounding_box,
+            'aspect_ratio': aspect_ratio
+        }
+    
     def validate_mask_quality(self, mask: np.ndarray, min_area_ratio: float = 0.01, max_area_ratio: float = 0.9) -> bool:
         """
         验证掩码质量是否符合基本要求

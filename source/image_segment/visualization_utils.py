@@ -21,6 +21,62 @@ class SegmentationVisualizer:
         plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
         plt.rcParams['axes.unicode_minus'] = False
     
+    def _draw_centroid_and_radius(self, ax, mask: np.ndarray, color: str = 'yellow', 
+                                 show_radius: bool = True, mask_analyzer=None):
+        """
+        在图像上绘制质心和最大半径
+        
+        Args:
+            ax: matplotlib轴对象
+            mask: 掩码数组
+            color: 绘制颜色
+            show_radius: 是否显示半径圆
+            mask_analyzer: 掩码分析器
+        """
+        if mask is None or np.sum(mask) == 0:
+            return
+        
+        try:
+            # 导入掩码分析器（如果没有提供）
+            if mask_analyzer is None:
+                try:
+                    from .mask_utils import create_mask_analyzer
+                except ImportError:
+                    from mask_utils import create_mask_analyzer
+                mask_analyzer = create_mask_analyzer()
+            
+            # 计算质心和半径
+            centroid = mask_analyzer.calculate_mask_centroid(mask)
+            max_radius = mask_analyzer.calculate_max_radius_from_centroid(mask, centroid)
+            
+            cx, cy = centroid
+            
+            # 绘制十字标记
+            cross_size = 8
+            ax.plot([cx-cross_size, cx+cross_size], [cy, cy], '-', color=color, linewidth=2)
+            ax.plot([cx, cx], [cy-cross_size, cy+cross_size], '-', color=color, linewidth=2)
+            
+            # 绘制最大半径箭头（选择一个方向）
+            if show_radius and max_radius > 0:
+                # 找到距离质心最远的点
+                y_coords, x_coords = np.where(mask > 0)
+                if len(x_coords) > 0:
+                    distances = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
+                    max_idx = np.argmax(distances)
+                    max_x, max_y = x_coords[max_idx], y_coords[max_idx]
+                    
+                    # 绘制从质心到最远点的箭头
+                    ax.annotate('', xy=(max_x, max_y), xytext=(cx, cy),
+                               arrowprops=dict(arrowstyle='->', color=color, lw=1.5,
+                                             connectionstyle="arc3", alpha=0.8),
+                               label=f'Max Radius: {max_radius:.1f}')
+            
+            return cx, cy, max_radius
+            
+        except Exception as e:
+            print(f"    ⚠️ 绘制质心和半径失败: {e}")
+            return None, None, None
+    
     def generate_merged_debug_visualization(self, segmenter, image_paths: List[str], 
                                           masks: List[np.ndarray], prompt_data: Dict[int, Dict[str, Any]], 
                                           output_dir: str = "test_output"):
@@ -85,7 +141,13 @@ class SegmentationVisualizer:
             axes[1].imshow(mask, alpha=0.5, cmap='Reds')
             mask_area = int(np.sum(mask))
             mask_quality = 0.0  # 不再显示自定义质量分数
-            axes[1].set_title(f"Segmentation Result\nImage {idx+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}")
+            
+            # 绘制质心和半径
+            cx, cy, radius = self._draw_centroid_and_radius(axes[1], mask, color='yellow')
+            if cx is not None:
+                axes[1].set_title(f"Segmentation Result\nImage {idx+1}\nArea: {mask_area}, Centroid: ({cx:.1f}, {cy:.1f}), Radius: {radius:.1f}")
+            else:
+                axes[1].set_title(f"Segmentation Result\nImage {idx+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}")
         else:
             axes[1].text(0.5, 0.5, "Segmentation Failed", ha='center', va='center', transform=axes[1].transAxes)
             axes[1].set_title(f"Segmentation Result\nImage {idx+1}\nFailed")
@@ -203,12 +265,21 @@ class SegmentationVisualizer:
             mask_area = int(np.sum(mask))
             mask_quality = debug_data.get('mask_quality', 0.0) or 0.0
             
+            # 绘制质心和半径
+            cx, cy, radius = self._draw_centroid_and_radius(axes[1, 2], mask, color='cyan')
+            
             # 显示保留率信息，根据是否实际进行了后处理调整标题
             retention = debug_data.get('postprocessing_stats', {}).get('area_retention', 1.0)
-            if retention < 1.0:
-                axes[1, 2].set_title(f"Cleaned Mask\nImage {idx+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}\nRetention: {retention:.3f}")
+            if cx is not None:
+                if retention < 1.0:
+                    axes[1, 2].set_title(f"Cleaned Mask\nImage {idx+1}\nArea: {mask_area}, Centroid: ({cx:.1f}, {cy:.1f}), Radius: {radius:.1f}\nRetention: {retention:.3f}")
+                else:
+                    axes[1, 2].set_title(f"Final Mask (No Processing)\nImage {idx+1}\nArea: {mask_area}, Centroid: ({cx:.1f}, {cy:.1f}), Radius: {radius:.1f}")
             else:
-                axes[1, 2].set_title(f"Final Mask (No Processing)\nImage {idx+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}")
+                if retention < 1.0:
+                    axes[1, 2].set_title(f"Cleaned Mask\nImage {idx+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}\nRetention: {retention:.3f}")
+                else:
+                    axes[1, 2].set_title(f"Final Mask (No Processing)\nImage {idx+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}")
         else:
             axes[1, 2].text(0.5, 0.5, "Processing Failed", ha='center', va='center', transform=axes[1, 2].transAxes)
             axes[1, 2].set_title(f"Final Mask\nImage {idx+1}\nFailed")
@@ -338,7 +409,37 @@ Postprocessing: Skipped
                     total_area = sum(cv2.contourArea(contour) for contour in contours)
                     contour_count = len(contours)
                     
+                    # 计算并绘制质心和半径
+                    try:
+                        from .mask_utils import create_mask_analyzer
+                    except ImportError:
+                        from mask_utils import create_mask_analyzer
+                    mask_analyzer = create_mask_analyzer()
+                    
+                    centroid = mask_analyzer.calculate_mask_centroid(mask)
+                    max_radius = mask_analyzer.calculate_max_radius_from_centroid(mask, centroid)
+                    
+                    if centroid != (0.0, 0.0) and max_radius > 0:
+                        cx, cy = int(centroid[0]), int(centroid[1])
+                        
+                        # 绘制十字标记
+                        cross_size = 8
+                        cv2.line(result_image, (cx-cross_size, cy), (cx+cross_size, cy), (0, 255, 255), 2)
+                        cv2.line(result_image, (cx, cy-cross_size), (cx, cy+cross_size), (0, 255, 255), 2)
+                        
+                        # 绘制最大半径箭头（选择一个方向）
+                        # 找到距离质心最远的点
+                        y_coords, x_coords = np.where(mask > 0)
+                        if len(x_coords) > 0:
+                            distances = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
+                            max_idx = np.argmax(distances)
+                            max_x, max_y = int(x_coords[max_idx]), int(y_coords[max_idx])
+                            
+                            # 绘制从质心到最远点的箭头线
+                            cv2.arrowedLine(result_image, (cx, cy), (max_x, max_y), (0, 255, 255), 2, tipLength=0.08)
+                    
                     print(f"   图片 {i+1}: 绘制了 {contour_count} 个轮廓，总面积 {int(total_area)} 像素")
+                    print(f"      质心: ({centroid[0]:.1f}, {centroid[1]:.1f}), 最大半径: {max_radius:.1f}")
                 else:
                     print(f"   图片 {i+1}: 未找到有效轮廓")
                 
