@@ -11,7 +11,7 @@ import glob
 import sys
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
-                               QFileDialog, QMessageBox)
+                               QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
 
@@ -26,11 +26,16 @@ class ExtractTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         # 初始化图像序列相关属性
-        self.image_files = []  # 存储图像文件列表
+        self.image_paths = []  # 图像路径列表（统一使用）
         self.current_image_index = 0  # 当前显示的图像索引
         self.sequence_folder_path = None  # 序列文件夹路径
         self.sequence_data = None  # 序列数据
         self.explosion_duration = 140  # 爆炸时长（毫秒）
+        
+        # 初始化prompt选择相关属性
+        self.is_prompt_selection_mode = False  # 是否处于prompt点选择模式
+        self.prompt_data = {}  # prompt数据：{image_index: {"points": [[x,y], ...], "labels": [1,0,1,...]}}
+        self.current_prompt_points = []  # 当前图像的prompt点临时存储
         
         # 初始化火球计算器
         self.fireball_calculator = FireballCalculator()
@@ -201,14 +206,24 @@ class ExtractTab(QWidget):
             self.sequence_btn = QPushButton("选择火球爆炸序列文件")
             layout.addWidget(self.sequence_btn)
             
-            layout.addWidget(QLabel("模型选择"))
-            self.extract_model = QComboBox()
-            self.extract_model.addItems(["U-Net 分割", "DeepLabV3", "SAM"])
-            layout.addWidget(self.extract_model)
+            # Prompt点选择
+            layout.addWidget(QLabel("Prompt点选择"))
+            self.prompt_btn = QPushButton("开始选择prompt点")
+            layout.addWidget(self.prompt_btn)
             
-            layout.addWidget(QLabel("批处理大小"))
-            self.batch_size = QLineEdit("8")
-            layout.addWidget(self.batch_size)
+            # 正负点选择单选按钮组
+            point_type_layout = QHBoxLayout()
+            self.point_type_group = QButtonGroup()
+            self.positive_radio = QRadioButton("选择正点")
+            self.negative_radio = QRadioButton("选择负点")
+            self.positive_radio.setChecked(True)  # 默认选择正点
+            
+            self.point_type_group.addButton(self.positive_radio)
+            self.point_type_group.addButton(self.negative_radio)
+            
+            point_type_layout.addWidget(self.positive_radio)
+            point_type_layout.addWidget(self.negative_radio)
+            layout.addLayout(point_type_layout)
             
             button_layout = QHBoxLayout()
             self.extract_btn = QPushButton("开始特征提取")
@@ -222,19 +237,39 @@ class ExtractTab(QWidget):
             button_layout.addWidget(self.extract_status)
             layout.addLayout(button_layout)
             
+            # 添加prompt点信息显示区域
+            layout.addWidget(QLabel("已选择的Prompt点信息"))
+            self.prompt_info_text = QTextEdit()
+            self.prompt_info_text.setReadOnly(True)
+            self.prompt_info_text.setMaximumHeight(200)
+            self.prompt_info_text.setStyleSheet("""
+                QTextEdit {
+                    background-color: #1f2937;
+                    border: 1px solid #374151;
+                    border-radius: 5px;
+                    color: #e5e7eb;
+                    font-family: 'Courier New', monospace;
+                    font-size: 11px;
+                    padding: 8px;
+                }
+            """)
+            self.prompt_info_text.setPlaceholderText("选择prompt点后，信息将在此显示...")
+            layout.addWidget(self.prompt_info_text)
+            
             self._sidebar_widget.setLayout(layout)
             
             # 设置信号连接
             self.sequence_btn.clicked.connect(self.select_sequence_folder)
+            self.prompt_btn.clicked.connect(self.toggle_prompt_selection)
             self.extract_btn.clicked.connect(self.start_feature_extraction)
         
         return self._sidebar_widget
     
     def on_time_changed(self, value):
         """时间轴变化"""
-        if self.image_files:
+        if self.image_paths:
             # 计算实际时间（毫秒）
-            total_frames = len(self.image_files)
+            total_frames = len(self.image_paths)
             if total_frames > 1:
                 time_ms = (value / (total_frames - 1)) * self.explosion_duration
             else:
@@ -248,11 +283,11 @@ class ExtractTab(QWidget):
     
     def display_image_at_index(self, index):
         """显示指定索引的图像"""
-        if not self.image_files or index < 0 or index >= len(self.image_files):
+        if not self.image_paths or index < 0 or index >= len(self.image_paths):
             return
         
         try:
-            image_path = self.image_files[index]
+            image_path = self.image_paths[index]
             # 使用 ImagePreviewWidget 的 set_image 方法
             self.extract_preview.set_image(image_path)
             self.current_image_index = index
@@ -292,8 +327,8 @@ class ExtractTab(QWidget):
                     # 加载温度数据
                     temp_success = self.load_temperature_data()
                     
-                    self.extract_status.setText(f"已加载序列: {len(self.image_files)} 个文件，时长: {self.explosion_duration}ms")
-                    print(f"成功加载火球序列: {len(self.image_files)} 个文件")
+                    self.extract_status.setText(f"已加载序列: {len(self.image_paths)} 个文件，时长: {self.explosion_duration}ms")
+                    print(f"成功加载火球序列: {len(self.image_paths)} 个文件")
                     if temp_success:
                         print("温度数据加载成功")
                     else:
@@ -326,12 +361,12 @@ class ExtractTab(QWidget):
             if image_files:
                 # 按文件名排序
                 image_files.sort()
-                self.image_files = image_files
+                self.image_paths = image_files  # 统一使用image_paths
                 self.sequence_folder_path = folder_path
                 self.current_image_index = 0
                 
                 # 设置时间轴范围
-                self.extract_slider.setRange(0, len(image_files) - 1)
+                self.extract_slider.setRange(0, len(self.image_paths) - 1)
                 self.extract_slider.setValue(0)
                 
                 # 显示第一张图像
@@ -665,3 +700,187 @@ class ExtractTab(QWidget):
             import traceback
             traceback.print_exc()
             raise e
+    
+    def toggle_prompt_selection(self):
+        """切换prompt点选择模式"""
+        try:
+            if not self.is_prompt_selection_mode:
+                # 开始选择prompt点
+                self.is_prompt_selection_mode = True
+                self.prompt_btn.setText("选择prompt点完成")
+                self.extract_status.setText("正在选择prompt点...")
+                print("🎯 开始prompt点选择模式")
+            else:
+                # 完成选择prompt点
+                self.is_prompt_selection_mode = False
+                self.prompt_btn.setText("开始选择prompt点")
+                self.extract_status.setText("prompt点选择完成")
+                print("✅ prompt点选择完成")
+                
+        except Exception as e:
+            print(f"❌ 切换prompt选择模式失败: {e}")
+            QMessageBox.critical(self, "错误", f"切换prompt选择模式失败:\n{str(e)}")
+    
+    def get_current_point_type(self):
+        """获取当前选择的点类型"""
+        if hasattr(self, 'positive_radio') and self.positive_radio.isChecked():
+            return 'positive'
+        elif hasattr(self, 'negative_radio') and self.negative_radio.isChecked():
+            return 'negative'
+        else:
+            return 'positive'  # 默认返回正点
+    
+    def add_prompt_point(self, image_index: int, x: int, y: int, is_positive: bool = True):
+        """
+        添加prompt点到数据结构
+        
+        Args:
+            image_index: 图像索引
+            x, y: 点坐标
+            is_positive: 是否为正点
+        """
+        try:
+            # 确保数据结构存在
+            if image_index not in self.prompt_data:
+                self.prompt_data[image_index] = {
+                    "points": [],
+                    "labels": []
+                }
+            
+            # 添加点坐标和标签
+            self.prompt_data[image_index]["points"].append([x, y])
+            self.prompt_data[image_index]["labels"].append(1 if is_positive else 0)
+            
+            print(f"添加prompt点: 图像{image_index}, 坐标({x}, {y}), 类型: {'正点' if is_positive else '负点'}")
+            
+            # 更新显示
+            self.update_prompt_info_display()
+            
+        except Exception as e:
+            print(f"❌ 添加prompt点失败: {e}")
+    
+    def remove_last_prompt_point(self, image_index: int):
+        """
+        移除指定图像的最后一个prompt点
+        
+        Args:
+            image_index: 图像索引
+        """
+        try:
+            if image_index in self.prompt_data:
+                if self.prompt_data[image_index]["points"]:
+                    removed_point = self.prompt_data[image_index]["points"].pop()
+                    self.prompt_data[image_index]["labels"].pop()
+                    print(f"移除prompt点: 图像{image_index}, 坐标{removed_point}")
+                    
+                    # 如果没有点了，删除整个条目
+                    if not self.prompt_data[image_index]["points"]:
+                        del self.prompt_data[image_index]
+                    
+                    # 更新显示
+                    self.update_prompt_info_display()
+                    
+        except Exception as e:
+            print(f"❌ 移除prompt点失败: {e}")
+    
+    def clear_prompt_data(self):
+        """清空所有prompt数据"""
+        self.prompt_data = {}
+        self.update_prompt_info_display()
+        print("🗑️ 已清空所有prompt数据")
+    
+    def update_prompt_info_display(self):
+        """更新prompt点信息显示"""
+        try:
+            if not self.prompt_data:
+                self.prompt_info_text.setPlainText("暂无选择的prompt点\n\n提示：\n1. 先加载图像序列\n2. 点击'开始选择prompt点'\n3. 在图像上点击选择正负点")
+                return
+            
+            # 生成用户可读的信息
+            info_lines = []
+            
+            for image_idx in sorted(self.prompt_data.keys()):
+                points = self.prompt_data[image_idx]["points"]
+                labels = self.prompt_data[image_idx]["labels"]
+                
+                # 分离正点和负点
+                positive_points = []
+                negative_points = []
+                
+                for point, label in zip(points, labels):
+                    if label == 1:
+                        positive_points.append(f"({point[0]}, {point[1]})")
+                    else:
+                        negative_points.append(f"({point[0]}, {point[1]})")
+                
+                # 格式化显示
+                info_lines.append(f"第 {image_idx + 1} 张图片特征点：")
+                
+                if positive_points:
+                    info_lines.append(f"  - 正点坐标：{', '.join(positive_points)}")
+                
+                if negative_points:
+                    info_lines.append(f"  - 负点坐标：{', '.join(negative_points)}")
+                
+                info_lines.append("")  # 空行分隔
+            
+            # 添加统计信息
+            total_images_with_prompts = len(self.prompt_data)
+            total_points = sum(len(data["points"]) for data in self.prompt_data.values())
+            total_positive = sum(sum(1 for label in data["labels"] if label == 1) for data in self.prompt_data.values())
+            total_negative = total_points - total_positive
+            
+            info_lines.append("=" * 30)
+            info_lines.append("统计信息：")
+            info_lines.append(f"  - 有prompt点的图像：{total_images_with_prompts} 张")
+            info_lines.append(f"  - 总点数：{total_points} 个")
+            info_lines.append(f"  - 正点：{total_positive} 个")
+            info_lines.append(f"  - 负点：{total_negative} 个")
+            
+            # 更新文本显示
+            self.prompt_info_text.setPlainText("\n".join(info_lines))
+            
+        except Exception as e:
+            print(f"❌ 更新prompt信息显示失败: {e}")
+            self.prompt_info_text.setPlainText(f"显示错误: {str(e)}")
+    
+    def export_prompt_data_to_json(self, file_path: str):
+        """
+        导出prompt数据到JSON文件
+        
+        Args:
+            file_path: 导出文件路径
+        """
+        try:
+            export_data = {
+                "image_paths": self.image_paths,
+                "prompt_data": {str(k): v for k, v in self.prompt_data.items()}  # 键转换为字符串
+            }
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=4, ensure_ascii=False)
+            
+            print(f"✅ prompt数据已导出到: {file_path}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ 导出prompt数据失败: {e}")
+            return False
+    
+    def test_prompt_data_functionality(self):
+        """测试prompt数据功能"""
+        try:
+            print("🧪 测试prompt数据功能...")
+            
+            # 模拟添加一些prompt点
+            self.add_prompt_point(0, 100, 100, True)   # 第1张图片，正点
+            self.add_prompt_point(0, 90, 100, True)    # 第1张图片，正点
+            self.add_prompt_point(0, 50, 50, False)    # 第1张图片，负点
+            
+            self.add_prompt_point(2, 120, 100, True)   # 第3张图片，正点
+            self.add_prompt_point(2, 60, 100, False)   # 第3张图片，负点
+            
+            print("✅ prompt数据功能测试完成")
+            
+        except Exception as e:
+            print(f"❌ prompt数据功能测试失败: {e}")
