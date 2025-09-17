@@ -6,9 +6,11 @@
 
 import os
 import sys
+import json
 import numpy as np
 import cv2
 from pathlib import Path
+from typing import List, Dict, Any, Tuple
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -48,7 +50,133 @@ def create_test_images():
     
     return image_paths
 
-def generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data):
+def load_data_from_json(json_path: str) -> Tuple[List[str], Dict[int, Dict[str, Any]]]:
+    """
+    从JSON文件加载图像路径和prompt数据
+    
+    JSON格式:
+    {
+        "image_paths": [
+            "path/to/image1.jpg",
+            "path/to/image2.jpg",
+            ...
+        ],
+        "prompt_data": {
+            "0": {
+                "points": [[x1, y1], [x2, y2], ...],
+                "labels": [1, 1, 0, 0, ...]
+            },
+            "2": {
+                "points": [[x1, y1], [x2, y2], ...], 
+                "labels": [1, 0, 1, ...]
+            }
+        }
+    }
+    
+    Args:
+        json_path: JSON文件路径
+        
+    Returns:
+        Tuple[List[str], Dict[int, Dict[str, Any]]]: (图像路径列表, prompt数据字典)
+    """
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # 提取图像路径
+        image_paths = data.get('image_paths', [])
+        
+        # 提取prompt数据并转换格式
+        raw_prompt_data = data.get('prompt_data', {})
+        prompt_data = {}
+        
+        for str_idx, prompt_info in raw_prompt_data.items():
+            idx = int(str_idx)  # 将字符串索引转换为整数
+            
+            # 转换点坐标格式：[[x, y], ...] → [(x, y), ...]
+            points = [tuple(point) for point in prompt_info.get('points', [])]
+            labels = prompt_info.get('labels', [])
+            
+            prompt_data[idx] = {
+                'points': points,
+                'labels': labels
+            }
+        
+        print(f"✓ 从JSON加载了 {len(image_paths)} 张图片")
+        print(f"✓ 从JSON加载了 {len(prompt_data)} 个prompt配置")
+        print(f"✓ Prompt图片索引: {sorted(prompt_data.keys())}")
+        
+        return image_paths, prompt_data
+        
+    except FileNotFoundError:
+        print(f"❌ JSON文件不存在: {json_path}")
+        return [], {}
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON格式错误: {e}")
+        return [], {}
+    except Exception as e:
+        print(f"❌ 加载JSON失败: {e}")
+        return [], {}
+
+def save_contour_visualization(image_paths: List[str], masks: List[np.ndarray], output_dir: str = "test_output"):
+    """
+    生成带有蓝色轮廓的原图可视化
+    
+    Args:
+        image_paths: 图像路径列表
+        masks: 掩码列表
+        output_dir: 输出目录
+    """
+    try:
+        # 创建轮廓可视化目录
+        contour_dir = Path(output_dir) / "contour_visualization"
+        contour_dir.mkdir(parents=True, exist_ok=True)
+        
+        print("生成蓝色轮廓可视化...")
+        
+        for i, (image_path, mask) in enumerate(zip(image_paths, masks)):
+            if mask is None:
+                print(f"   图片 {i+1}: 跳过（无掩码）")
+                continue
+            
+            # 读取原图
+            image = cv2.imread(image_path)
+            if image is None:
+                print(f"   图片 {i+1}: 跳过（读取失败）")
+                continue
+            
+            # 创建结果图像的副本
+            result_image = image.copy()
+            
+            # 找到掩码的轮廓
+            mask_uint8 = (mask * 255).astype(np.uint8)
+            contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # 绘制蓝色轮廓
+            if contours:
+                cv2.drawContours(result_image, contours, -1, (255, 0, 0), 2)  # 蓝色轮廓，线宽2
+                
+                # 计算轮廓信息
+                total_area = sum(cv2.contourArea(contour) for contour in contours)
+                contour_count = len(contours)
+                
+                print(f"   图片 {i+1}: 绘制了 {contour_count} 个轮廓，总面积 {int(total_area)} 像素")
+            else:
+                print(f"   图片 {i+1}: 未找到有效轮廓")
+            
+            # 保存结果
+            base_name = Path(image_path).stem
+            output_path = contour_dir / f"{base_name}_contour.png"
+            cv2.imwrite(str(output_path), result_image)
+            
+        print(f"✓ 轮廓可视化保存到: {contour_dir}")
+        
+    except Exception as e:
+        print(f"❌ 生成轮廓可视化失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+def generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data, output_dir: str = "test_output"):
     """
     生成合并的debug可视化图片
     有prompt点的图片: prompt_points, segmentation_result, next_iteration_sampling
@@ -59,6 +187,7 @@ def generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_da
         image_paths: 图像路径列表
         masks: 掩码列表
         prompt_data: prompt数据
+        output_dir: 输出目录
     """
     try:
         # 设置中文字体支持
@@ -237,7 +366,7 @@ Point Statistics:
                 axes[1, 2].axis('off')
             
             # 保存合并的debug图片
-            vis_dir = Path("test_output/visualization")
+            vis_dir = Path(output_dir) / "visualization"
             vis_dir.mkdir(parents=True, exist_ok=True)
             base_name = Path(image_paths[i]).stem
             debug_path = str(vis_dir / f"{base_name}_merged_debug.png")
@@ -344,22 +473,127 @@ def test_complete_propagation():
         traceback.print_exc()
         return False
 
+def test_from_json(json_path: str):
+    """从JSON文件测试掩码传播流程"""
+    print("=" * 60)
+    print("从JSON文件测试迭代掩码传播")
+    print("=" * 60)
+    
+    try:
+        # 加载JSON数据
+        print("1. 加载JSON数据...")
+        image_paths, prompt_data = load_data_from_json(json_path)
+        
+        if not image_paths or not prompt_data:
+            print("❌ JSON数据加载失败或为空")
+            return False
+        
+        # 验证图像文件是否存在
+        print("\n2. 验证图像文件...")
+        valid_paths = []
+        for i, path in enumerate(image_paths):
+            if os.path.exists(path):
+                valid_paths.append(path)
+                print(f"   ✓ 图片 {i+1}: {os.path.basename(path)}")
+            else:
+                print(f"   ❌ 图片 {i+1}: 文件不存在 - {path}")
+        
+        if not valid_paths:
+            print("❌ 没有找到有效的图像文件")
+            return False
+        
+        image_paths = valid_paths
+        
+        # 创建分割器
+        print("\n3. 创建分割器...")
+        segmenter = create_iterative_segmenter()
+        print("   ✓ 分割器创建成功")
+        
+        # 执行分割
+        print("\n4. 执行迭代掩码传播分割...")
+        masks = segmenter.segment_sequence_with_iterative_propagation(
+            image_paths=image_paths,
+            prompt_data=prompt_data,
+            output_dir="json_test_output",
+            save_masks=True,
+            save_visualization=False
+        )
+        
+        # 生成debug可视化
+        print("\n5. 生成debug可视化...")
+        generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data, "json_test_output")
+        
+        # 生成蓝色轮廓可视化
+        print("\n6. 生成蓝色轮廓可视化...")
+        save_contour_visualization(image_paths, masks, "json_test_output")
+        
+        # 分析结果
+        print("\n7. 分析分割结果...")
+        successful_masks = sum(1 for mask in masks if mask is not None)
+        print(f"   ✓ 成功分割了 {successful_masks}/{len(masks)} 张图片")
+        
+        # 检查每张图片的分割结果
+        for i, mask in enumerate(masks):
+            if mask is not None:
+                area = np.sum(mask)
+                quality = segmenter.mask_analyzer.calculate_mask_quality(mask)
+                print(f"   图片 {i+1}: 面积={int(area)} 像素, 质量={quality:.3f}")
+            else:
+                print(f"   图片 {i+1}: 分割失败")
+        
+        print("\n" + "=" * 60)
+        print("JSON测试完成！")
+        print("=" * 60)
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ JSON测试失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 def main():
     """主测试函数"""
     print("基于RGB相似性的掩码传播完整测试")
     
-    # 测试完整传播流程
-    test_passed = test_complete_propagation()
-    
-    print(f"\n{'='*60}")
-    print(f"测试总结:")
-    print(f"完整传播流程测试: {'通过' if test_passed else '失败'}")
-    print(f"{'='*60}")
-    
-    if test_passed:
-        print("🎉 所有测试通过！基于RGB相似性的掩码传播功能正常工作。")
+    # 检查是否提供了JSON文件参数
+    if len(sys.argv) > 1:
+        json_path = sys.argv[1]
+        print(f"使用JSON文件: {json_path}")
+        
+        # 从JSON文件测试
+        test_passed = test_from_json(json_path)
+        
+        print(f"\n{'='*60}")
+        print(f"测试总结:")
+        print(f"JSON文件测试: {'通过' if test_passed else '失败'}")
+        print(f"{'='*60}")
+        
+        if test_passed:
+            print("🎉 JSON测试通过！迭代掩码传播功能正常工作。")
+            print("📁 输出文件:")
+            print("   - json_test_output/masks/ - 掩码文件")
+            print("   - json_test_output/visualization/ - debug可视化")
+            print("   - json_test_output/contour_visualization/ - 蓝色轮廓图")
+        else:
+            print("⚠️ JSON测试失败，请检查输入数据和代码。")
     else:
-        print("⚠️ 测试失败，请检查代码。")
+        # 默认测试模式
+        test_passed = test_complete_propagation()
+        
+        print(f"\n{'='*60}")
+        print(f"测试总结:")
+        print(f"完整传播流程测试: {'通过' if test_passed else '失败'}")
+        print(f"{'='*60}")
+        
+        if test_passed:
+            print("🎉 所有测试通过！基于RGB相似性的掩码传播功能正常工作。")
+        else:
+            print("⚠️ 测试失败，请检查代码。")
+        
+        print("\n💡 提示: 也可以使用JSON文件测试:")
+        print("   python test_complete_propagation.py data.json")
 
 if __name__ == "__main__":
     main()
