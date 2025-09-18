@@ -486,14 +486,15 @@ class IterativeMaskPropagationSegmenter:
             # 保存传播详情（不包含最终结果）
             self._save_propagated_image_details(target_idx, reference_image_path, debug_info)
             
-            if len(target_points) == 0:
-                print(f"    ⚠️ 未找到有效的正负点，跳过")
-                return None
-            
             # 记录点生成信息
             positive_count = sum(target_labels)
             negative_count = len(target_labels) - positive_count
             print(f"    📍 生成了 {positive_count} 个正点和 {negative_count} 个负点")
+            
+            # 检查正点数量：没有正点无法准确定位火球
+            if positive_count == 0:
+                print(f"    ❌ 没有正点，无法准确定位火球，标记为失败")
+                return None
             
             # 使用筛选后的点进行SAM分割
             self.predictor.set_image(target_image_rgb)

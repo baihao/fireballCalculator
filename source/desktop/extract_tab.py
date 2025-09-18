@@ -207,6 +207,7 @@ class ExtractTab(QWidget):
             self._sidebar_widget = QGroupBox("特征提取")
             layout = QVBoxLayout()
             layout.setAlignment(Qt.AlignTop)  # 只向上对齐
+            layout.setSpacing(8)  # 设置控件间距为8像素
             
             layout.addWidget(QLabel("火球爆炸序列文件（JSON格式）"))
             self.sequence_btn = QPushButton("选择火球爆炸序列文件")
@@ -219,6 +220,7 @@ class ExtractTab(QWidget):
             
             # 正负点选择单选按钮组
             point_type_layout = QHBoxLayout()
+            point_type_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
             self.point_type_group = QButtonGroup()
             self.positive_radio = QRadioButton("选择正点")
             self.negative_radio = QRadioButton("选择负点")
@@ -232,6 +234,7 @@ class ExtractTab(QWidget):
             layout.addLayout(point_type_layout)
             
             button_layout = QHBoxLayout()
+            button_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
             self.extract_btn = QPushButton("开始特征提取")
             self.extract_btn.setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
             self.cancel_extract_btn = QPushButton("取消")
@@ -261,6 +264,9 @@ class ExtractTab(QWidget):
             """)
             self.prompt_info_text.setPlaceholderText("选择prompt点后，信息将在此显示...")
             layout.addWidget(self.prompt_info_text)
+            
+            # 添加弹性空间，确保所有控件向上紧凑排列
+            layout.addStretch()
             
             self._sidebar_widget.setLayout(layout)
             
@@ -1062,7 +1068,7 @@ class ExtractTab(QWidget):
             
             # 图片跳转控件
             jump_layout = QHBoxLayout()
-            jump_layout.setAlignment(Qt.AlignCenter)
+            jump_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
             
             jump_layout.addWidget(QLabel("跳转到图片:"))
             
