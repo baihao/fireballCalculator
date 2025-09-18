@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
+from interactive_image_widget import create_interactive_image_widget
 
 # 添加路径以导入火球计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -82,13 +83,19 @@ class ExtractTab(QWidget):
         preview_group_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
         preview_group_layout.setSpacing(8)
         
-        self.extract_preview = ImagePreviewWidget()
+        self.extract_preview = create_interactive_image_widget()
         # 创建水平布局来居中图像预览
         image_layout = QHBoxLayout()
         image_layout.addStretch()
         image_layout.addWidget(self.extract_preview)
         image_layout.addStretch()
         preview_group_layout.addLayout(image_layout)
+        
+        # 连接交互式图像控件的信号
+        self.extract_preview.point_clicked.connect(self.on_image_point_clicked)
+        
+        # 添加图片导航控件
+        self.add_image_navigation_controls(preview_group_layout)
         
         # 时间轴
         timeline_layout = QHBoxLayout()
@@ -171,7 +178,7 @@ class ExtractTab(QWidget):
         self.save_button.setEnabled(False)
         button_layout.addWidget(self.save_button)
         button_layout.addStretch()
-        button_layout.addWidget(QLabel("提取完成后可保存"))
+        button_layout.addWidget(QLabel("有prompt点后可保存"))
         right_layout.addLayout(button_layout)
         
         right_widget.setLayout(right_layout)
@@ -189,9 +196,8 @@ class ExtractTab(QWidget):
         """设置信号连接"""
         self.extract_slider.valueChanged.connect(self.on_time_changed)
         
-        # 连接特征提取按钮
-        if hasattr(self, 'extract_btn'):
-            self.extract_btn.clicked.connect(self.start_feature_extraction)
+        # 连接保存按钮
+        self.save_button.clicked.connect(self.save_extraction_sequence)
     
     def get_sidebar_widget(self):
         """获取特征提取模块的侧边栏组件"""
@@ -262,6 +268,11 @@ class ExtractTab(QWidget):
             self.sequence_btn.clicked.connect(self.select_sequence_folder)
             self.prompt_btn.clicked.connect(self.toggle_prompt_selection)
             self.extract_btn.clicked.connect(self.start_feature_extraction)
+            self.cancel_extract_btn.clicked.connect(self.cancel_current_image_points)
+            
+            # 连接单选按钮状态变化
+            self.positive_radio.toggled.connect(self.on_radio_button_changed)
+            self.negative_radio.toggled.connect(self.on_radio_button_changed)
         
         return self._sidebar_widget
     
@@ -288,10 +299,17 @@ class ExtractTab(QWidget):
         
         try:
             image_path = self.image_paths[index]
-            # 使用 ImagePreviewWidget 的 set_image 方法
-            self.extract_preview.set_image(image_path)
-            self.current_image_index = index
-            print(f"显示图像: {image_path} (索引: {index})")
+            # 使用交互式图像控件的 set_image 方法
+            success = self.extract_preview.set_image(image_path)
+            if success:
+                self.current_image_index = index
+                # 加载该图像已有的点标记
+                self.load_points_for_current_image()
+                # 更新图片索引显示
+                self.update_image_index_display()
+                print(f"显示图像: {image_path} (索引: {index})")
+            else:
+                print(f"图像加载失败: {image_path}")
                 
         except Exception as e:
             print(f"显示图像失败: {e}")
@@ -371,6 +389,9 @@ class ExtractTab(QWidget):
                 
                 # 显示第一张图像
                 self.display_image_at_index(0)
+                
+                # 初始化图片索引显示
+                self.update_image_index_display()
                 
                 return True
             else:
@@ -709,12 +730,23 @@ class ExtractTab(QWidget):
                 self.is_prompt_selection_mode = True
                 self.prompt_btn.setText("选择prompt点完成")
                 self.extract_status.setText("正在选择prompt点...")
-                print("🎯 开始prompt点选择模式")
+                
+                # 根据当前单选按钮状态设置交互模式
+                current_type = self.get_current_point_type()
+                self.extract_preview.set_interaction_mode(current_type)
+                self.extract_preview.set_interactive_enabled(True)
+                
+                print(f"🎯 开始prompt点选择模式: {current_type}")
             else:
                 # 完成选择prompt点
                 self.is_prompt_selection_mode = False
                 self.prompt_btn.setText("开始选择prompt点")
                 self.extract_status.setText("prompt点选择完成")
+                
+                # 禁用交互
+                self.extract_preview.set_interaction_mode('none')
+                self.extract_preview.set_interactive_enabled(False)
+                
                 print("✅ prompt点选择完成")
                 
         except Exception as e:
@@ -840,6 +872,9 @@ class ExtractTab(QWidget):
             # 更新文本显示
             self.prompt_info_text.setPlainText("\n".join(info_lines))
             
+            # 更新保存按钮状态
+            self.save_button.setEnabled(len(self.prompt_data) > 0)
+            
         except Exception as e:
             print(f"❌ 更新prompt信息显示失败: {e}")
             self.prompt_info_text.setPlainText(f"显示错误: {str(e)}")
@@ -884,3 +919,247 @@ class ExtractTab(QWidget):
             
         except Exception as e:
             print(f"❌ prompt数据功能测试失败: {e}")
+    
+    def on_image_point_clicked(self, x: int, y: int, point_type: str):
+        """
+        处理图像点击事件
+        
+        Args:
+            x, y: 点击的图像坐标
+            point_type: 点类型 ('positive' 或 'negative')
+        """
+        try:
+            if not self.is_prompt_selection_mode:
+                return
+            
+            # 添加点到数据结构
+            is_positive = (point_type == 'positive')
+            self.add_prompt_point(self.current_image_index, x, y, is_positive)
+            
+            print(f"图像点击: 索引{self.current_image_index}, 坐标({x}, {y}), 类型: {point_type}")
+            
+        except Exception as e:
+            print(f"❌ 处理图像点击失败: {e}")
+    
+    def on_radio_button_changed(self):
+        """处理单选按钮状态变化"""
+        try:
+            if self.is_prompt_selection_mode:
+                # 更新交互模式
+                current_type = self.get_current_point_type()
+                self.extract_preview.set_interaction_mode(current_type)
+                print(f"切换点选择类型为: {current_type}")
+                
+        except Exception as e:
+            print(f"❌ 处理单选按钮变化失败: {e}")
+    
+    def cancel_current_image_points(self):
+        """取消当前图像上的所有点"""
+        try:
+            if self.current_image_index in self.prompt_data:
+                # 移除数据结构中的点
+                del self.prompt_data[self.current_image_index]
+                
+                # 清空图像控件中的点显示
+                self.extract_preview.clear_points()
+                
+                # 更新信息显示
+                self.update_prompt_info_display()
+                
+                print(f"🗑️ 已取消图像{self.current_image_index}上的所有点")
+                self.extract_status.setText("已取消当前图像的点选择")
+                
+        except Exception as e:
+            print(f"❌ 取消当前图像点失败: {e}")
+    
+    def load_points_for_current_image(self):
+        """为当前图像加载已有的点标记"""
+        try:
+            if self.current_image_index in self.prompt_data:
+                points = self.prompt_data[self.current_image_index]["points"]
+                labels = self.prompt_data[self.current_image_index]["labels"]
+                
+                # 分离正负点
+                positive_points = []
+                negative_points = []
+                
+                for point, label in zip(points, labels):
+                    if label == 1:
+                        positive_points.append(tuple(point))
+                    else:
+                        negative_points.append(tuple(point))
+                
+                # 设置到图像控件
+                self.extract_preview.set_points(positive_points, negative_points)
+                
+                print(f"为图像{self.current_image_index}加载了{len(positive_points)}个正点, {len(negative_points)}个负点")
+            else:
+                # 清空显示
+                self.extract_preview.clear_points()
+                
+        except Exception as e:
+            print(f"❌ 加载当前图像点失败: {e}")
+    
+    def save_extraction_sequence(self):
+        """保存提取序列（按照example_data.json格式）"""
+        try:
+            if not self.prompt_data:
+                QMessageBox.warning(self, "警告", "没有选择任何prompt点，无法保存！")
+                return
+            
+            if not self.image_paths:
+                QMessageBox.warning(self, "警告", "没有加载图像序列，无法保存！")
+                return
+            
+            # 选择保存文件
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "保存提取序列",
+                "fireball_prompt_data.json",
+                "JSON文件 (*.json);;所有文件 (*)"
+            )
+            
+            if file_path:
+                # 导出数据
+                success = self.export_prompt_data_to_json(file_path)
+                
+                if success:
+                    QMessageBox.information(self, "成功", 
+                                          f"提取序列已保存到:\n{file_path}\n\n"
+                                          f"包含 {len(self.prompt_data)} 张图像的prompt点数据")
+                    self.extract_status.setText("序列保存成功")
+                else:
+                    QMessageBox.critical(self, "错误", "保存失败，请检查文件路径和权限！")
+                    self.extract_status.setText("序列保存失败")
+                    
+        except Exception as e:
+            print(f"❌ 保存提取序列失败: {e}")
+            QMessageBox.critical(self, "错误", f"保存提取序列失败:\n{str(e)}")
+            self.extract_status.setText("保存失败")
+    
+    def add_image_navigation_controls(self, parent_layout):
+        """
+        添加图片导航控件
+        
+        Args:
+            parent_layout: 父布局
+        """
+        try:
+            # 图片索引信息标签
+            self.image_index_label = QLabel("0/0")
+            self.image_index_label.setAlignment(Qt.AlignCenter)
+            self.image_index_label.setStyleSheet("""
+                QLabel {
+                    color: #9ca3af;
+                    font-size: 14px;
+                    font-weight: bold;
+                    padding: 5px;
+                    background-color: #1f2937;
+                    border: 1px solid #374151;
+                    border-radius: 5px;
+                }
+            """)
+            parent_layout.addWidget(self.image_index_label)
+            
+            # 图片跳转控件
+            jump_layout = QHBoxLayout()
+            jump_layout.setAlignment(Qt.AlignCenter)
+            
+            jump_layout.addWidget(QLabel("跳转到图片:"))
+            
+            self.jump_input = QLineEdit()
+            self.jump_input.setPlaceholderText("输入图片编号")
+            self.jump_input.setMaximumWidth(100)
+            self.jump_input.setStyleSheet("""
+                QLineEdit {
+                    background-color: #1f2937;
+                    border: 1px solid #374151;
+                    border-radius: 5px;
+                    color: #e5e7eb;
+                    padding: 5px;
+                    font-size: 12px;
+                }
+            """)
+            jump_layout.addWidget(self.jump_input)
+            
+            self.jump_btn = QPushButton("查看")
+            self.jump_btn.setMaximumWidth(60)
+            self.jump_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #374151;
+                    color: #e5e7eb;
+                    border: 1px solid #4b5563;
+                    border-radius: 5px;
+                    padding: 5px 10px;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: #4b5563;
+                }
+                QPushButton:pressed {
+                    background-color: #6b7280;
+                }
+            """)
+            jump_layout.addWidget(self.jump_btn)
+            
+            parent_layout.addLayout(jump_layout)
+            
+            # 连接信号
+            self.jump_btn.clicked.connect(self.jump_to_image)
+            self.jump_input.returnPressed.connect(self.jump_to_image)  # 回车键也触发跳转
+            
+        except Exception as e:
+            print(f"❌ 添加图片导航控件失败: {e}")
+    
+    def update_image_index_display(self):
+        """更新图片索引显示"""
+        try:
+            if self.image_paths:
+                current = self.current_image_index + 1  # 显示从1开始
+                total = len(self.image_paths)
+                self.image_index_label.setText(f"{current}/{total}")
+            else:
+                self.image_index_label.setText("0/0")
+                
+        except Exception as e:
+            print(f"❌ 更新图片索引显示失败: {e}")
+    
+    def jump_to_image(self):
+        """跳转到指定图片"""
+        try:
+            if not self.image_paths:
+                QMessageBox.warning(self, "警告", "请先加载图像序列！")
+                return
+            
+            # 获取输入的图片编号
+            input_text = self.jump_input.text().strip()
+            if not input_text:
+                return
+            
+            try:
+                # 转换为索引（用户输入从1开始，内部索引从0开始）
+                image_number = int(input_text)
+                image_index = image_number - 1
+                
+                # 检查索引范围
+                if image_index < 0 or image_index >= len(self.image_paths):
+                    QMessageBox.warning(self, "警告", 
+                                      f"图片编号超出范围！\n有效范围: 1-{len(self.image_paths)}")
+                    return
+                
+                # 跳转到指定图片
+                self.display_image_at_index(image_index)
+                
+                # 同步更新时间轴
+                self.extract_slider.setValue(image_index)
+                
+                # 清空输入框
+                self.jump_input.clear()
+                
+                print(f"跳转到图片 {image_number} (索引: {image_index})")
+                
+            except ValueError:
+                QMessageBox.warning(self, "警告", "请输入有效的数字！")
+                
+        except Exception as e:
+            print(f"❌ 跳转到图片失败: {e}")
+            QMessageBox.critical(self, "错误", f"跳转失败:\n{str(e)}")

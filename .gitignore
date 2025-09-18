@@ -56,6 +56,10 @@ source/image_segment/*_summary.png
 !fireball_sequence.json
 !source/desktop/fireball_sequence.json
 
+# Test data directory
+test_data/
+test_data/**
+
 # Historical experiment outputs (if recreated by tests)
 source/image_segment/output_advanced/
 source/image_segment/output_advanced/**
