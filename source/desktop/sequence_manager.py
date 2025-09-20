@@ -142,6 +142,30 @@ class SequenceManager:
             print(f"提取prompt数据失败: {e}")
             return {}
     
+    def get_ignition_point_from_sequence(self, sequence_data: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+        """
+        从序列数据中提取起爆点
+        
+        Args:
+            sequence_data: 序列数据字典
+            
+        Returns:
+            Optional[Tuple[int, int]]: 起爆点坐标 (x, y) 或 None
+        """
+        try:
+            # 从image_sequence中获取target_center
+            image_sequence = sequence_data.get('image_sequence', {})
+            target_center = image_sequence.get('target_center', None)
+            
+            if target_center and len(target_center) >= 2:
+                return tuple(target_center[:2])  # 确保返回 (x, y) 元组
+            
+            return None
+            
+        except Exception as e:
+            print(f"提取起爆点失败: {e}")
+            return None
+    
     def save_prompt_data_to_sequence(self, file_path: str, prompt_data: Dict[int, Dict[str, Any]]) -> Tuple[bool, str]:
         """
         将prompt数据保存到序列文件中
@@ -184,6 +208,64 @@ class SequenceManager:
             print(error_msg)
             return False, error_msg
     
+    def save_prompt_and_ignition_data_to_sequence(
+        self, 
+        file_path: str, 
+        prompt_data: Dict[int, Dict[str, Any]], 
+        ignition_point: Optional[Tuple[int, int]]
+    ) -> Tuple[bool, str]:
+        """
+        将prompt数据和起爆点保存到序列文件中
+        
+        Args:
+            file_path: 序列文件路径
+            prompt_data: prompt数据字典
+            ignition_point: 起爆点坐标 (x, y) 或 None
+            
+        Returns:
+            Tuple[bool, str]: (是否成功, 错误信息或成功信息)
+        """
+        try:
+            # 读取现有的序列文件
+            success, sequence_data, message = self.load_sequence_file(file_path)
+            if not success:
+                return False, f"无法读取序列文件: {message}"
+            
+            # 转换prompt_data的键为字符串（JSON要求）
+            prompt_data_str_keys = {str(k): v for k, v in prompt_data.items()}
+            
+            # 将prompt_data和target_center添加到image_sequence中
+            if 'image_sequence' not in sequence_data:
+                sequence_data['image_sequence'] = {}
+            
+            sequence_data['image_sequence']['prompt_data'] = prompt_data_str_keys
+            
+            # 保存起爆点
+            if ignition_point:
+                sequence_data['image_sequence']['target_center'] = list(ignition_point)
+            elif 'target_center' in sequence_data['image_sequence']:
+                # 如果没有起爆点但之前有，则删除
+                del sequence_data['image_sequence']['target_center']
+            
+            # 保存更新后的文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(sequence_data, f, ensure_ascii=False, indent=4)
+            
+            # 统计信息
+            total_images_with_prompts = len(prompt_data)
+            total_points = sum(len(data["points"]) for data in prompt_data.values())
+            
+            success_msg = f"参考点数据保存成功！包含 {total_images_with_prompts} 张图像的 {total_points} 个参考点"
+            if ignition_point:
+                success_msg += f"，起爆点: ({ignition_point[0]}, {ignition_point[1]})"
+            
+            return True, success_msg
+            
+        except Exception as e:
+            error_msg = f"保存参考点数据失败: {str(e)}"
+            print(error_msg)
+            return False, error_msg
+    
     def get_sequence_summary(self, sequence_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         获取序列数据摘要
@@ -199,6 +281,7 @@ class SequenceManager:
             time_data, temp_data = self.get_temperature_data_from_sequence(sequence_data)
             parameters = self.get_parameters_from_sequence(sequence_data)
             prompt_data = self.get_prompt_data_from_sequence(sequence_data)
+            ignition_point = self.get_ignition_point_from_sequence(sequence_data)
             
             summary = {
                 'image_count': len(image_paths),
@@ -207,6 +290,8 @@ class SequenceManager:
                 'has_prompt_data': len(prompt_data) > 0,
                 'prompt_images_count': len(prompt_data),
                 'total_prompt_points': sum(len(data["points"]) for data in prompt_data.values()) if prompt_data else 0,
+                'has_ignition_point': ignition_point is not None,
+                'ignition_point': ignition_point,
                 'explosion_duration': parameters.get('explosion_duration', '未知'),
                 'material_type': parameters.get('material_type', '未知'),
                 'metadata': sequence_data.get('metadata', {})

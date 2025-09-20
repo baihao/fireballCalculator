@@ -30,9 +30,10 @@ class InteractiveImageWidget(QLabel):
         # 点标记相关属性
         self.positive_points = []   # 正点列表 [(x, y), ...]
         self.negative_points = []   # 负点列表 [(x, y), ...]
+        self.ignition_point = None  # 起爆点 (x, y) 或 None
         
         # 交互状态
-        self.interaction_mode = 'none'  # 'none', 'positive', 'negative'
+        self.interaction_mode = 'none'  # 'none', 'positive', 'negative', 'ignition'
         self.is_interactive = False     # 是否启用交互
         
         # 设置基本属性
@@ -87,7 +88,7 @@ class InteractiveImageWidget(QLabel):
         设置交互模式
         
         Args:
-            mode: 交互模式 ('none', 'positive', 'negative')
+            mode: 交互模式 ('none', 'positive', 'negative', 'ignition')
         """
         self.interaction_mode = mode
         self.is_interactive = (mode != 'none')
@@ -122,6 +123,23 @@ class InteractiveImageWidget(QLabel):
         except Exception as e:
             print(f"❌ 添加点标记失败: {e}")
     
+    def set_ignition_point(self, x: int, y: int):
+        """
+        设置起爆点（只保留最后一个）
+        
+        Args:
+            x, y: 点坐标（图像坐标系）
+        """
+        try:
+            self.ignition_point = (x, y)
+            print(f"设置起爆点: ({x}, {y})")
+            
+            # 更新显示
+            self.update_display()
+            
+        except Exception as e:
+            print(f"❌ 设置起爆点失败: {e}")
+    
     def remove_last_point(self, is_positive: bool = True):
         """
         移除最后一个点
@@ -147,30 +165,33 @@ class InteractiveImageWidget(QLabel):
         """清空所有点标记"""
         self.positive_points = []
         self.negative_points = []
+        self.ignition_point = None
         self.update_display()
         print("🗑️ 清空所有点标记")
     
-    def set_points(self, positive_points: List[Tuple[int, int]], negative_points: List[Tuple[int, int]]):
+    def set_points(self, positive_points: List[Tuple[int, int]], negative_points: List[Tuple[int, int]], ignition_point: Optional[Tuple[int, int]] = None):
         """
         设置点标记（用于加载已有数据）
         
         Args:
             positive_points: 正点列表
             negative_points: 负点列表
+            ignition_point: 起爆点坐标
         """
         self.positive_points = positive_points.copy()
         self.negative_points = negative_points.copy()
+        self.ignition_point = ignition_point
         self.update_display()
-        print(f"设置点标记: {len(positive_points)}个正点, {len(negative_points)}个负点")
+        print(f"设置点标记: {len(positive_points)}个正点, {len(negative_points)}个负点, 起爆点: {ignition_point}")
     
-    def get_points(self) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+    def get_points(self) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]], Optional[Tuple[int, int]]]:
         """
         获取当前的点标记
         
         Returns:
-            Tuple: (正点列表, 负点列表)
+            Tuple: (正点列表, 负点列表, 起爆点)
         """
-        return self.positive_points.copy(), self.negative_points.copy()
+        return self.positive_points.copy(), self.negative_points.copy(), self.ignition_point
     
     def update_display(self):
         """更新图像显示，包括点标记"""
@@ -200,6 +221,11 @@ class InteractiveImageWidget(QLabel):
             # 绘制负点（蓝色十字）
             for x, y in self.negative_points:
                 self._draw_cross(image, x, y, (0, 0, 255), size=12, thickness=3)
+            
+            # 绘制起爆点（紫色十字）
+            if self.ignition_point is not None:
+                x, y = self.ignition_point
+                self._draw_cross(image, x, y, (128, 0, 128), size=15, thickness=4)  # 稍大一些突出显示
                 
         except Exception as e:
             print(f"❌ 绘制点标记失败: {e}")
@@ -284,6 +310,9 @@ class InteractiveImageWidget(QLabel):
                 elif self.interaction_mode == 'negative':
                     self.add_point(image_x, image_y, False)
                     self.point_clicked.emit(image_x, image_y, 'negative')
+                elif self.interaction_mode == 'ignition':
+                    self.set_ignition_point(image_x, image_y)
+                    self.point_clicked.emit(image_x, image_y, 'ignition')
             
         except Exception as e:
             print(f"❌ 处理鼠标点击失败: {e}")
@@ -346,7 +375,8 @@ class InteractiveImageWidget(QLabel):
         return {
             'positive_points': self.positive_points.copy(),
             'negative_points': self.negative_points.copy(),
-            'total_points': len(self.positive_points) + len(self.negative_points),
+            'ignition_point': self.ignition_point,
+            'total_points': len(self.positive_points) + len(self.negative_points) + (1 if self.ignition_point else 0),
             'image_path': self.image_path
         }
     

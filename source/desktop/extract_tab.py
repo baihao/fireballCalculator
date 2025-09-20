@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
-from interactive_image_widget import create_interactive_image_widget
 from sequence_manager import SequenceManager
+from extract_tab_ui import ExtractTabUI
 
 # 添加路径以导入火球计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -33,284 +33,87 @@ class ExtractTab(QWidget):
         self.explosion_duration = 140  # 爆炸时长（毫秒）
         
         # 初始化prompt选择相关属性
-        self.is_prompt_selection_mode = False  # 是否处于prompt点选择模式
+        self.is_prompt_selection_mode = False  # 是否处于参考点选择模式
         self.prompt_data = {}  # prompt数据：{image_index: {"points": [[x,y], ...], "labels": [1,0,1,...]}}
-        self.current_prompt_points = []  # 当前图像的prompt点临时存储
+        self.current_prompt_points = []  # 当前图像的参考点临时存储
+        self.ignition_point = None  # 起爆点坐标 (x, y) 或 None
         
         # 初始化火球计算器和序列管理器
         self.fireball_calculator = FireballCalculator()
         self.sequence_manager = SequenceManager()
         
-        self.init_ui()
+        # 初始化UI构建器并创建界面
+        self.ui_builder = ExtractTabUI()
+        self.ui_builder.create_main_layout(self)
+        self.ui_components = self.ui_builder.get_ui_components()
+        
+        # 获取UI组件引用（为了向后兼容）
+        self._setup_ui_component_references()
+        
         self.setup_connections()
         self.init_charts()
+    
+    def _setup_ui_component_references(self):
+        """设置UI组件引用（向后兼容）"""
+        # 主要控件引用
+        self.extract_preview = self.ui_components['extract_preview']
+        self.extract_slider = self.ui_components['extract_slider']
+        self.extract_time_label = self.ui_components['extract_time_label']
+        self.extract_status = self.ui_components['extract_status']
+        self.progress_label = self.ui_components['progress_label']
         
-    def init_ui(self):
-        layout = QHBoxLayout()
+        # 图表控件引用
+        self.temp_chart = self.ui_components['temp_chart']
+        self.diam_chart = self.ui_components['diam_chart']
         
-        # 左侧图像预览
-        left_widget = QWidget()
-        left_layout = QVBoxLayout()
-        left_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
+        # 按钮控件引用
+        self.sequence_btn = self.ui_components['sequence_btn']
+        self.prompt_btn = self.ui_components['prompt_btn']
+        self.extract_btn = self.ui_components['extract_btn']
+        self.cancel_extract_btn = self.ui_components['cancel_extract_btn']
+        self.save_button = self.ui_components['save_button']
         
-        toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("提取结果预览与质量检查"))
-        toolbar.addStretch()
-        self.progress_label = QLabel("0%")
-        self.progress_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        toolbar.addWidget(self.progress_label)
-        left_layout.addLayout(toolbar)
+        # 单选按钮和组引用
+        self.point_type_group = self.ui_components['point_type_group']
+        self.positive_radio = self.ui_components['positive_radio']
+        self.negative_radio = self.ui_components['negative_radio']
+        self.ignition_radio = self.ui_components['ignition_radio']
         
-        # 图像预览和时间轴组合
-        preview_group = QGroupBox("火球爆炸序列预览")
-        preview_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 1px solid #1f2937;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 10px;
-                background-color: #111827;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-                color: #38bdf8;
-            }
-        """)
-        preview_group_layout = QVBoxLayout()
-        preview_group_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
-        preview_group_layout.setSpacing(8)
-        
-        self.extract_preview = create_interactive_image_widget()
-        # 创建水平布局来居中图像预览
-        image_layout = QHBoxLayout()
-        image_layout.addStretch()
-        image_layout.addWidget(self.extract_preview)
-        image_layout.addStretch()
-        preview_group_layout.addLayout(image_layout)
-        
-        # 连接交互式图像控件的信号
-        self.extract_preview.point_clicked.connect(self.on_image_point_clicked)
-        
-        # 添加图片导航控件
-        self.add_image_navigation_controls(preview_group_layout)
-        
-        # 时间轴
-        timeline_layout = QHBoxLayout()
-        timeline_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
-        self.extract_slider = QSlider(Qt.Horizontal)
-        self.extract_slider.setRange(0, 100)
-        self.extract_time_label = QLabel("t = 0 ms")
-        self.extract_time_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        timeline_layout.addWidget(self.extract_slider)
-        timeline_layout.addWidget(self.extract_time_label)
-        preview_group_layout.addLayout(timeline_layout)
-        
-        preview_group.setLayout(preview_group_layout)
-        left_layout.addWidget(preview_group)
-        
-        # 添加弹性空间，将状态标签推到最下面
-        left_layout.addStretch()
-        
-        # 状态标签
-        self.extract_status = QLabel("待开始")
-        self.extract_status.setStyleSheet("color: #9ca3af; font-size: 12px; padding: 10px; text-align: center;")
-        self.extract_status.setAlignment(Qt.AlignCenter)
-        left_layout.addWidget(self.extract_status)
-        
-        left_widget.setLayout(left_layout)
-        
-        # 右侧图表区域
-        right_widget = QWidget()
-        right_layout = QVBoxLayout()
-        right_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
-        right_layout.setSpacing(10)
-        
-        # 温度图表
-        temp_group = QGroupBox("火球温度随时间变化")
-        temp_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 1px solid #1f2937;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 10px;
-                background-color: #111827;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-                color: #38bdf8;
-            }
-        """)
-        temp_layout = QVBoxLayout()
-        temp_layout.setAlignment(Qt.AlignTop)
-        
-        self.temp_chart = MatplotlibWidget(width=4, height=2.5)
-        temp_layout.addWidget(self.temp_chart)
-        temp_group.setLayout(temp_layout)
-        right_layout.addWidget(temp_group)
-        
-        # 直径图表
-        diam_group = QGroupBox("火球直径随时间变化")
-        diam_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 1px solid #1f2937;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 10px;
-                background-color: #111827;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-                color: #38bdf8;
-            }
-        """)
-        diam_layout = QVBoxLayout()
-        diam_layout.setAlignment(Qt.AlignTop)
-        
-        self.diam_chart = MatplotlibWidget(width=4, height=2.5)
-        diam_layout.addWidget(self.diam_chart)
-        diam_group.setLayout(diam_layout)
-        right_layout.addWidget(diam_group)
-        
-        # 控制按钮
-        button_layout = QHBoxLayout()
-        button_layout.setAlignment(Qt.AlignTop)
-        self.save_button = QPushButton("保存提取序列")
-        self.save_button.setEnabled(False)
-        button_layout.addWidget(self.save_button)
-        button_layout.addStretch()
-        button_layout.addWidget(QLabel("有prompt点后可保存"))
-        right_layout.addLayout(button_layout)
-        
-        right_widget.setLayout(right_layout)
-        
-        # 添加到主布局
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(left_widget)
-        splitter.addWidget(right_widget)
-        splitter.setSizes([600, 300])
-        
-        layout.addWidget(splitter)
-        self.setLayout(layout)
+        # 信息显示控件引用
+        self.prompt_info_text = self.ui_components['prompt_info_text']
+        self.image_index_label = self.ui_components['image_index_label']
+        self.jump_input = self.ui_components['jump_input']
+        self.jump_btn = self.ui_components['jump_btn']
     
     def setup_connections(self):
         """设置信号连接"""
+        # 时间轴和图像控件
         self.extract_slider.valueChanged.connect(self.on_time_changed)
+        self.extract_preview.point_clicked.connect(self.on_image_point_clicked)
         
-        # 连接保存按钮
+        # 侧边栏按钮
+        self.sequence_btn.clicked.connect(self.select_sequence_folder)
+        self.prompt_btn.clicked.connect(self.toggle_prompt_selection)
+        self.extract_btn.clicked.connect(self.start_feature_extraction)
+        self.cancel_extract_btn.clicked.connect(self.cancel_current_image_points)
+        
+        # 单选按钮状态变化
+        self.positive_radio.toggled.connect(self.on_radio_button_changed)
+        self.negative_radio.toggled.connect(self.on_radio_button_changed)
+        self.ignition_radio.toggled.connect(self.on_radio_button_changed)
+        
+        # 图像导航
+        self.jump_btn.clicked.connect(self.jump_to_image)
+        self.jump_input.returnPressed.connect(self.jump_to_image)
+        
+        # 保存按钮
         self.save_button.clicked.connect(self.save_extraction_sequence)
     
     def get_sidebar_widget(self):
         """获取特征提取模块的侧边栏组件"""
         if not hasattr(self, '_sidebar_widget'):
-            from PySide6.QtWidgets import QGroupBox, QComboBox, QLineEdit
-            
-            self._sidebar_widget = QGroupBox("特征提取")
-            layout = QVBoxLayout()
-            layout.setAlignment(Qt.AlignTop)  # 只向上对齐
-            layout.setSpacing(8)  # 设置控件间距为8像素
-            
-            layout.addWidget(QLabel("火球爆炸序列文件（JSON格式）"))
-            self.sequence_btn = QPushButton("选择火球爆炸序列文件")
-            layout.addWidget(self.sequence_btn)
-            
-            # Prompt点选择组
-            prompt_group = QGroupBox("Prompt点选择")
-            prompt_group.setStyleSheet("""
-                QGroupBox {
-                    font-weight: bold;
-                    border: 1px solid #374151;
-                    border-radius: 8px;
-                    margin-top: 10px;
-                    padding-top: 10px;
-                    background-color: #1f2937;
-                }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    left: 10px;
-                    padding: 0 5px 0 5px;
-                    color: #60a5fa;
-                }
-            """)
-            prompt_layout = QVBoxLayout()
-            prompt_layout.setAlignment(Qt.AlignTop)
-            prompt_layout.setSpacing(8)
-            
-            # 开始选择prompt点按钮
-            self.prompt_btn = QPushButton("开始选择prompt点")
-            prompt_layout.addWidget(self.prompt_btn)
-            
-            # 正负点选择单选按钮组
-            point_type_layout = QHBoxLayout()
-            point_type_layout.setAlignment(Qt.AlignTop)
-            self.point_type_group = QButtonGroup()
-            self.positive_radio = QRadioButton("选择正点")
-            self.negative_radio = QRadioButton("选择负点")
-            self.positive_radio.setChecked(True)  # 默认选择正点
-            
-            self.point_type_group.addButton(self.positive_radio)
-            self.point_type_group.addButton(self.negative_radio)
-            
-            point_type_layout.addWidget(self.positive_radio)
-            point_type_layout.addWidget(self.negative_radio)
-            prompt_layout.addLayout(point_type_layout)
-            
-            # 清除按钮
-            self.cancel_extract_btn = QPushButton("清除当前图片上prompt点")
-            prompt_layout.addWidget(self.cancel_extract_btn)
-            
-            # 添加prompt点信息显示区域
-            prompt_layout.addWidget(QLabel("已选择的Prompt点信息"))
-            self.prompt_info_text = QTextEdit()
-            self.prompt_info_text.setReadOnly(True)
-            self.prompt_info_text.setMaximumHeight(200)
-            self.prompt_info_text.setStyleSheet("""
-                QTextEdit {
-                    background-color: #111827;
-                    border: 1px solid #374151;
-                    border-radius: 5px;
-                    color: #e5e7eb;
-                    font-family: 'Courier New', monospace;
-                    font-size: 11px;
-                    padding: 8px;
-                }
-            """)
-            self.prompt_info_text.setPlaceholderText("选择prompt点后，信息将在此显示...")
-            prompt_layout.addWidget(self.prompt_info_text)
-            
-            prompt_group.setLayout(prompt_layout)
-            layout.addWidget(prompt_group)
-            
-            # 特征提取按钮
-            extract_layout = QVBoxLayout()
-            extract_layout.setAlignment(Qt.AlignTop)
-            self.extract_btn = QPushButton("开始特征提取")
-            self.extract_btn.setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
-            extract_layout.addWidget(self.extract_btn)
-            layout.addLayout(extract_layout)
-            
-            # 添加弹性空间，确保所有控件向上紧凑排列
-            layout.addStretch()
-            
-            self._sidebar_widget.setLayout(layout)
-            
-            # 设置信号连接
-            self.sequence_btn.clicked.connect(self.select_sequence_folder)
-            self.prompt_btn.clicked.connect(self.toggle_prompt_selection)
-            self.extract_btn.clicked.connect(self.start_feature_extraction)
-            self.cancel_extract_btn.clicked.connect(self.cancel_current_image_points)
-            
-            # 连接单选按钮状态变化
-            self.positive_radio.toggled.connect(self.on_radio_button_changed)
-            self.negative_radio.toggled.connect(self.on_radio_button_changed)
+            # 使用UI构建器创建侧边栏
+            self._sidebar_widget = self.ui_builder.create_sidebar_widget()
         
         return self._sidebar_widget
     
@@ -409,10 +212,19 @@ class ExtractTab(QWidget):
                 prompt_data = self.sequence_manager.get_prompt_data_from_sequence(sequence_data)
                 if prompt_data:
                     self.prompt_data = prompt_data
-                    self.update_prompt_info_display()
-                    # 如果当前显示的图像有prompt点，加载它们
-                    self.load_points_for_current_image()
                     print(f"加载prompt数据: {len(prompt_data)} 张图像的prompt点")
+                
+                # 加载起爆点
+                ignition_point = self.sequence_manager.get_ignition_point_from_sequence(sequence_data)
+                if ignition_point:
+                    self.ignition_point = ignition_point
+                    print(f"加载起爆点: {ignition_point}")
+                
+                # 更新信息面板显示（包含prompt数据和起爆点）
+                self.update_prompt_info_display()
+                
+                # 如果当前显示的图像有prompt点或起爆点，加载它们
+                self.load_points_for_current_image()
                 
                 # 获取摘要信息
                 summary = self.sequence_manager.get_sequence_summary(sequence_data)
@@ -422,7 +234,9 @@ class ExtractTab(QWidget):
                 if summary['has_temperature_data']:
                     status_msg += f"，温度数据: {summary['temperature_points']} 点"
                 if summary['has_prompt_data']:
-                    status_msg += f"，prompt数据: {summary['total_prompt_points']} 点"
+                    status_msg += f"，参考点数据: {summary['total_prompt_points']} 点"
+                if summary['has_ignition_point']:
+                    status_msg += f"，起爆点: {summary['ignition_point']}"
                 
                 self.extract_status.setText(status_msg)
                 print(f"成功加载火球序列: {summary}")
@@ -434,101 +248,9 @@ class ExtractTab(QWidget):
     
     def init_charts(self):
         """初始化图表"""
-        # 初始化温度图表
-        self.init_temperature_chart()
-        
-        # 初始化直径图表
-        self.init_diameter_chart()
-    
-    def init_temperature_chart(self):
-        """初始化温度图表"""
-        try:
-            # 清除图表并设置基本样式
-            self.temp_chart.clear()
-            
-            # 添加子图
-            ax = self.temp_chart.figure.add_subplot(111)
-            
-            # 设置图表样式
-            self.temp_chart.figure.patch.set_facecolor('#111827')
-            ax.set_facecolor('#111827')
-            
-            # 设置坐标轴颜色
-            ax.tick_params(colors='#9ca3af', labelsize=9)
-            ax.spines['bottom'].set_color('#374151')
-            ax.spines['top'].set_color('#374151')
-            ax.spines['left'].set_color('#374151')
-            ax.spines['right'].set_color('#374151')
-            
-            # 设置标签颜色
-            ax.set_xlabel("时间 (ms)", color='#e5e7eb', fontsize=10)
-            ax.set_ylabel("温度 (K)", color='#e5e7eb', fontsize=10)
-            ax.set_title("火球温度随时间变化", color='#38bdf8', fontsize=11, fontweight='bold')
-            
-            # 设置坐标轴范围
-            ax.set_xlim(0, 140)
-            ax.set_ylim(1000, 1600)
-            
-            # 显示网格
-            ax.grid(True, alpha=0.3, color='#374151')
-            
-            # 显示提示文本
-            ax.text(70, 1300, "请加载序列文件", 
-                   ha='center', va='center', 
-                   color='#9ca3af', fontsize=10,
-                   bbox=dict(boxstyle="round,pad=0.3", facecolor='#1f2937', alpha=0.8))
-            
-            # 调整布局
-            self.temp_chart.figure.tight_layout(pad=1.0)
-            self.temp_chart.canvas.draw()
-            
-        except Exception as e:
-            print(f"初始化温度图表失败: {e}")
-    
-    def init_diameter_chart(self):
-        """初始化直径图表"""
-        try:
-            # 清除图表并设置基本样式
-            self.diam_chart.clear()
-            
-            # 添加子图
-            ax = self.diam_chart.figure.add_subplot(111)
-            
-            # 设置图表样式
-            self.diam_chart.figure.patch.set_facecolor('#111827')
-            ax.set_facecolor('#111827')
-            
-            # 设置坐标轴颜色
-            ax.tick_params(colors='#9ca3af', labelsize=9)
-            ax.spines['bottom'].set_color('#374151')
-            ax.spines['top'].set_color('#374151')
-            ax.spines['left'].set_color('#374151')
-            ax.spines['right'].set_color('#374151')
-            
-            # 设置标签颜色
-            ax.set_xlabel("时间 (ms)", color='#e5e7eb', fontsize=10)
-            ax.set_ylabel("直径 (m)", color='#e5e7eb', fontsize=10)
-            ax.set_title("火球直径随时间变化", color='#38bdf8', fontsize=11, fontweight='bold')
-            
-            # 设置坐标轴范围
-            ax.set_xlim(0, 140)
-            ax.set_ylim(0, 2)
-            
-            # 显示网格
-            ax.grid(True, alpha=0.3, color='#374151')
-            
-            # 显示提示文本
-            ax.text(70, 1, "提取完成后显示", 
-                   ha='center', va='center', 
-                   color='#9ca3af', fontsize=10,
-                   bbox=dict(boxstyle="round,pad=0.3", facecolor='#1f2937', alpha=0.8))
-            
-            # 调整布局
-            self.diam_chart.figure.tight_layout(pad=1.0)
-            self.diam_chart.canvas.draw()
-            
-        except Exception as e:
-            print(f"初始化直径图表失败: {e}")
+        # 使用UI构建器初始化图表
+        self.ui_builder.init_temperature_chart()
+        self.ui_builder.init_diameter_chart()
     
     def update_temperature_chart(self, time_data, temp_data):
         """更新温度图表"""
@@ -664,44 +386,45 @@ class ExtractTab(QWidget):
             if not self.is_prompt_selection_mode:
                 # 开始选择prompt点
                 self.is_prompt_selection_mode = True
-                self.prompt_btn.setText("选择prompt点完成")
-                self.extract_status.setText("正在选择prompt点...")
+                self.prompt_btn.setText("选择参考点完成")
+                self.extract_status.setText("正在选择参考点...")
                 
                 # 根据当前单选按钮状态设置交互模式
                 current_type = self.get_current_point_type()
                 self.extract_preview.set_interaction_mode(current_type)
                 self.extract_preview.set_interactive_enabled(True)
                 
-                print(f"🎯 开始prompt点选择模式: {current_type}")
+                print(f"🎯 开始参考点选择模式: {current_type}")
             else:
-                # 完成选择prompt点
+                # 完成选择参考点
                 self.is_prompt_selection_mode = False
-                self.prompt_btn.setText("开始选择prompt点")
-                self.extract_status.setText("prompt点选择完成")
+                self.prompt_btn.setText("开始选择参考点")
+                self.extract_status.setText("参考点选择完成")
                 
                 # 禁用交互
                 self.extract_preview.set_interaction_mode('none')
                 self.extract_preview.set_interactive_enabled(False)
                 
-                # 自动保存prompt数据到序列文件
+                # 自动保存prompt数据和起爆点到序列文件
                 self._auto_save_prompt_data()
                 
-                print("✅ prompt点选择完成")
+                print("✅ 参考点选择完成")
                 
         except Exception as e:
-            print(f"❌ 切换prompt选择模式失败: {e}")
-            QMessageBox.critical(self, "错误", f"切换prompt选择模式失败:\n{str(e)}")
+            print(f"❌ 切换参考点选择模式失败: {e}")
+            QMessageBox.critical(self, "错误", f"切换参考点选择模式失败:\n{str(e)}")
     
     def _auto_save_prompt_data(self):
-        """自动保存prompt数据到当前序列文件"""
+        """自动保存prompt数据和起爆点到当前序列文件"""
         try:
-            # 检查是否有序列数据和prompt数据
+            # 检查是否有序列数据
             if not self.sequence_data:
                 print("没有序列数据，无法自动保存prompt数据")
                 return
             
-            if not self.prompt_data:
-                print("没有prompt数据，无需保存")
+            # 检查是否有数据需要保存
+            if not self.prompt_data and not self.ignition_point:
+                print("没有prompt数据或起爆点，无需保存")
                 return
             
             # 检查是否有原始文件路径（从序列加载时保存）
@@ -709,20 +432,20 @@ class ExtractTab(QWidget):
                 print("没有当前序列文件路径，无法自动保存")
                 return
             
-            # 使用序列管理器保存prompt数据
-            success, message = self.sequence_manager.save_prompt_data_to_sequence(
-                self._current_sequence_file_path, self.prompt_data
+            # 使用序列管理器保存prompt数据和起爆点
+            success, message = self.sequence_manager.save_prompt_and_ignition_data_to_sequence(
+                self._current_sequence_file_path, self.prompt_data, self.ignition_point
             )
             
             if success:
-                print(f"✅ 自动保存prompt数据成功: {message}")
-                self.extract_status.setText("prompt数据已自动保存")
+                print(f"✅ 自动保存prompt数据和起爆点成功: {message}")
+                self.extract_status.setText("参考点数据已自动保存")
             else:
-                print(f"❌ 自动保存prompt数据失败: {message}")
-                self.extract_status.setText("prompt数据保存失败")
+                print(f"❌ 自动保存参考点数据失败: {message}")
+                self.extract_status.setText("参考点数据保存失败")
                 
         except Exception as e:
-            print(f"❌ 自动保存prompt数据异常: {e}")
+            print(f"❌ 自动保存参考点数据异常: {e}")
     
     def get_current_point_type(self):
         """获取当前选择的点类型"""
@@ -730,6 +453,8 @@ class ExtractTab(QWidget):
             return 'positive'
         elif hasattr(self, 'negative_radio') and self.negative_radio.isChecked():
             return 'negative'
+        elif hasattr(self, 'ignition_radio') and self.ignition_radio.isChecked():
+            return 'ignition'
         else:
             return 'positive'  # 默认返回正点
     
@@ -754,100 +479,88 @@ class ExtractTab(QWidget):
             self.prompt_data[image_index]["points"].append([x, y])
             self.prompt_data[image_index]["labels"].append(1 if is_positive else 0)
             
-            print(f"添加prompt点: 图像{image_index}, 坐标({x}, {y}), 类型: {'正点' if is_positive else '负点'}")
+            print(f"添加参考点: 图像{image_index}, 坐标({x}, {y}), 类型: {'正点' if is_positive else '负点'}")
             
             # 更新显示
             self.update_prompt_info_display()
             
         except Exception as e:
-            print(f"❌ 添加prompt点失败: {e}")
-    
-    def remove_last_prompt_point(self, image_index: int):
-        """
-        移除指定图像的最后一个prompt点
-        
-        Args:
-            image_index: 图像索引
-        """
-        try:
-            if image_index in self.prompt_data:
-                if self.prompt_data[image_index]["points"]:
-                    removed_point = self.prompt_data[image_index]["points"].pop()
-                    self.prompt_data[image_index]["labels"].pop()
-                    print(f"移除prompt点: 图像{image_index}, 坐标{removed_point}")
-                    
-                    # 如果没有点了，删除整个条目
-                    if not self.prompt_data[image_index]["points"]:
-                        del self.prompt_data[image_index]
-                    
-                    # 更新显示
-                    self.update_prompt_info_display()
-                    
-        except Exception as e:
-            print(f"❌ 移除prompt点失败: {e}")
+            print(f"❌ 添加参考点失败: {e}")
     
     def clear_prompt_data(self):
         """清空所有prompt数据"""
         self.prompt_data = {}
+        self.ignition_point = None
         self.update_prompt_info_display()
-        print("🗑️ 已清空所有prompt数据")
+        print("🗑️ 已清空所有参考点数据")
     
     def update_prompt_info_display(self):
-        """更新prompt点信息显示"""
+        """更新参考点信息显示"""
         try:
-            if not self.prompt_data:
-                self.prompt_info_text.setPlainText("暂无选择的prompt点\n\n提示：\n1. 先加载图像序列\n2. 点击'开始选择prompt点'\n3. 在图像上点击选择正负点")
+            if not self.prompt_data and not self.ignition_point:
+                self.prompt_info_text.setPlainText("暂无选择的参考点\n\n提示：\n1. 先加载图像序列\n2. 点击'开始选择参考点'\n3. 在图像上点击选择正负点")
                 return
             
             # 生成用户可读的信息
             info_lines = []
             
-            for image_idx in sorted(self.prompt_data.keys()):
-                points = self.prompt_data[image_idx]["points"]
-                labels = self.prompt_data[image_idx]["labels"]
-                
-                # 分离正点和负点
-                positive_points = []
-                negative_points = []
-                
-                for point, label in zip(points, labels):
-                    if label == 1:
-                        positive_points.append(f"({point[0]}, {point[1]})")
-                    else:
-                        negative_points.append(f"({point[0]}, {point[1]})")
-                
-                # 格式化显示
-                info_lines.append(f"第 {image_idx + 1} 张图片特征点：")
-                
-                if positive_points:
-                    info_lines.append(f"  - 正点坐标：{', '.join(positive_points)}")
-                
-                if negative_points:
-                    info_lines.append(f"  - 负点坐标：{', '.join(negative_points)}")
-                
+            # 显示起爆点信息（如果存在）
+            if self.ignition_point:
+                info_lines.append("🎯 起爆点信息：")
+                info_lines.append(f"  - 坐标：({self.ignition_point[0]}, {self.ignition_point[1]})")
                 info_lines.append("")  # 空行分隔
             
+            # 显示各图像的参考点信息
+            if self.prompt_data:
+                for image_idx in sorted(self.prompt_data.keys()):
+                    points = self.prompt_data[image_idx]["points"]
+                    labels = self.prompt_data[image_idx]["labels"]
+                
+                    # 分离正点和负点
+                    positive_points = []
+                    negative_points = []
+                    
+                    for point, label in zip(points, labels):
+                        if label == 1:
+                            positive_points.append(f"({point[0]}, {point[1]})")
+                        else:
+                            negative_points.append(f"({point[0]}, {point[1]})")
+                    
+                    # 格式化显示
+                    info_lines.append(f"第 {image_idx + 1} 张图片参考点：")
+                    
+                    if positive_points:
+                        info_lines.append(f"  - 正点坐标：{', '.join(positive_points)}")
+                    
+                    if negative_points:
+                        info_lines.append(f"  - 负点坐标：{', '.join(negative_points)}")
+                    
+                    info_lines.append("")  # 空行分隔
+            
             # 添加统计信息
-            total_images_with_prompts = len(self.prompt_data)
-            total_points = sum(len(data["points"]) for data in self.prompt_data.values())
-            total_positive = sum(sum(1 for label in data["labels"] if label == 1) for data in self.prompt_data.values())
+            total_images_with_prompts = len(self.prompt_data) if self.prompt_data else 0
+            total_points = sum(len(data["points"]) for data in self.prompt_data.values()) if self.prompt_data else 0
+            total_positive = sum(sum(1 for label in data["labels"] if label == 1) for data in self.prompt_data.values()) if self.prompt_data else 0
             total_negative = total_points - total_positive
             
             info_lines.append("=" * 30)
             info_lines.append("统计信息：")
-            info_lines.append(f"  - 有prompt点的图像：{total_images_with_prompts} 张")
-            info_lines.append(f"  - 总点数：{total_points} 个")
-            info_lines.append(f"  - 正点：{total_positive} 个")
-            info_lines.append(f"  - 负点：{total_negative} 个")
+            if total_images_with_prompts > 0:
+                info_lines.append(f"  - 有参考点的图像：{total_images_with_prompts} 张")
+                info_lines.append(f"  - 总点数：{total_points} 个")
+                info_lines.append(f"  - 正点：{total_positive} 个")
+                info_lines.append(f"  - 负点：{total_negative} 个")
+            if self.ignition_point:
+                info_lines.append(f"  - 起爆点：1 个")
             
             # 更新文本显示
             self.prompt_info_text.setPlainText("\n".join(info_lines))
             
-            # 更新保存按钮状态
-            self.save_button.setEnabled(len(self.prompt_data) > 0)
+            # 更新保存按钮状态（有参考点或起爆点时可保存）
+            self.save_button.setEnabled(len(self.prompt_data) > 0 or self.ignition_point is not None)
             
         except Exception as e:
-            print(f"❌ 更新prompt信息显示失败: {e}")
+            print(f"❌ 更新参考点信息显示失败: {e}")
             self.prompt_info_text.setPlainText(f"显示错误: {str(e)}")
     
     def export_prompt_data_to_json(self, file_path: str):
@@ -866,30 +579,12 @@ class ExtractTab(QWidget):
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(export_data, f, indent=4, ensure_ascii=False)
             
-            print(f"✅ prompt数据已导出到: {file_path}")
+            print(f"✅ 参考点数据已导出到: {file_path}")
             return True
             
         except Exception as e:
-            print(f"❌ 导出prompt数据失败: {e}")
+            print(f"❌ 导出参考点数据失败: {e}")
             return False
-    
-    def test_prompt_data_functionality(self):
-        """测试prompt数据功能"""
-        try:
-            print("🧪 测试prompt数据功能...")
-            
-            # 模拟添加一些prompt点
-            self.add_prompt_point(0, 100, 100, True)   # 第1张图片，正点
-            self.add_prompt_point(0, 90, 100, True)    # 第1张图片，正点
-            self.add_prompt_point(0, 50, 50, False)    # 第1张图片，负点
-            
-            self.add_prompt_point(2, 120, 100, True)   # 第3张图片，正点
-            self.add_prompt_point(2, 60, 100, False)   # 第3张图片，负点
-            
-            print("✅ prompt数据功能测试完成")
-            
-        except Exception as e:
-            print(f"❌ prompt数据功能测试失败: {e}")
     
     def on_image_point_clicked(self, x: int, y: int, point_type: str):
         """
@@ -897,20 +592,38 @@ class ExtractTab(QWidget):
         
         Args:
             x, y: 点击的图像坐标
-            point_type: 点类型 ('positive' 或 'negative')
+            point_type: 点类型 ('positive', 'negative', 'ignition')
         """
         try:
             if not self.is_prompt_selection_mode:
                 return
             
-            # 添加点到数据结构
-            is_positive = (point_type == 'positive')
-            self.add_prompt_point(self.current_image_index, x, y, is_positive)
+            if point_type == 'ignition':
+                # 设置起爆点（全局唯一）
+                self.ignition_point = (x, y)
+                print(f"设置起爆点: 坐标({x}, {y})")
+                # 更新所有图像的起爆点显示
+                self.update_ignition_point_display()
+                # 更新信息面板显示
+                self.update_prompt_info_display()
+            else:
+                # 添加正负点到数据结构
+                is_positive = (point_type == 'positive')
+                self.add_prompt_point(self.current_image_index, x, y, is_positive)
             
             print(f"图像点击: 索引{self.current_image_index}, 坐标({x}, {y}), 类型: {point_type}")
             
         except Exception as e:
             print(f"❌ 处理图像点击失败: {e}")
+    
+    def update_ignition_point_display(self):
+        """更新起爆点显示"""
+        try:
+            # 更新当前图像的起爆点显示
+            self.load_points_for_current_image()
+            
+        except Exception as e:
+            print(f"❌ 更新起爆点显示失败: {e}")
     
     def on_radio_button_changed(self):
         """处理单选按钮状态变化"""
@@ -937,8 +650,8 @@ class ExtractTab(QWidget):
                 # 更新信息显示
                 self.update_prompt_info_display()
                 
-                print(f"🗑️ 已取消图像{self.current_image_index}上的所有点")
-                self.extract_status.setText("已取消当前图像的点选择")
+                print(f"🗑️ 已取消图像{self.current_image_index}上的所有参考点")
+                self.extract_status.setText("已取消当前图像的参考点选择")
                 
         except Exception as e:
             print(f"❌ 取消当前图像点失败: {e}")
@@ -946,27 +659,24 @@ class ExtractTab(QWidget):
     def load_points_for_current_image(self):
         """为当前图像加载已有的点标记"""
         try:
+            positive_points = []
+            negative_points = []
+            
             if self.current_image_index in self.prompt_data:
                 points = self.prompt_data[self.current_image_index]["points"]
                 labels = self.prompt_data[self.current_image_index]["labels"]
                 
                 # 分离正负点
-                positive_points = []
-                negative_points = []
-                
                 for point, label in zip(points, labels):
                     if label == 1:
                         positive_points.append(tuple(point))
                     else:
                         negative_points.append(tuple(point))
-                
-                # 设置到图像控件
-                self.extract_preview.set_points(positive_points, negative_points)
-                
-                print(f"为图像{self.current_image_index}加载了{len(positive_points)}个正点, {len(negative_points)}个负点")
-            else:
-                # 清空显示
-                self.extract_preview.clear_points()
+            
+            # 设置到图像控件（包括起爆点）
+            self.extract_preview.set_points(positive_points, negative_points, self.ignition_point)
+            
+            print(f"为图像{self.current_image_index}加载了{len(positive_points)}个正点, {len(negative_points)}个负点, 起爆点: {self.ignition_point}")
                 
         except Exception as e:
             print(f"❌ 加载当前图像点失败: {e}")
@@ -975,7 +685,7 @@ class ExtractTab(QWidget):
         """保存提取序列（按照example_data.json格式）"""
         try:
             if not self.prompt_data:
-                QMessageBox.warning(self, "警告", "没有选择任何prompt点，无法保存！")
+                QMessageBox.warning(self, "警告", "没有选择任何参考点，无法保存！")
                 return
             
             if not self.image_paths:
@@ -996,7 +706,7 @@ class ExtractTab(QWidget):
                 if success:
                     QMessageBox.information(self, "成功", 
                                           f"提取序列已保存到:\n{file_path}\n\n"
-                                          f"包含 {len(self.prompt_data)} 张图像的prompt点数据")
+                                          f"包含 {len(self.prompt_data)} 张图像的参考点数据")
                     self.extract_status.setText("序列保存成功")
                 else:
                     QMessageBox.critical(self, "错误", "保存失败，请检查文件路径和权限！")
@@ -1006,80 +716,6 @@ class ExtractTab(QWidget):
             print(f"❌ 保存提取序列失败: {e}")
             QMessageBox.critical(self, "错误", f"保存提取序列失败:\n{str(e)}")
             self.extract_status.setText("保存失败")
-    
-    def add_image_navigation_controls(self, parent_layout):
-        """
-        添加图片导航控件
-        
-        Args:
-            parent_layout: 父布局
-        """
-        try:
-            # 图片索引信息标签
-            self.image_index_label = QLabel("0/0")
-            self.image_index_label.setAlignment(Qt.AlignCenter)
-            self.image_index_label.setStyleSheet("""
-                QLabel {
-                    color: #9ca3af;
-                    font-size: 14px;
-                    font-weight: bold;
-                    padding: 5px;
-                    background-color: #1f2937;
-                    border: 1px solid #374151;
-                    border-radius: 5px;
-                }
-            """)
-            parent_layout.addWidget(self.image_index_label)
-            
-            # 图片跳转控件
-            jump_layout = QHBoxLayout()
-            jump_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
-            
-            jump_layout.addWidget(QLabel("跳转到图片:"))
-            
-            self.jump_input = QLineEdit()
-            self.jump_input.setPlaceholderText("输入图片编号")
-            self.jump_input.setMaximumWidth(100)
-            self.jump_input.setStyleSheet("""
-                QLineEdit {
-                    background-color: #1f2937;
-                    border: 1px solid #374151;
-                    border-radius: 5px;
-                    color: #e5e7eb;
-                    padding: 5px;
-                    font-size: 12px;
-                }
-            """)
-            jump_layout.addWidget(self.jump_input)
-            
-            self.jump_btn = QPushButton("查看")
-            self.jump_btn.setMaximumWidth(60)
-            self.jump_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #374151;
-                    color: #e5e7eb;
-                    border: 1px solid #4b5563;
-                    border-radius: 5px;
-                    padding: 5px 10px;
-                    font-size: 12px;
-                }
-                QPushButton:hover {
-                    background-color: #4b5563;
-                }
-                QPushButton:pressed {
-                    background-color: #6b7280;
-                }
-            """)
-            jump_layout.addWidget(self.jump_btn)
-            
-            parent_layout.addLayout(jump_layout)
-            
-            # 连接信号
-            self.jump_btn.clicked.connect(self.jump_to_image)
-            self.jump_input.returnPressed.connect(self.jump_to_image)  # 回车键也触发跳转
-            
-        except Exception as e:
-            print(f"❌ 添加图片导航控件失败: {e}")
     
     def update_image_index_display(self):
         """更新图片索引显示"""
