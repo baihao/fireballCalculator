@@ -7,7 +7,6 @@
 import numpy as np
 import json
 import os
-import glob
 import sys
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
@@ -15,6 +14,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
 from interactive_image_widget import create_interactive_image_widget
+from sequence_manager import SequenceManager
 
 # 添加路径以导入火球计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -29,7 +29,6 @@ class ExtractTab(QWidget):
         # 初始化图像序列相关属性
         self.image_paths = []  # 图像路径列表（统一使用）
         self.current_image_index = 0  # 当前显示的图像索引
-        self.sequence_folder_path = None  # 序列文件夹路径
         self.sequence_data = None  # 序列数据
         self.explosion_duration = 140  # 爆炸时长（毫秒）
         
@@ -38,8 +37,9 @@ class ExtractTab(QWidget):
         self.prompt_data = {}  # prompt数据：{image_index: {"points": [[x,y], ...], "labels": [1,0,1,...]}}
         self.current_prompt_points = []  # 当前图像的prompt点临时存储
         
-        # 初始化火球计算器
+        # 初始化火球计算器和序列管理器
         self.fireball_calculator = FireballCalculator()
+        self.sequence_manager = SequenceManager()
         
         self.init_ui()
         self.setup_connections()
@@ -110,6 +110,15 @@ class ExtractTab(QWidget):
         
         preview_group.setLayout(preview_group_layout)
         left_layout.addWidget(preview_group)
+        
+        # 添加弹性空间，将状态标签推到最下面
+        left_layout.addStretch()
+        
+        # 状态标签
+        self.extract_status = QLabel("待开始")
+        self.extract_status.setStyleSheet("color: #9ca3af; font-size: 12px; padding: 10px; text-align: center;")
+        self.extract_status.setAlignment(Qt.AlignCenter)
+        left_layout.addWidget(self.extract_status)
         
         left_widget.setLayout(left_layout)
         
@@ -213,14 +222,35 @@ class ExtractTab(QWidget):
             self.sequence_btn = QPushButton("选择火球爆炸序列文件")
             layout.addWidget(self.sequence_btn)
             
-            # Prompt点选择
-            layout.addWidget(QLabel("Prompt点选择"))
+            # Prompt点选择组
+            prompt_group = QGroupBox("Prompt点选择")
+            prompt_group.setStyleSheet("""
+                QGroupBox {
+                    font-weight: bold;
+                    border: 1px solid #374151;
+                    border-radius: 8px;
+                    margin-top: 10px;
+                    padding-top: 10px;
+                    background-color: #1f2937;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px 0 5px;
+                    color: #60a5fa;
+                }
+            """)
+            prompt_layout = QVBoxLayout()
+            prompt_layout.setAlignment(Qt.AlignTop)
+            prompt_layout.setSpacing(8)
+            
+            # 开始选择prompt点按钮
             self.prompt_btn = QPushButton("开始选择prompt点")
-            layout.addWidget(self.prompt_btn)
+            prompt_layout.addWidget(self.prompt_btn)
             
             # 正负点选择单选按钮组
             point_type_layout = QHBoxLayout()
-            point_type_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
+            point_type_layout.setAlignment(Qt.AlignTop)
             self.point_type_group = QButtonGroup()
             self.positive_radio = QRadioButton("选择正点")
             self.negative_radio = QRadioButton("选择负点")
@@ -231,29 +261,20 @@ class ExtractTab(QWidget):
             
             point_type_layout.addWidget(self.positive_radio)
             point_type_layout.addWidget(self.negative_radio)
-            layout.addLayout(point_type_layout)
+            prompt_layout.addLayout(point_type_layout)
             
-            button_layout = QHBoxLayout()
-            button_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
-            self.extract_btn = QPushButton("开始特征提取")
-            self.extract_btn.setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
-            self.cancel_extract_btn = QPushButton("取消")
-            button_layout.addWidget(self.extract_btn)
-            button_layout.addWidget(self.cancel_extract_btn)
-            button_layout.addStretch()
-            self.extract_status = QLabel("待开始")
-            self.extract_status.setStyleSheet("color: #9ca3af; font-size: 12px;")
-            button_layout.addWidget(self.extract_status)
-            layout.addLayout(button_layout)
+            # 清除按钮
+            self.cancel_extract_btn = QPushButton("清除当前图片上prompt点")
+            prompt_layout.addWidget(self.cancel_extract_btn)
             
             # 添加prompt点信息显示区域
-            layout.addWidget(QLabel("已选择的Prompt点信息"))
+            prompt_layout.addWidget(QLabel("已选择的Prompt点信息"))
             self.prompt_info_text = QTextEdit()
             self.prompt_info_text.setReadOnly(True)
             self.prompt_info_text.setMaximumHeight(200)
             self.prompt_info_text.setStyleSheet("""
                 QTextEdit {
-                    background-color: #1f2937;
+                    background-color: #111827;
                     border: 1px solid #374151;
                     border-radius: 5px;
                     color: #e5e7eb;
@@ -263,7 +284,18 @@ class ExtractTab(QWidget):
                 }
             """)
             self.prompt_info_text.setPlaceholderText("选择prompt点后，信息将在此显示...")
-            layout.addWidget(self.prompt_info_text)
+            prompt_layout.addWidget(self.prompt_info_text)
+            
+            prompt_group.setLayout(prompt_layout)
+            layout.addWidget(prompt_group)
+            
+            # 特征提取按钮
+            extract_layout = QVBoxLayout()
+            extract_layout.setAlignment(Qt.AlignTop)
+            self.extract_btn = QPushButton("开始特征提取")
+            self.extract_btn.setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
+            extract_layout.addWidget(self.extract_btn)
+            layout.addLayout(extract_layout)
             
             # 添加弹性空间，确保所有控件向上紧凑排列
             layout.addStretch()
@@ -330,84 +362,75 @@ class ExtractTab(QWidget):
         
         if file_path:
             try:
-                # 读取JSON文件
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    self.sequence_data = json.load(f)
+                # 使用序列管理器加载文件
+                success, sequence_data, message = self.sequence_manager.load_sequence_file(file_path)
                 
-                # 解析图像序列路径
-                image_folder_path = self.sequence_data.get('files', {}).get('image_folder', '')
-                if not image_folder_path or image_folder_path == "未设置":
-                    QMessageBox.warning(self, "警告", "JSON文件中没有有效的图像序列路径！")
-                    self.extract_status.setText("无效的图像序列路径")
+                if not success:
+                    QMessageBox.critical(self, "错误", f"加载序列文件失败:\n{message}")
+                    self.extract_status.setText("文件加载失败")
                     return
                 
-                # 获取爆炸时长
-                self.explosion_duration = int(self.sequence_data.get('parameters', {}).get('explosion_duration', 140))
+                # 保存序列数据和文件路径
+                self.sequence_data = sequence_data
+                self._current_sequence_file_path = file_path
                 
-                # 加载图像序列
-                success = self.load_image_sequence(image_folder_path)
+                # 提取图像路径
+                image_paths = self.sequence_manager.get_image_paths_from_sequence(sequence_data)
+                if not image_paths:
+                    QMessageBox.warning(self, "警告", "序列文件中没有图像路径！")
+                    self.extract_status.setText("无图像数据")
+                    return
                 
-                if success:
-                    # 加载温度数据
-                    temp_success = self.load_temperature_data()
-                    
-                    self.extract_status.setText(f"已加载序列: {len(self.image_paths)} 个文件，时长: {self.explosion_duration}ms")
-                    print(f"成功加载火球序列: {len(self.image_paths)} 个文件")
-                    if temp_success:
-                        print("温度数据加载成功")
-                    else:
-                        print("温度数据加载失败")
-                else:
-                    self.extract_status.setText("加载图像序列失败")
-                    
-            except Exception as e:
-                QMessageBox.critical(self, "错误", f"读取序列文件失败:\n{str(e)}")
-                self.extract_status.setText("读取文件失败")
-                print(f"读取序列文件失败: {e}")
-    
-    def load_image_sequence(self, folder_path):
-        """加载图像序列"""
-        try:
-            if not os.path.exists(folder_path):
-                QMessageBox.warning(self, "警告", f"图像序列文件夹不存在: {folder_path}")
-                return False
-            
-            # 检查文件夹中的图像文件
-            image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.tiff']
-            image_files = []
-            
-            for ext in image_extensions:
-                pattern = os.path.join(folder_path, ext)
-                image_files.extend(glob.glob(pattern))
-                pattern = os.path.join(folder_path, ext.upper())
-                image_files.extend(glob.glob(pattern))
-            
-            if image_files:
-                # 按文件名排序
-                image_files.sort()
-                self.image_paths = image_files  # 统一使用image_paths
-                self.sequence_folder_path = folder_path
+                # 提取参数
+                parameters = self.sequence_manager.get_parameters_from_sequence(sequence_data)
+                self.explosion_duration = int(parameters.get('explosion_duration', 140))
+                
+                # 设置图像路径和索引
+                self.image_paths = image_paths
                 self.current_image_index = 0
                 
                 # 设置时间轴范围
                 self.extract_slider.setRange(0, len(self.image_paths) - 1)
                 self.extract_slider.setValue(0)
                 
+                # 设置图像控件为最大尺寸
+                self.extract_preview.resize(self.extract_preview.maximumSize())
+                
                 # 显示第一张图像
                 self.display_image_at_index(0)
                 
-                # 初始化图片索引显示
-                self.update_image_index_display()
+                # 加载温度数据
+                time_data, temp_data = self.sequence_manager.get_temperature_data_from_sequence(sequence_data)
+                if time_data and temp_data:
+                    self.update_temperature_chart(time_data, temp_data)
+                    print(f"加载温度数据: {len(temp_data)} 个数据点")
                 
-                return True
-            else:
-                QMessageBox.warning(self, "警告", f"文件夹中没有找到图像文件: {folder_path}")
-                return False
+                # 加载prompt数据
+                prompt_data = self.sequence_manager.get_prompt_data_from_sequence(sequence_data)
+                if prompt_data:
+                    self.prompt_data = prompt_data
+                    self.update_prompt_info_display()
+                    # 如果当前显示的图像有prompt点，加载它们
+                    self.load_points_for_current_image()
+                    print(f"加载prompt数据: {len(prompt_data)} 张图像的prompt点")
                 
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"加载图像序列失败:\n{str(e)}")
-            print(f"加载图像序列失败: {e}")
-            return False
+                # 获取摘要信息
+                summary = self.sequence_manager.get_sequence_summary(sequence_data)
+                
+                # 更新状态
+                status_msg = f"已加载序列: {summary['image_count']} 个文件，时长: {self.explosion_duration}ms"
+                if summary['has_temperature_data']:
+                    status_msg += f"，温度数据: {summary['temperature_points']} 点"
+                if summary['has_prompt_data']:
+                    status_msg += f"，prompt数据: {summary['total_prompt_points']} 点"
+                
+                self.extract_status.setText(status_msg)
+                print(f"成功加载火球序列: {summary}")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"处理序列文件失败:\n{str(e)}")
+                self.extract_status.setText("处理失败")
+                print(f"处理序列文件失败: {e}")
     
     def init_charts(self):
         """初始化图表"""
@@ -506,99 +529,6 @@ class ExtractTab(QWidget):
             
         except Exception as e:
             print(f"初始化直径图表失败: {e}")
-    
-    def load_temperature_data(self):
-        """加载温度数据并更新图表"""
-        try:
-            print("开始加载温度数据...")
-            
-            if not self.sequence_data:
-                print("❌ 没有序列数据，无法加载温度数据")
-                return False
-            
-            # 获取温度文件路径
-            temp_file_path = self.sequence_data.get('files', {}).get('temperature_file', '')
-            print(f"温度文件路径: {temp_file_path}")
-            
-            if not temp_file_path or temp_file_path == "未设置":
-                print("❌ 没有温度文件路径")
-                return False
-            
-            # 检查文件是否存在
-            if not os.path.exists(temp_file_path):
-                print(f"❌ 温度文件不存在: {temp_file_path}")
-                return False
-            
-            print(f"✅ 温度文件存在，开始读取...")
-            
-            # 读取温度数据
-            time_data, temp_data = self._read_temperature_csv(temp_file_path)
-            if time_data is None or temp_data is None:
-                print("❌ 读取温度数据失败")
-                return False
-            
-            print(f"✅ 温度数据读取成功: {len(time_data)} 个点")
-            
-            # 更新温度图表
-            self.update_temperature_chart(time_data, temp_data)
-            print("✅ 温度图表更新完成")
-            return True
-            
-        except Exception as e:
-            print(f"❌ 加载温度数据失败: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def _read_temperature_csv(self, file_path):
-        """读取温度CSV文件"""
-        try:
-            print(f"开始读取CSV文件: {file_path}")
-            time_data = []
-            temp_data = []
-            
-            with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            print(f"文件总行数: {len(lines)}")
-            if len(lines) > 0:
-                print(f"第一行（标题）: {lines[0].strip()}")
-            
-            # 跳过标题行
-            for i, line in enumerate(lines[1:], 1):
-                line = line.strip()
-                if line and ',' in line:
-                    parts = line.split(',')
-                    if len(parts) >= 2:
-                        try:
-                            time_val = float(parts[0])
-                            temp_val = float(parts[1])
-                            time_data.append(time_val)
-                            temp_data.append(temp_val)
-                        except ValueError as e:
-                            print(f"第{i+1}行数据格式错误: {line}, 错误: {e}")
-                            continue
-                    else:
-                        print(f"第{i+1}行列数不足: {line}")
-                else:
-                    print(f"第{i+1}行格式错误: {line}")
-            
-            print(f"成功解析 {len(time_data)} 个数据点")
-            
-            if time_data and temp_data:
-                print(f"✅ 成功读取温度数据: {len(time_data)} 个点")
-                print(f"   时间范围: {min(time_data)} - {max(time_data)} ms")
-                print(f"   温度范围: {min(temp_data)} - {max(temp_data)} K")
-                return time_data, temp_data
-            else:
-                print("❌ 没有找到有效的温度数据")
-                return None, None
-                
-        except Exception as e:
-            print(f"❌ 读取温度CSV失败: {e}")
-            import traceback
-            traceback.print_exc()
-            return None, None
     
     def update_temperature_chart(self, time_data, temp_data):
         """更新温度图表"""
@@ -753,11 +683,46 @@ class ExtractTab(QWidget):
                 self.extract_preview.set_interaction_mode('none')
                 self.extract_preview.set_interactive_enabled(False)
                 
+                # 自动保存prompt数据到序列文件
+                self._auto_save_prompt_data()
+                
                 print("✅ prompt点选择完成")
                 
         except Exception as e:
             print(f"❌ 切换prompt选择模式失败: {e}")
             QMessageBox.critical(self, "错误", f"切换prompt选择模式失败:\n{str(e)}")
+    
+    def _auto_save_prompt_data(self):
+        """自动保存prompt数据到当前序列文件"""
+        try:
+            # 检查是否有序列数据和prompt数据
+            if not self.sequence_data:
+                print("没有序列数据，无法自动保存prompt数据")
+                return
+            
+            if not self.prompt_data:
+                print("没有prompt数据，无需保存")
+                return
+            
+            # 检查是否有原始文件路径（从序列加载时保存）
+            if not hasattr(self, '_current_sequence_file_path'):
+                print("没有当前序列文件路径，无法自动保存")
+                return
+            
+            # 使用序列管理器保存prompt数据
+            success, message = self.sequence_manager.save_prompt_data_to_sequence(
+                self._current_sequence_file_path, self.prompt_data
+            )
+            
+            if success:
+                print(f"✅ 自动保存prompt数据成功: {message}")
+                self.extract_status.setText("prompt数据已自动保存")
+            else:
+                print(f"❌ 自动保存prompt数据失败: {message}")
+                self.extract_status.setText("prompt数据保存失败")
+                
+        except Exception as e:
+            print(f"❌ 自动保存prompt数据异常: {e}")
     
     def get_current_point_type(self):
         """获取当前选择的点类型"""

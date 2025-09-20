@@ -37,6 +37,7 @@ class InteractiveImageWidget(QLabel):
         
         # 设置基本属性
         self.setMinimumSize(400, 300)
+        self.setMaximumSize(600, 450)  # 设置最大尺寸防止过度放大
         self.setAlignment(Qt.AlignCenter)
         self.setStyleSheet("""
             QLabel {
@@ -251,9 +252,10 @@ class InteractiveImageWidget(QLabel):
             qt_image = QImage(image_bytes, w, h, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
             
-            # 缩放以适应控件大小
+            # 缩放以适应固定的最大尺寸
+            max_size = self.maximumSize()
             scaled_pixmap = pixmap.scaled(
-                self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                max_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
             
             self.display_pixmap = scaled_pixmap

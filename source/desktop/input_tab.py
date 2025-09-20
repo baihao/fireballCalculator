@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
 from fireball_temperature_calculator import FireballTemperatureCalculator
+from sequence_manager import SequenceManager
 
 
 class InputTab(QWidget):
@@ -24,10 +25,13 @@ class InputTab(QWidget):
         super().__init__(parent)
         # 初始化文件路径属性
         self.image_folder_path = None
-        self.video_file_path = None
         self.temperature_file_path = None  # 温度文件路径
         self.image_files = []  # 存储图像文件列表
         self.current_image_index = 0  # 当前显示的图像索引
+        
+        # 初始化序列管理器
+        self.sequence_manager = SequenceManager()
+        
         self.init_ui()
         self.setup_connections()
         
@@ -322,41 +326,26 @@ class InputTab(QWidget):
             if not file_path:
                 return
             
-            # 准备保存的数据
-            sequence_data = {
-                "metadata": {
-                    "description": "爆炸火球分析采样序列",
-                    "version": "1.0",
-                    "created_at": str(np.datetime64('now'))
-                },
-                "parameters": {
-                    "material_type": self.material_label.text().split(": ")[1],
-                    "equivalent": self.equivalent_label.text().split(": ")[1].split(" ")[0],
-                    "al_percent": self.al_percent_label.text().split(": ")[1].replace("%", ""),
-                    "explosion_duration": self.explosion_duration.text(),
-                    "pixel_length": self.pixel_length.text()
-                },
-                "files": {
-                    "image_folder": self.image_folder_path if self.image_folder_path else "未设置",
-                    "video_file": self.video_file_path if self.video_file_path else "未设置",
-                    "temperature_file": getattr(self, 'temperature_file_path', "未设置")
-                },
-                "temperature_data": {
-                    "time_range": "0-140 ms",
-                    "data_points": 800,
-                    "note": "温度数据基于当前参数计算"
-                },
-                "image_sequence_info": {
-                    "folder_path": self.image_folder_path if self.image_folder_path else "未设置",
-                    "note": "图像序列文件夹路径"
-                }
-            }
+            # 使用序列管理器保存数据（包含验证）
+            success, message = self.sequence_manager.export_sequence_data(
+                file_path=file_path,
+                image_files=self.image_files,
+                explosive_type=self.explosive_type.currentText(),
+                equivalent=self.equivalent.text(),
+                al_percent=self.al_percent.text(),
+                explosion_duration=self.explosion_duration.text(),
+                pixel_length=self.pixel_length.text(),
+                imported_time_data=getattr(self, '_imported_time_data', None),
+                imported_temp_data=getattr(self, '_imported_temp_data', None)
+            )
             
-            # 保存到文件
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(sequence_data, f, ensure_ascii=False, indent=2)
-            
-            QMessageBox.information(self, "保存成功", f"采样序列已保存到:\n{file_path}")
+            if success:
+                # 显示成功消息
+                full_msg = f"采样序列已保存到:\n{file_path}\n\n{message}"
+                QMessageBox.information(self, "保存成功", full_msg)
+            else:
+                # 显示失败消息
+                QMessageBox.critical(self, "保存失败", message)
             
         except Exception as e:
             QMessageBox.critical(self, "保存失败", f"保存采样序列时出错:\n{str(e)}")
@@ -373,7 +362,6 @@ class InputTab(QWidget):
             
             # 文件输入组控件
             self.image_sequence_btn = QPushButton("导入火球图像序列")
-            self.video_file_btn = QPushButton("导入火球视频文件")
             self.temp_files_btn = QPushButton("导入火球温度时间序列")
             self.explosion_duration = QLineEdit("140")
             self.pixel_length = QLineEdit("0.01")
@@ -429,11 +417,6 @@ class InputTab(QWidget):
             image_seq_label.setStyleSheet(label_style)
             file_layout.addWidget(image_seq_label)
             file_layout.addWidget(self.image_sequence_btn)
-            
-            video_label = QLabel("导入火球视频文件")
-            video_label.setStyleSheet(label_style)
-            file_layout.addWidget(video_label)
-            file_layout.addWidget(self.video_file_btn)
             
             temp_label = QLabel("导入火球温度时间序列（CSV/JSON）")
             temp_label.setStyleSheet(label_style)
@@ -531,7 +514,6 @@ class InputTab(QWidget):
         """设置侧边栏信号连接"""
         # 文件选择按钮
         self.image_sequence_btn.clicked.connect(self.select_image_sequence)
-        self.video_file_btn.clicked.connect(self.select_video_file)
         self.temp_files_btn.clicked.connect(self.select_temp_files)
         self.clear_btn.clicked.connect(self.clear_inputs)
         
@@ -589,19 +571,6 @@ class InputTab(QWidget):
             else:
                 QMessageBox.warning(self, "警告", "所选文件夹中没有找到图像文件！")
     
-    def select_video_file(self):
-        """选择视频文件"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择视频文件",
-            "", "视频文件 (*.mp4 *.avi *.mov *.mkv *.wmv *.flv);;所有文件 (*)"
-        )
-        
-        if file_path:
-            self.input_status.setText(f"已选择视频文件: {os.path.basename(file_path)}")
-            # 这里可以保存视频文件路径
-            self.video_file_path = file_path
-    
-    
     def select_temp_files(self):
         """选择温度时间序列文件"""
         files, _ = QFileDialog.getOpenFileNames(
@@ -620,8 +589,10 @@ class InputTab(QWidget):
                     print(f"时间范围: {min(time_data)} - {max(time_data)} ms")
                     print(f"温度范围: {min(temp_data)} - {max(temp_data)} K")
                     
-                    # 保存温度文件路径
+                    # 保存温度文件路径和数据
                     self.temperature_file_path = file_path
+                    self._imported_time_data = time_data  # 保存导入的时间数据点
+                    self._imported_temp_data = temp_data  # 保存导入的温度数据点
                     
                     # 更新温度图表
                     self.update_temperature_chart(time_data, temp_data)
@@ -748,8 +719,9 @@ class InputTab(QWidget):
         self.input_status.setText("已清空")
         # 清空文件路径和图像序列
         self.image_folder_path = None
-        self.video_file_path = None
         self.temperature_file_path = None
+        self._imported_time_data = None  # 清空导入的时间数据
+        self._imported_temp_data = None  # 清空导入的温度数据
         self.image_files = []
         self.current_image_index = 0
         

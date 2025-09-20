@@ -17,7 +17,7 @@ fi
 echo "✓ Conda 已安装: $(conda --version)"
 
 # 检查Python版本要求
-PYTHON_VERSION="3.10"
+PYTHON_VERSION="3.9"
 ENV_NAME="fireball_calculator"
 ENV_PYTHON_PATH="/Users/hbai/miniconda3/envs/${ENV_NAME}/bin/python"
 ENV_PIP_PATH="/Users/hbai/miniconda3/envs/${ENV_NAME}/bin/pip"
@@ -127,36 +127,6 @@ else
     echo "然后重新运行本脚本。"
 fi
 
-# 如存在本地子模块 sam2，则以可编辑模式安装
-if [ -d "third_party/sam2" ]; then
-    echo ""
-    echo "检测到本地子模块: third_party/sam2"
-    echo "正在以可编辑模式安装 SAM2 ..."
-    
-    # 检查Python版本是否满足SAM2要求
-    PYTHON_VER=$(${ENV_PYTHON_PATH} -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    PYTHON_MAJOR=$(${ENV_PYTHON_PATH} -c "import sys; print(sys.version_info.major)")
-    PYTHON_MINOR=$(${ENV_PYTHON_PATH} -c "import sys; print(sys.version_info.minor)")
-    
-    if [ $PYTHON_MAJOR -gt 3 ] || ([ $PYTHON_MAJOR -eq 3 ] && [ $PYTHON_MINOR -ge 10 ]); then
-        ${ENV_PIP_PATH} install -e third_party/sam2
-        if [ $? -eq 0 ]; then
-            echo "✓ SAM2 安装成功 (editable)"
-        else
-            echo "⚠️ SAM2 安装失败，请检查网络或子模块状态"
-        fi
-    else
-        echo "⚠️ SAM2 需要 Python 3.10+，当前版本: ${PYTHON_VER}"
-        echo "跳过 SAM2 安装"
-    fi
-else
-    echo ""
-    echo "未检测到 third_party/sam2。"
-    echo "如需使用 SAM2，请先添加子模块："
-    echo "  git submodule add git@github.com:facebookresearch/sam2.git source/third_party/sam2"
-    echo "  git submodule update --init --recursive"
-    echo "然后重新运行本脚本。"
-fi
 
 # 检查并修复Qt库冲突
 echo ""
@@ -193,16 +163,16 @@ if [ $? -eq 0 ]; then
     
     # 设置当前会话的别名
     echo "正在设置当前会话的别名..."
-    alias python310="${ENV_PYTHON_PATH}"
-    alias pip310="${ENV_PIP_PATH}"
+    alias python39="${ENV_PYTHON_PATH}"
+    alias pip39="${ENV_PIP_PATH}"
     echo "✓ 别名设置成功！"
     echo ""
     
     echo "✓ 快速使用命令:"
     echo "1. 激活conda环境: conda activate ${ENV_NAME}"
     echo "2. 设置别名: source ./setup_aliases.sh"
-    echo "3. 使用环境Python: python310 fireball_radius_calculator.py"
-    echo "4. 使用环境pip: pip310 install package_name"
+    echo "3. 使用环境Python: python39 fireball_radius_calculator.py"
+    echo "4. 使用环境pip: pip39 install package_name"
     echo "5. 退出conda环境: conda deactivate"
     echo ""
     echo "✓ 环境管理命令:"
@@ -213,12 +183,12 @@ if [ $? -eq 0 ]; then
     echo "- 设置别名: source ./setup_aliases.sh"
     echo ""
     echo "✓ 永久别名设置 (添加到 ~/.zshrc 或 ~/.bashrc):"
-    echo "  alias python310='${ENV_PYTHON_PATH}'"
-    echo "  alias pip310='${ENV_PIP_PATH}'"
+    echo "  alias python39='${ENV_PYTHON_PATH}'"
+    echo "  alias pip39='${ENV_PIP_PATH}'"
     echo ""
     echo "✓ 注意事项:"
     echo "- 每次使用前都需要先激活conda环境"
-    echo "- 当前会话已设置 python310 和 pip310 别名"
+    echo "- 当前会话已设置 python39 和 pip39 别名"
     echo "- 如果遇到Python版本问题，请使用完整路径: ${ENV_PYTHON_PATH}"
     echo ""
 else
