@@ -10,7 +10,7 @@ import json
 import numpy as np
 import cv2
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -50,26 +50,23 @@ def create_test_images():
     
     return image_paths
 
-def load_data_from_json(json_path: str) -> Tuple[List[str], Dict[int, Dict[str, Any]]]:
+def load_data_from_json(json_path: str) -> Tuple[List[str], Dict[int, Dict[str, Any]], Optional[Tuple[float, float]]]:
     """
     从JSON文件加载图像路径和prompt数据
     
-    JSON格式:
+    支持两种JSON格式:
+    1. 简单格式:
     {
-        "image_paths": [
-            "path/to/image1.jpg",
-            "path/to/image2.jpg",
-            ...
-        ],
-        "prompt_data": {
-            "0": {
-                "points": [[x1, y1], [x2, y2], ...],
-                "labels": [1, 1, 0, 0, ...]
-            },
-            "2": {
-                "points": [[x1, y1], [x2, y2], ...], 
-                "labels": [1, 0, 1, ...]
-            }
+        "image_paths": [...],
+        "prompt_data": {...}
+    }
+    
+    2. 火球序列格式 (fireball_sequence.json):
+    {
+        "image_sequence": {
+            "image_paths": [...],
+            "prompt_data": {...},
+            "target_center": [x, y]
         }
     }
     
@@ -77,19 +74,38 @@ def load_data_from_json(json_path: str) -> Tuple[List[str], Dict[int, Dict[str, 
         json_path: JSON文件路径
         
     Returns:
-        Tuple[List[str], Dict[int, Dict[str, Any]]]: (图像路径列表, prompt数据字典)
+        Tuple[List[str], Dict[int, Dict[str, Any]], Optional[Tuple[float, float]]]: 
+        (图像路径列表, prompt数据字典, 目标中心点)
     """
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        # 提取图像路径
-        image_paths = data.get('image_paths', [])
+        # 检查是否为火球序列格式
+        if 'image_sequence' in data:
+            print("✓ 检测到火球序列格式")
+            sequence_data = data['image_sequence']
+            
+            # 从image_sequence中提取数据
+            image_paths = sequence_data.get('image_paths', [])
+            raw_prompt_data = sequence_data.get('prompt_data', {})
+            
+            # 提取目标中心点
+            target_center = None
+            if 'target_center' in sequence_data:
+                center_data = sequence_data['target_center']
+                if isinstance(center_data, (list, tuple)) and len(center_data) >= 2:
+                    target_center = (float(center_data[0]), float(center_data[1]))
+                    print(f"✓ 读取到目标中心点: ({target_center[0]:.1f}, {target_center[1]:.1f})")
+        else:
+            print("✓ 检测到简单格式")
+            # 简单格式：直接从根级别提取
+            image_paths = data.get('image_paths', [])
+            raw_prompt_data = data.get('prompt_data', {})
+            target_center = None
         
-        # 提取prompt数据并转换格式
-        raw_prompt_data = data.get('prompt_data', {})
+        # 转换prompt数据格式
         prompt_data = {}
-        
         for str_idx, prompt_info in raw_prompt_data.items():
             idx = int(str_idx)  # 将字符串索引转换为整数
             
@@ -106,17 +122,17 @@ def load_data_from_json(json_path: str) -> Tuple[List[str], Dict[int, Dict[str, 
         print(f"✓ 从JSON加载了 {len(prompt_data)} 个prompt配置")
         print(f"✓ Prompt图片索引: {sorted(prompt_data.keys())}")
         
-        return image_paths, prompt_data
+        return image_paths, prompt_data, target_center
         
     except FileNotFoundError:
         print(f"❌ JSON文件不存在: {json_path}")
-        return [], {}
+        return [], {}, None
     except json.JSONDecodeError as e:
         print(f"❌ JSON格式错误: {e}")
-        return [], {}
+        return [], {}, None
     except Exception as e:
         print(f"❌ 加载JSON失败: {e}")
-        return [], {}
+        return [], {}, None
 
 
 def test_complete_propagation():
@@ -176,7 +192,7 @@ def test_complete_propagation():
         visualizer.generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data)
         
         # 生成轮廓可视化
-        visualizer.save_contour_visualization(image_paths, masks)
+        visualizer.save_contour_visualization(image_paths, masks, geometries=geometries)
         
         # 生成汇总可视化
         visualizer.create_summary_visualization(image_paths, masks)
@@ -237,7 +253,7 @@ def test_from_json(json_path: str):
     try:
         # 加载JSON数据
         print("1. 加载JSON数据...")
-        image_paths, prompt_data = load_data_from_json(json_path)
+        image_paths, prompt_data, target_center = load_data_from_json(json_path)
         
         if not image_paths or not prompt_data:
             print("❌ JSON数据加载失败或为空")
@@ -271,7 +287,8 @@ def test_from_json(json_path: str):
             prompt_data=prompt_data,
             output_dir="json_test_output",
             save_masks=True,
-            save_visualization=False
+            save_visualization=False,
+            target_centre=target_center
         )
         
         # 生成可视化
@@ -282,7 +299,7 @@ def test_from_json(json_path: str):
         visualizer.generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data, "json_test_output")
         
         # 生成蓝色轮廓可视化
-        visualizer.save_contour_visualization(image_paths, masks, "json_test_output")
+        visualizer.save_contour_visualization(image_paths, masks, "json_test_output", geometries)
         
         # 生成汇总可视化
         visualizer.create_summary_visualization(image_paths, masks, "json_test_output")

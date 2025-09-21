@@ -47,7 +47,7 @@ class SegmentationVisualizer:
             
             # 计算质心和半径
             centroid = mask_analyzer.calculate_mask_centroid(mask)
-            max_radius = mask_analyzer.calculate_max_radius_from_centroid(mask, centroid)
+            max_radius, max_radius_point = mask_analyzer.calculate_max_radius_with_point(mask, centroid)
             
             cx, cy = centroid
             
@@ -56,16 +56,11 @@ class SegmentationVisualizer:
             ax.plot([cx-cross_size, cx+cross_size], [cy, cy], '-', color=color, linewidth=2)
             ax.plot([cx, cx], [cy-cross_size, cy+cross_size], '-', color=color, linewidth=2)
             
-            # 绘制最大半径箭头（选择一个方向）
+            # 绘制最大半径箭头
             if show_radius and max_radius > 0:
-                # 找到距离质心最远的点
-                y_coords, x_coords = np.where(mask > 0)
-                if len(x_coords) > 0:
-                    distances = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
-                    max_idx = np.argmax(distances)
-                    max_x, max_y = x_coords[max_idx], y_coords[max_idx]
-                    
-                    # 绘制从质心到最远点的箭头
+                if max_radius_point != (0.0, 0.0):
+                    # 使用计算出的最大半径点
+                    max_x, max_y = max_radius_point
                     ax.annotate('', xy=(max_x, max_y), xytext=(cx, cy),
                                arrowprops=dict(arrowstyle='->', color=color, lw=1.5,
                                              connectionstyle="arc3", alpha=0.8),
@@ -367,7 +362,7 @@ Postprocessing: Skipped
         print(f"     Saved merged debug image: {debug_path}")
     
     def save_contour_visualization(self, image_paths: List[str], masks: List[np.ndarray], 
-                                 output_dir: str = "test_output"):
+                                 output_dir: str = "test_output", geometries: Optional[List[Dict[str, Any]]] = None):
         """
         生成带有蓝色轮廓的原图可视化
         
@@ -375,6 +370,7 @@ Postprocessing: Skipped
             image_paths: 图像路径列表
             masks: 掩码列表
             output_dir: 输出目录
+            geometries: 几何信息列表，如果提供则使用这些信息绘制质心和半径，否则重新计算
         """
         try:
             # 创建轮廓可视化目录
@@ -409,34 +405,29 @@ Postprocessing: Skipped
                     total_area = sum(cv2.contourArea(contour) for contour in contours)
                     contour_count = len(contours)
                     
-                    # 计算并绘制质心和半径
-                    try:
-                        from .mask_utils import create_mask_analyzer
-                    except ImportError:
-                        from mask_utils import create_mask_analyzer
-                    mask_analyzer = create_mask_analyzer()
-                    
-                    centroid = mask_analyzer.calculate_mask_centroid(mask)
-                    max_radius = mask_analyzer.calculate_max_radius_from_centroid(mask, centroid)
-                    
-                    if centroid != (0.0, 0.0) and max_radius > 0:
-                        cx, cy = int(centroid[0]), int(centroid[1])
+                    # 使用几何信息绘制质心和半径（如果没有几何信息则跳过）
+                    if geometries is not None and i < len(geometries) and geometries[i] is not None:
+                        # 使用提供的几何信息
+                        centroid = geometries[i]['centroid']
+                        max_radius = geometries[i]['max_radius']
+                        max_radius_point = geometries[i].get('max_radius_point', (0.0, 0.0))
                         
-                        # 绘制十字标记
-                        cross_size = 8
-                        cv2.line(result_image, (cx-cross_size, cy), (cx+cross_size, cy), (0, 255, 255), 2)
-                        cv2.line(result_image, (cx, cy-cross_size), (cx, cy+cross_size), (0, 255, 255), 2)
-                        
-                        # 绘制最大半径箭头（选择一个方向）
-                        # 找到距离质心最远的点
-                        y_coords, x_coords = np.where(mask > 0)
-                        if len(x_coords) > 0:
-                            distances = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
-                            max_idx = np.argmax(distances)
-                            max_x, max_y = int(x_coords[max_idx]), int(y_coords[max_idx])
+                        if centroid != (0.0, 0.0) and max_radius > 0:
+                            cx, cy = int(centroid[0]), int(centroid[1])
                             
-                            # 绘制从质心到最远点的箭头线
-                            cv2.arrowedLine(result_image, (cx, cy), (max_x, max_y), (0, 255, 255), 2, tipLength=0.08)
+                            # 绘制十字标记
+                            cross_size = 8
+                            cv2.line(result_image, (cx-cross_size, cy), (cx+cross_size, cy), (0, 255, 255), 2)
+                            cv2.line(result_image, (cx, cy-cross_size), (cx, cy+cross_size), (0, 255, 255), 2)
+                            
+                            # 绘制最大半径箭头
+                            if max_radius_point != (0.0, 0.0):
+                                max_x, max_y = int(max_radius_point[0]), int(max_radius_point[1])
+                                cv2.arrowedLine(result_image, (cx, cy), (max_x, max_y), (0, 255, 255), 2, tipLength=0.08)
+                    else:
+                        # 没有几何信息，跳过质心和半径绘制
+                        centroid = (0.0, 0.0)
+                        max_radius = 0.0
                     
                     print(f"   图片 {i+1}: 绘制了 {contour_count} 个轮廓，总面积 {int(total_area)} 像素")
                     print(f"      质心: ({centroid[0]:.1f}, {centroid[1]:.1f}), 最大半径: {max_radius:.1f}")

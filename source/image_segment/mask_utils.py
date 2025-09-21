@@ -53,19 +53,19 @@ class MaskValidator:
         
         return (float(cx), float(cy))
     
-    def calculate_max_radius_from_centroid(self, mask: np.ndarray, centroid: Optional[Tuple[float, float]] = None) -> float:
+    def calculate_max_radius_with_point(self, mask: np.ndarray, centroid: Optional[Tuple[float, float]] = None) -> Tuple[float, Tuple[float, float]]:
         """
-        计算从质心到掩码边界的最大半径
+        计算从质心到掩码边界的最大半径，并返回最大半径对应的点坐标
         
         Args:
             mask: 输入掩码 (二值图像)
             centroid: 质心坐标，如果为None则自动计算
             
         Returns:
-            float: 最大半径，如果掩码为空返回 0.0
+            Tuple[float, Tuple[float, float]]: (最大半径, 最大半径对应的点坐标)
         """
         if mask is None or np.sum(mask) == 0:
-            return 0.0
+            return 0.0, (0.0, 0.0)
         
         # 获取质心坐标
         if centroid is None:
@@ -77,39 +77,52 @@ class MaskValidator:
         y_coords, x_coords = np.where(mask > 0)
         
         if len(x_coords) == 0:
-            return 0.0
+            return 0.0, (0.0, 0.0)
         
         # 计算从质心到所有掩码像素的距离
         distances = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
         
-        # 返回最大距离
-        max_radius = float(np.max(distances))
+        # 找到最大距离的索引
+        max_distance_idx = np.argmax(distances)
         
-        return max_radius
+        # 返回最大距离和对应的点坐标
+        max_radius = float(distances[max_distance_idx])
+        max_radius_point = (float(x_coords[max_distance_idx]), float(y_coords[max_distance_idx]))
+        
+        return max_radius, max_radius_point
     
-    def analyze_mask_geometry(self, mask: np.ndarray) -> Dict[str, Any]:
+    def analyze_mask_geometry(self, mask: np.ndarray, target_centre: Optional[Tuple[float, float]] = None) -> Dict[str, Any]:
         """
         分析掩码的几何特征
         
         Args:
             mask: 输入掩码
+            target_centre: 目标质心坐标，如果提供则直接使用，否则自动计算
             
         Returns:
-            Dict: 包含几何特征的字典
+            Dict: 包含几何特征的字典，包括最大半径对应的点坐标
         """
         if mask is None or np.sum(mask) == 0:
             return {
                 'area': 0,
                 'centroid': (0.0, 0.0),
                 'max_radius': 0.0,
+                'max_radius_point': (0.0, 0.0),
                 'bounding_box': (0, 0, 0, 0),
                 'aspect_ratio': 0.0
             }
         
         # 基本信息
         area = self.calculate_mask_area(mask)
-        centroid = self.calculate_mask_centroid(mask)
-        max_radius = self.calculate_max_radius_from_centroid(mask, centroid)
+        
+        # 如果提供了目标质心，直接使用；否则计算质心
+        if target_centre is not None:
+            centroid = target_centre
+        else:
+            centroid = self.calculate_mask_centroid(mask)
+            
+        # 计算最大半径和对应的点坐标
+        max_radius, max_radius_point = self.calculate_max_radius_with_point(mask, centroid)
         
         # 边界框
         y_coords, x_coords = np.where(mask > 0)
@@ -130,6 +143,7 @@ class MaskValidator:
             'area': area,
             'centroid': centroid,
             'max_radius': max_radius,
+            'max_radius_point': max_radius_point,
             'bounding_box': bounding_box,
             'aspect_ratio': aspect_ratio
         }

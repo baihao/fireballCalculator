@@ -12,6 +12,7 @@ import torch
 from typing import List, Tuple, Optional, Dict, Any
 import matplotlib.pyplot as plt
 from pathlib import Path
+import time
 
 # 导入SAM初始化模块
 try:
@@ -86,7 +87,8 @@ class IterativeMaskPropagationSegmenter:
                                                   prompt_data: Dict[int, Dict[str, Any]],
                                                   output_dir: Optional[str] = None,
                                                   save_masks: bool = True,
-                                                  save_visualization: bool = True) -> List[Optional[np.ndarray]]:
+                                                  save_visualization: bool = True,
+                                                  target_centre: Optional[Tuple[float, float]] = None) -> List[Optional[np.ndarray]]:
         """
         对图像序列进行迭代掩码传播分割
         
@@ -104,6 +106,7 @@ class IterativeMaskPropagationSegmenter:
             output_dir: 输出目录
             save_masks: 是否保存分割掩码
             save_visualization: 是否保存可视化结果
+            target_centre: 目标质心坐标，如果提供则在计算几何信息时使用，否则自动计算质心
             
         Returns:
             List[Optional[np.ndarray]]: 每张图片的分割掩码列表，None表示未处理或处理失败
@@ -146,7 +149,7 @@ class IterativeMaskPropagationSegmenter:
         mask_geometries = []
         for i, mask in enumerate(self.all_masks):
             if mask is not None:
-                geometry = self.mask_analyzer.analyze_mask_geometry(mask)
+                geometry = self.mask_analyzer.analyze_mask_geometry(mask, target_centre)
                 geometry['image_index'] = i
                 mask_geometries.append(geometry)
             else:
@@ -264,6 +267,9 @@ class IterativeMaskPropagationSegmenter:
             
             print(f"处理第 {idx+1}/{len(image_paths)} 张图片 (有prompt点): {os.path.basename(image_paths[idx])}")
             
+            # 记录开始时间
+            start_time = time.time()
+            
             # 分割图片
             result = self._segment_with_prompts(image_paths[idx], prompt_data[idx])
             
@@ -279,14 +285,24 @@ class IterativeMaskPropagationSegmenter:
                 # 保存prompt图片详情和下次迭代的采样点
                 self._save_prompted_image_details(idx, best_mask, prompt_data[idx])
                 
+                # 计算处理时间
+                end_time = time.time()
+                processing_time = end_time - start_time
+                
                 print(f"  ✓ 分割成功，选择最佳掩码 (SAM质量分数: {sam_quality:.3f})")
+                print(f"  ⏱️ 处理时间: {processing_time:.2f} 秒")
                 
                 # 保存结果
                 if output_dir:
                     self.output_manager.save_mask_results(image_paths[idx], best_mask, idx, output_dir, save_masks, "prompted")
             else:
+                # 计算处理时间（即使失败也要记录时间）
+                end_time = time.time()
+                processing_time = end_time - start_time
+                
                 self.failed_indices.add(idx)
                 print(f"  ❌ 分割失败，标记为失败")
+                print(f"  ⏱️ 处理时间: {processing_time:.2f} 秒")
     
     def _iterative_mask_propagation(self, image_paths: List[str], output_dir: Optional[str], 
                                    save_masks: bool, save_visualization: bool):
@@ -334,6 +350,9 @@ class IterativeMaskPropagationSegmenter:
                 for unprocessed_idx in unprocessed_indices:
                     print(f"    处理第 {unprocessed_idx+1} 张图片")
                     
+                    # 记录开始时间
+                    start_time = time.time()
+                    
                     # 获取预定义的采样点
                     predefined_points = None
                     if (processed_idx in self.propagation_details and 
@@ -350,12 +369,17 @@ class IterativeMaskPropagationSegmenter:
                         predefined_points
                     )
                     
+                    # 计算处理时间
+                    end_time = time.time()
+                    processing_time = end_time - start_time
+                    
                     if mask is not None and self.mask_analyzer.validate_mask_quality(mask):
                         self.all_masks[unprocessed_idx] = mask
                         self.processed_indices.add(unprocessed_idx)
                         processed_this_iteration += 1
                         
                         print(f"      ✓ 掩码传播成功")
+                        print(f"      ⏱️ 处理时间: {processing_time:.2f} 秒")
                         
                         # 保存结果
                         if output_dir:
@@ -373,6 +397,7 @@ class IterativeMaskPropagationSegmenter:
                             mask
                         )
                         print(f"      ❌ 掩码传播失败: {failure_reason}")
+                        print(f"      ⏱️ 处理时间: {processing_time:.2f} 秒")
             
             print(f"  本次迭代处理了 {processed_this_iteration} 张图片，失败 {failed_this_iteration} 张图片")
             
