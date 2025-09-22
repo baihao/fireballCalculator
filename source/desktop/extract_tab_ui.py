@@ -92,6 +92,11 @@ class ExtractTabUI:
         # 特征提取按钮
         self.ui_components['extract_btn'] = QPushButton("开始特征提取")
         self.ui_components['extract_btn'].setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
+        
+        # 重新提取按钮
+        self.ui_components['reextract_btn'] = QPushButton("重新提取")
+        self.ui_components['reextract_btn'].setStyleSheet("QPushButton { background-color: #f59e0b; color: white; }")
+        self.ui_components['reextract_btn'].setVisible(False)  # 初始隐藏
     
     def _create_left_panel(self) -> QWidget:
         """创建左侧图像预览面板"""
@@ -339,6 +344,7 @@ class ExtractTabUI:
         extract_layout = QVBoxLayout()
         extract_layout.setAlignment(Qt.AlignTop)
         extract_layout.addWidget(self.ui_components['extract_btn'])
+        extract_layout.addWidget(self.ui_components['reextract_btn'])
         layout.addLayout(extract_layout)
         
         # 添加弹性空间

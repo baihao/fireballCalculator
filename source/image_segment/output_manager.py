@@ -7,9 +7,10 @@
 
 import os
 import cv2
+import json
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Set, Any
+from typing import List, Optional, Set, Any, Dict, Tuple
 
 
 class SegmentationOutputManager:
@@ -249,6 +250,129 @@ class SegmentationOutputManager:
             summary.update(processing_details)
         
         return summary
+    
+    def extract_contour_from_mask(self, mask: np.ndarray) -> Optional[List[List[Tuple[int, int]]]]:
+        """
+        从掩码中提取轮廓坐标
+        
+        Args:
+            mask: 输入掩码
+            
+        Returns:
+            List[List[Tuple[int, int]]]: 轮廓点列表，每个轮廓是点坐标的列表
+        """
+        if mask is None or np.sum(mask) == 0:
+            return None
+        
+        try:
+            # 转换为uint8格式
+            mask_uint8 = (mask * 255).astype(np.uint8)
+            
+            # 查找轮廓
+            contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if not contours:
+                return None
+            
+            # 转换轮廓格式：从numpy数组转换为坐标点列表
+            contour_list = []
+            for contour in contours:
+                # 将轮廓点转换为 (x, y) 坐标列表
+                points = [(int(point[0][0]), int(point[0][1])) for point in contour]
+                contour_list.append(points)
+            
+            return contour_list
+            
+        except Exception as e:
+            print(f"    ⚠️ 轮廓提取失败: {e}")
+            return None
+    
+    def export_segmentation_results_to_json(self, json_path: str, image_paths: List[str], 
+                                          masks: List[Optional[np.ndarray]], 
+                                          geometries: List[Optional[Dict[str, Any]]]) -> bool:
+        """
+        将分割结果导出到原JSON文件中
+        
+        Args:
+            json_path: 原JSON文件路径
+            image_paths: 图像路径列表
+            masks: 掩码列表
+            geometries: 几何信息列表
+            
+        Returns:
+            bool: 是否成功导出
+        """
+        try:
+            # 读取原始JSON文件
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # 创建分割结果数据结构
+            segmentation_results = []
+            
+            for i, (image_path, mask, geometry) in enumerate(zip(image_paths, masks, geometries)):
+                result_item = {
+                    "success": mask is not None
+                }
+                
+                if mask is not None and geometry is not None:
+                    # 提取轮廓
+                    contours = self.extract_contour_from_mask(mask)
+                    
+                    # 获取质心坐标
+                    centroid = geometry.get('centroid', (0.0, 0.0))
+                    
+                    # 获取最大半径信息
+                    max_radius = geometry.get('max_radius', 0.0)
+                    max_radius_point = geometry.get('max_radius_point', (0.0, 0.0))
+                    
+                    result_item.update({
+                        "contours": contours,
+                        "centroid": {
+                            "x": float(centroid[0]),
+                            "y": float(centroid[1])
+                        },
+                        "max_radius": {
+                            "value": float(max_radius),
+                            "endpoint": {
+                                "x": float(max_radius_point[0]),
+                                "y": float(max_radius_point[1])
+                            }
+                        }
+                    })
+                else:
+                    # 分割失败的情况
+                    result_item.update({
+                        "contours": None,
+                        "centroid": None,
+                        "max_radius": None
+                    })
+                
+                segmentation_results.append(result_item)
+            
+            # 添加分割结果到原JSON数据中
+            data["image_sequence_segmentation"] = segmentation_results
+            
+            # 保存更新后的JSON文件
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            print(f"✅ 分割结果已导出到: {json_path}")
+            successful_count = sum(1 for result in segmentation_results if result['success'])
+            print(f"   成功分割: {successful_count}/{len(segmentation_results)} 张图片")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ 导出分割结果失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _get_current_timestamp(self) -> str:
+        """获取当前时间戳"""
+        from datetime import datetime
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def create_output_manager(mask_analyzer=None) -> SegmentationOutputManager:

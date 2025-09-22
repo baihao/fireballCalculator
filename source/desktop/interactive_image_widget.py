@@ -10,7 +10,7 @@ import numpy as np
 from PySide6.QtWidgets import QLabel, QWidget
 from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QMouseEvent
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 
 
 class InteractiveImageWidget(QLabel):
@@ -31,6 +31,10 @@ class InteractiveImageWidget(QLabel):
         self.positive_points = []   # 正点列表 [(x, y), ...]
         self.negative_points = []   # 负点列表 [(x, y), ...]
         self.ignition_point = None  # 起爆点 (x, y) 或 None
+        
+        # 分割结果相关属性
+        self.segmentation_result = None  # 分割结果数据
+        self.show_segmentation = False   # 是否显示分割结果
         
         # 交互状态
         self.interaction_mode = 'none'  # 'none', 'positive', 'negative', 'ignition'
@@ -169,6 +173,47 @@ class InteractiveImageWidget(QLabel):
         self.update_display()
         print("🗑️ 清空所有点标记")
     
+    def set_segmentation_result(self, segmentation_data: Optional[Dict[str, Any]]):
+        """
+        设置分割结果数据
+        
+        Args:
+            segmentation_data: 分割结果数据字典，包含contours、centroid、max_radius等信息
+        """
+        try:
+            self.segmentation_result = segmentation_data
+            
+            if segmentation_data is not None and segmentation_data.get('success', False):
+                print(f"✓ 设置分割结果: 轮廓数={len(segmentation_data.get('contours', []))}, "
+                      f"质心=({segmentation_data.get('centroid', {}).get('x', 0):.1f}, "
+                      f"{segmentation_data.get('centroid', {}).get('y', 0):.1f})")
+            else:
+                print("设置分割结果: 无有效数据或分割失败")
+            
+            # 更新显示
+            self.update_display()
+            
+        except Exception as e:
+            print(f"❌ 设置分割结果失败: {e}")
+    
+    def set_show_segmentation(self, show: bool):
+        """
+        设置是否显示分割结果
+        
+        Args:
+            show: 是否显示分割结果
+        """
+        self.show_segmentation = show
+        self.update_display()
+        print(f"分割结果显示: {'开启' if show else '关闭'}")
+    
+    def clear_segmentation_result(self):
+        """清空分割结果"""
+        self.segmentation_result = None
+        self.show_segmentation = False
+        self.update_display()
+        print("🗑️ 清空分割结果")
+    
     def set_points(self, positive_points: List[Tuple[int, int]], negative_points: List[Tuple[int, int]], ignition_point: Optional[Tuple[int, int]] = None):
         """
         设置点标记（用于加载已有数据）
@@ -202,8 +247,13 @@ class InteractiveImageWidget(QLabel):
             # 创建显示图像的副本
             display_image = self.original_image.copy()
             
-            # 绘制点标记
-            self._draw_points_on_image(display_image)
+            # 绘制分割结果（在点标记之前绘制，作为背景）
+            if self.show_segmentation:
+                self._draw_segmentation_on_image(display_image)
+            
+            # 只有在不显示分割结果时才绘制点标记（避免视觉混乱）
+            if not self.show_segmentation:
+                self._draw_points_on_image(display_image)
             
             # 转换为QPixmap并缩放显示
             self._convert_and_display(display_image)
@@ -258,6 +308,58 @@ class InteractiveImageWidget(QLabel):
                 
         except Exception as e:
             print(f"❌ 绘制十字失败: {e}")
+    
+    def _draw_segmentation_on_image(self, image: np.ndarray):
+        """
+        在图像上绘制分割结果
+        
+        Args:
+            image: 图像数组
+        """
+        try:
+            if self.segmentation_result is None or not self.segmentation_result.get('success', False):
+                return
+            
+            # 1. 绘制蓝色轮廓
+            contours = self.segmentation_result.get('contours', [])
+            if contours:
+                for contour_points in contours:
+                    if len(contour_points) > 2:
+                        # 转换为numpy数组格式
+                        contour_array = np.array(contour_points, dtype=np.int32).reshape((-1, 1, 2))
+                        # 绘制蓝色轮廓，线宽3
+                        cv2.drawContours(image, [contour_array], -1, (0, 0, 255), 3)  # RGB格式，蓝色
+            
+            # 2. 绘制绿色质心到最大半径的箭头
+            centroid_data = self.segmentation_result.get('centroid', {})
+            max_radius_data = self.segmentation_result.get('max_radius', {})
+            
+            if centroid_data and max_radius_data:
+                # 获取质心坐标
+                cx = int(centroid_data.get('x', 0))
+                cy = int(centroid_data.get('y', 0))
+                
+                # 获取最大半径端点坐标
+                endpoint_data = max_radius_data.get('endpoint', {})
+                ex = int(endpoint_data.get('x', 0))
+                ey = int(endpoint_data.get('y', 0))
+                
+                # 确保坐标在图像范围内
+                h, w = image.shape[:2]
+                if (0 <= cx < w and 0 <= cy < h and 
+                    0 <= ex < w and 0 <= ey < h):
+                    
+                    # 绘制绿色箭头，从质心指向最大半径端点
+                    cv2.arrowedLine(image, (cx, cy), (ex, ey), (0, 255, 0), 3, tipLength=0.1)  # RGB格式，绿色
+                    
+                    # 在质心绘制紫色圆点
+                    cv2.circle(image, (cx, cy), 5, (128, 0, 128), -1)  # 填充的紫色圆点
+                    
+                    # 在最大半径端点绘制小圆圈
+                    cv2.circle(image, (ex, ey), 3, (0, 255, 0), 2)  # 绿色圆圈
+                    
+        except Exception as e:
+            print(f"❌ 绘制分割结果失败: {e}")
     
     def _convert_and_display(self, image: np.ndarray):
         """将numpy图像转换为QPixmap并显示"""

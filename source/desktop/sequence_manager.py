@@ -51,7 +51,7 @@ class SequenceManager:
     
     def get_image_paths_from_sequence(self, sequence_data: Dict[str, Any]) -> List[str]:
         """
-        从序列数据中提取图像路径列表
+        从序列数据中提取图像路径列表（支持多种格式）
         
         Args:
             sequence_data: 序列数据字典
@@ -60,7 +60,16 @@ class SequenceManager:
             List[str]: 图像路径列表
         """
         try:
-            return sequence_data.get('image_sequence', {}).get('image_paths', [])
+            # 优先检查简单格式
+            if 'image_paths' in sequence_data:
+                return sequence_data.get('image_paths', [])
+            
+            # 检查image_sequence格式
+            if 'image_sequence' in sequence_data:
+                return sequence_data.get('image_sequence', {}).get('image_paths', [])
+            
+            return []
+            
         except Exception as e:
             print(f"提取图像路径失败: {e}")
             return []
@@ -166,6 +175,55 @@ class SequenceManager:
             print(f"提取起爆点失败: {e}")
             return None
     
+    def get_segmentation_results_from_sequence(self, sequence_data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+        """
+        从序列数据中提取分割结果
+        
+        Args:
+            sequence_data: 序列数据字典
+            
+        Returns:
+            Optional[List[Dict[str, Any]]]: 分割结果列表，每个元素包含轮廓、质心、最大半径信息
+        """
+        try:
+            segmentation_results = sequence_data.get('image_sequence_segmentation', None)
+            
+            if segmentation_results is None:
+                print("未找到分割结果数据")
+                return None
+            
+            if not isinstance(segmentation_results, list):
+                print("分割结果数据格式错误，应为数组")
+                return None
+            
+            print(f"✓ 找到 {len(segmentation_results)} 张图片的分割结果")
+            
+            # 统计成功的分割数量
+            successful_count = sum(1 for result in segmentation_results if result.get('success', False))
+            print(f"✓ 其中 {successful_count} 张图片分割成功")
+            
+            return segmentation_results
+            
+        except Exception as e:
+            print(f"提取分割结果失败: {e}")
+            return None
+    
+    def has_segmentation_results(self, sequence_data: Dict[str, Any]) -> bool:
+        """
+        检查序列数据是否包含分割结果
+        
+        Args:
+            sequence_data: 序列数据字典
+            
+        Returns:
+            bool: 是否包含分割结果
+        """
+        try:
+            segmentation_results = sequence_data.get('image_sequence_segmentation', None)
+            return segmentation_results is not None and len(segmentation_results) > 0
+        except Exception:
+            return False
+    
     def save_prompt_data_to_sequence(self, file_path: str, prompt_data: Dict[int, Dict[str, Any]]) -> Tuple[bool, str]:
         """
         将prompt数据保存到序列文件中
@@ -266,6 +324,153 @@ class SequenceManager:
             print(error_msg)
             return False, error_msg
     
+    def clear_prompt_data_from_sequence(self, file_path: str) -> Tuple[bool, str]:
+        """
+        从序列文件中清除特征点数据
+        
+        Args:
+            file_path: 序列文件路径
+            
+        Returns:
+            Tuple[bool, str]: (是否成功, 错误信息或成功信息)
+        """
+        try:
+            # 读取现有的序列文件
+            success, sequence_data, message = self.load_sequence_file(file_path)
+            if not success:
+                return False, f"无法读取序列文件: {message}"
+            
+            # 清除prompt_data
+            if 'image_sequence' in sequence_data and 'prompt_data' in sequence_data['image_sequence']:
+                del sequence_data['image_sequence']['prompt_data']
+                print("✅ 已清除特征点数据")
+            
+            # 保存更新后的文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(sequence_data, f, ensure_ascii=False, indent=4)
+            
+            return True, "特征点数据清除成功"
+            
+        except Exception as e:
+            error_msg = f"清除特征点数据失败: {str(e)}"
+            print(error_msg)
+            return False, error_msg
+    
+    def clear_ignition_point_from_sequence(self, file_path: str) -> Tuple[bool, str]:
+        """
+        从序列文件中清除爆心数据
+        
+        Args:
+            file_path: 序列文件路径
+            
+        Returns:
+            Tuple[bool, str]: (是否成功, 错误信息或成功信息)
+        """
+        try:
+            # 读取现有的序列文件
+            success, sequence_data, message = self.load_sequence_file(file_path)
+            if not success:
+                return False, f"无法读取序列文件: {message}"
+            
+            # 清除target_center(爆心)
+            if 'image_sequence' in sequence_data and 'target_center' in sequence_data['image_sequence']:
+                del sequence_data['image_sequence']['target_center']
+                print("✅ 已清除爆心数据")
+            
+            # 保存更新后的文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(sequence_data, f, ensure_ascii=False, indent=4)
+            
+            return True, "爆心数据清除成功"
+            
+        except Exception as e:
+            error_msg = f"清除爆心数据失败: {str(e)}"
+            print(error_msg)
+            return False, error_msg
+    
+    def clear_segmentation_results_from_sequence(self, file_path: str) -> Tuple[bool, str]:
+        """
+        从序列文件中清除分割结果
+        
+        Args:
+            file_path: 序列文件路径
+            
+        Returns:
+            Tuple[bool, str]: (是否成功, 错误信息或成功信息)
+        """
+        try:
+            # 读取现有的序列文件
+            success, sequence_data, message = self.load_sequence_file(file_path)
+            if not success:
+                return False, f"无法读取序列文件: {message}"
+            
+            # 清除image_sequence_segmentation
+            if 'image_sequence_segmentation' in sequence_data:
+                del sequence_data['image_sequence_segmentation']
+                print("✅ 已清除分割结果")
+            
+            # 保存更新后的文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(sequence_data, f, ensure_ascii=False, indent=4)
+            
+            return True, "分割结果清除成功"
+            
+        except Exception as e:
+            error_msg = f"清除分割结果失败: {str(e)}"
+            print(error_msg)
+            return False, error_msg
+    
+    def clear_all_analysis_data_from_sequence(self, file_path: str) -> Tuple[bool, str]:
+        """
+        从序列文件中清除所有分析数据（特征点、爆心、分割结果）
+        
+        Args:
+            file_path: 序列文件路径
+            
+        Returns:
+            Tuple[bool, str]: (是否成功, 错误信息或成功信息)
+        """
+        try:
+            # 读取现有的序列文件
+            success, sequence_data, message = self.load_sequence_file(file_path)
+            if not success:
+                return False, f"无法读取序列文件: {message}"
+            
+            cleared_items = []
+            
+            # 清除prompt_data
+            if 'image_sequence' in sequence_data:
+                if 'prompt_data' in sequence_data['image_sequence']:
+                    del sequence_data['image_sequence']['prompt_data']
+                    cleared_items.append("特征点数据")
+                
+                # 清除target_center(爆心)
+                if 'target_center' in sequence_data['image_sequence']:
+                    del sequence_data['image_sequence']['target_center']
+                    cleared_items.append("爆心数据")
+            
+            # 清除分割结果
+            if 'image_sequence_segmentation' in sequence_data:
+                del sequence_data['image_sequence_segmentation']
+                cleared_items.append("分割结果")
+            
+            if not cleared_items:
+                return True, "没有找到需要清除的分析数据"
+            
+            # 保存更新后的文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(sequence_data, f, ensure_ascii=False, indent=4)
+            
+            cleared_text = "、".join(cleared_items)
+            print(f"✅ 已清除: {cleared_text}")
+            
+            return True, f"所有分析数据清除成功: {cleared_text}"
+            
+        except Exception as e:
+            error_msg = f"清除分析数据失败: {str(e)}"
+            print(error_msg)
+            return False, error_msg
+    
     def get_sequence_summary(self, sequence_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         获取序列数据摘要
@@ -313,7 +518,7 @@ class SequenceManager:
     
     def _validate_sequence_format(self, sequence_data: Dict[str, Any]) -> Tuple[bool, str]:
         """
-        验证序列文件格式
+        验证序列文件格式（支持包含分割结果的格式）
         
         Args:
             sequence_data: 序列数据字典
@@ -322,7 +527,20 @@ class SequenceManager:
             Tuple[bool, str]: (是否有效, 错误信息)
         """
         try:
-            # 检查必需的顶级键
+            # 检查是否包含分割结果的格式（我们的导出格式）
+            if 'image_sequence_segmentation' in sequence_data:
+                # 包含分割结果的格式，需要检查基本结构
+                if 'image_paths' in sequence_data:
+                    # 简单格式 + 分割结果
+                    return True, ""
+                elif 'image_sequence' in sequence_data:
+                    # image_sequence格式 + 分割结果
+                    image_seq = sequence_data.get('image_sequence', {})
+                    if 'image_paths' not in image_seq:
+                        return False, "image_sequence中缺少image_paths字段"
+                    return True, ""
+            
+            # 检查标准的完整格式
             required_keys = ['metadata', 'image_sequence', 'parameters']
             for key in required_keys:
                 if key not in sequence_data:
@@ -611,3 +829,127 @@ class SequenceManager:
             }
         
         return summary
+
+
+def test_clear_functions():
+    """测试清除功能"""
+    print("🧪 测试SequenceManager清除功能")
+    print("=" * 50)
+    
+    # 创建测试数据
+    test_data = {
+        "metadata": {
+            "description": "测试数据",
+            "version": "1.0"
+        },
+        "image_sequence": {
+            "image_paths": ["test1.jpg", "test2.jpg"],
+            "prompt_data": {
+                "0": {
+                    "points": [[100, 100], [200, 200]],
+                    "labels": [1, 0]
+                }
+            },
+            "target_center": [150, 150]
+        },
+        "image_sequence_segmentation": [
+            {
+                "success": True,
+                "contour": [[100, 100], [110, 100]],
+                "centroid": [105, 100],
+                "max_radius": 50.0
+            }
+        ],
+        "parameters": {
+            "material_type": "40%Al/Rubber",
+            "explosion_duration": "140"
+        }
+    }
+    
+    # 保存测试文件
+    import tempfile
+    import os
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+        json.dump(test_data, f, ensure_ascii=False, indent=4)
+        test_file_path = f.name
+    
+    try:
+        manager = SequenceManager()
+        
+        print(f"1. 创建测试数据文件: {test_file_path}")
+        
+        # 测试加载
+        success, data, msg = manager.load_sequence_file(test_file_path)
+        print(f"   加载结果: {'✅' if success else '❌'} {msg}")
+        
+        # 检查初始数据
+        has_prompt = bool(manager.get_prompt_data_from_sequence(data))
+        has_ignition = manager.get_ignition_point_from_sequence(data) is not None
+        has_segmentation = manager.has_segmentation_results(data)
+        
+        print(f"   初始状态: 特征点={'✅' if has_prompt else '❌'}, 爆心={'✅' if has_ignition else '❌'}, 分割结果={'✅' if has_segmentation else '❌'}")
+        
+        print("\n2. 测试单独清除功能:")
+        
+        # 测试清除特征点
+        success, msg = manager.clear_prompt_data_from_sequence(test_file_path)
+        print(f"   清除特征点: {'✅' if success else '❌'} {msg}")
+        
+        # 测试清除爆心
+        success, msg = manager.clear_ignition_point_from_sequence(test_file_path)
+        print(f"   清除爆心: {'✅' if success else '❌'} {msg}")
+        
+        # 测试清除分割结果
+        success, msg = manager.clear_segmentation_results_from_sequence(test_file_path)
+        print(f"   清除分割结果: {'✅' if success else '❌'} {msg}")
+        
+        # 验证清除结果
+        success, data_after, msg = manager.load_sequence_file(test_file_path)
+        if success:
+            has_prompt_after = bool(manager.get_prompt_data_from_sequence(data_after))
+            has_ignition_after = manager.get_ignition_point_from_sequence(data_after) is not None
+            has_segmentation_after = manager.has_segmentation_results(data_after)
+            
+            print(f"   清除后状态: 特征点={'❌' if not has_prompt_after else '✅'}, 爆心={'❌' if not has_ignition_after else '✅'}, 分割结果={'❌' if not has_segmentation_after else '✅'}")
+        
+        print("\n3. 测试批量清除功能:")
+        
+        # 重新创建测试数据
+        with open(test_file_path, 'w', encoding='utf-8') as f:
+            json.dump(test_data, f, ensure_ascii=False, indent=4)
+        
+        # 测试批量清除
+        success, msg = manager.clear_all_analysis_data_from_sequence(test_file_path)
+        print(f"   批量清除: {'✅' if success else '❌'} {msg}")
+        
+        # 验证批量清除结果
+        success, data_final, msg = manager.load_sequence_file(test_file_path)
+        if success:
+            has_prompt_final = bool(manager.get_prompt_data_from_sequence(data_final))
+            has_ignition_final = manager.get_ignition_point_from_sequence(data_final) is not None
+            has_segmentation_final = manager.has_segmentation_results(data_final)
+            
+            print(f"   批量清除后: 特征点={'❌' if not has_prompt_final else '✅'}, 爆心={'❌' if not has_ignition_final else '✅'}, 分割结果={'❌' if not has_segmentation_final else '✅'}")
+            
+            # 检查基本数据是否保留
+            image_paths = manager.get_image_paths_from_sequence(data_final)
+            parameters = manager.get_parameters_from_sequence(data_final)
+            print(f"   基本数据保留: 图像路径={len(image_paths)}个, 参数={len(parameters)}个")
+        
+        print("\n✅ 所有清除功能测试通过！")
+        
+    except Exception as e:
+        print(f"❌ 测试失败: {e}")
+        import traceback
+        traceback.print_exc()
+        
+    finally:
+        # 清理测试文件
+        if os.path.exists(test_file_path):
+            os.unlink(test_file_path)
+            print(f"\n🗑️ 已清理测试文件: {test_file_path}")
+
+
+if __name__ == "__main__":
+    test_clear_functions()

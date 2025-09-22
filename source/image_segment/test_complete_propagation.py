@@ -326,6 +326,17 @@ def test_from_json(json_path: str):
                 area = geometry['area']
                 print(f"   图片 {i+1}: 质心=({centroid[0]:.1f}, {centroid[1]:.1f}), 最大半径={max_radius:.1f}, 面积={area}")
         
+        # 导出分割结果到JSON文件
+        print("\n9. 导出分割结果到JSON文件...")
+        export_success = segmenter.output_manager.export_segmentation_results_to_json(
+            json_path, image_paths, masks, geometries
+        )
+        
+        if export_success:
+            print("   ✅ 分割结果导出成功")
+        else:
+            print("   ❌ 分割结果导出失败")
+        
         print("\n" + "=" * 60)
         print("JSON测试完成！")
         print("=" * 60)

@@ -8,6 +8,7 @@ import numpy as np
 import json
 import os
 import sys
+import subprocess
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
@@ -37,6 +38,10 @@ class ExtractTab(QWidget):
         self.prompt_data = {}  # prompt数据：{image_index: {"points": [[x,y], ...], "labels": [1,0,1,...]}}
         self.current_prompt_points = []  # 当前图像的参考点临时存储
         self.ignition_point = None  # 起爆点坐标 (x, y) 或 None
+        
+        # 分割结果相关属性
+        self.segmentation_results = []  # 分割结果列表
+        self.has_segmentation_data = False  # 是否有分割结果数据
         
         # 初始化火球计算器和序列管理器
         self.fireball_calculator = FireballCalculator()
@@ -70,6 +75,7 @@ class ExtractTab(QWidget):
         self.sequence_btn = self.ui_components['sequence_btn']
         self.prompt_btn = self.ui_components['prompt_btn']
         self.extract_btn = self.ui_components['extract_btn']
+        self.reextract_btn = self.ui_components['reextract_btn']
         self.cancel_extract_btn = self.ui_components['cancel_extract_btn']
         self.save_button = self.ui_components['save_button']
         
@@ -95,6 +101,7 @@ class ExtractTab(QWidget):
         self.sequence_btn.clicked.connect(self.select_sequence_folder)
         self.prompt_btn.clicked.connect(self.toggle_prompt_selection)
         self.extract_btn.clicked.connect(self.start_feature_extraction)
+        self.reextract_btn.clicked.connect(self.start_reextraction)
         self.cancel_extract_btn.clicked.connect(self.cancel_current_image_points)
         
         # 单选按钮状态变化
@@ -144,11 +151,23 @@ class ExtractTab(QWidget):
             success = self.extract_preview.set_image(image_path)
             if success:
                 self.current_image_index = index
-                # 加载该图像已有的点标记
-                self.load_points_for_current_image()
+                
+                # 优先显示分割结果，如果有的话
+                if self.has_segmentation_data and index < len(self.segmentation_results):
+                    # 有分割结果：显示分割结果，不显示特征点
+                    segmentation_data = self.segmentation_results[index]
+                    self.extract_preview.set_segmentation_result(segmentation_data)
+                    self.extract_preview.set_show_segmentation(True)
+                    self.extract_preview.clear_points()  # 清除特征点
+                    print(f"显示图像: {image_path} (索引: {index}) - 分割结果模式")
+                else:
+                    # 没有分割结果：正常加载特征点
+                    self.extract_preview.set_show_segmentation(False)
+                    self.load_points_for_current_image()
+                    print(f"显示图像: {image_path} (索引: {index}) - 特征点模式")
+                
                 # 更新图片索引显示
                 self.update_image_index_display()
-                print(f"显示图像: {image_path} (索引: {index})")
             else:
                 print(f"图像加载失败: {image_path}")
                 
@@ -208,23 +227,72 @@ class ExtractTab(QWidget):
                     self.update_temperature_chart(time_data, temp_data)
                     print(f"加载温度数据: {len(temp_data)} 个数据点")
                 
-                # 加载prompt数据
-                prompt_data = self.sequence_manager.get_prompt_data_from_sequence(sequence_data)
-                if prompt_data:
-                    self.prompt_data = prompt_data
-                    print(f"加载prompt数据: {len(prompt_data)} 张图像的prompt点")
+                # 检查是否有分割结果
+                has_segmentation_results = self.sequence_manager.has_segmentation_results(sequence_data)
                 
-                # 加载起爆点
-                ignition_point = self.sequence_manager.get_ignition_point_from_sequence(sequence_data)
-                if ignition_point:
-                    self.ignition_point = ignition_point
-                    print(f"加载起爆点: {ignition_point}")
-                
-                # 更新信息面板显示（包含prompt数据和起爆点）
-                self.update_prompt_info_display()
-                
-                # 如果当前显示的图像有prompt点或起爆点，加载它们
-                self.load_points_for_current_image()
+                if has_segmentation_results:
+                    # 有分割结果：优先显示分割结果，不显示特征点
+                    segmentation_results = self.sequence_manager.get_segmentation_results_from_sequence(sequence_data)
+                    print(f"检测到分割结果: {len(segmentation_results)} 张图像")
+                    
+                    # 调试：打印前几个分割结果的结构
+                    for i, result in enumerate(segmentation_results[:5]):
+                        if result:
+                            max_radius = result.get('max_radius')
+                            if isinstance(max_radius, dict):
+                                max_radius_info = f"dict(keys={list(max_radius.keys())}, value={max_radius.get('value')})"
+                            else:
+                                max_radius_info = f"{type(max_radius).__name__}({max_radius})"
+                            print(f"   结果 {i}: success={result.get('success')}, max_radius={max_radius_info}")
+                        else:
+                            print(f"   结果 {i}: None")
+                    
+                    # 设置分割结果显示
+                    self.segmentation_results = segmentation_results
+                    self.has_segmentation_data = True
+                    
+                    # 清除特征点数据，避免显示冲突
+                    self.prompt_data = {}
+                    self.ignition_point = None
+                    
+                    # 更新信息面板显示分割结果信息
+                    successful_count = sum(1 for result in segmentation_results if result.get('success', False))
+                    self.update_segmentation_info_display(successful_count, len(segmentation_results))
+                    
+                    # 更新直径图表（基于分割结果）
+                    print(f"📊 准备更新直径图表...")
+                    self.update_diameter_chart_from_segmentation_results(segmentation_results)
+                    
+                    # 显示重新提取按钮，隐藏正常提取按钮
+                    self.extract_btn.setVisible(False)
+                    self.reextract_btn.setVisible(True)
+                    
+                    print(f"切换到分割结果显示模式: {successful_count}/{len(segmentation_results)} 张图片分割成功")
+                else:
+                    # 没有分割结果：正常加载prompt数据
+                    self.has_segmentation_data = False
+                    
+                    # 显示正常提取按钮，隐藏重新提取按钮
+                    self.extract_btn.setVisible(True)
+                    self.reextract_btn.setVisible(False)
+                    
+                    # 加载prompt数据
+                    prompt_data = self.sequence_manager.get_prompt_data_from_sequence(sequence_data)
+                    if prompt_data:
+                        self.prompt_data = prompt_data
+                        print(f"加载prompt数据: {len(prompt_data)} 张图像的prompt点")
+                    
+                    # 加载起爆点
+                    ignition_point = self.sequence_manager.get_ignition_point_from_sequence(sequence_data)
+                    if ignition_point:
+                        self.ignition_point = ignition_point
+                        print(f"加载起爆点: {ignition_point}")
+                    
+                    # 更新信息面板显示（包含prompt数据和起爆点）
+                    self.update_prompt_info_display()
+                    
+                    # 如果当前显示的图像有prompt点或起爆点，加载它们
+                    self.load_points_for_current_image()
                 
                 # 获取摘要信息
                 summary = self.sequence_manager.get_sequence_summary(sequence_data)
@@ -278,9 +346,13 @@ class ExtractTab(QWidget):
     def update_diameter_chart(self, time_data, diameter_data):
         """更新直径图表（提取完成后调用）"""
         try:
-            print(f"开始更新直径图表: {len(time_data)} 个数据点")
+            print(f"📊 update_diameter_chart 被调用")
+            print(f"   时间数据点数: {len(time_data)}")
+            print(f"   直径数据点数: {len(diameter_data)}")
+            print(f"   图表对象: {self.diam_chart}")
             
             # 使用 MatplotlibWidget 的 plot_line 方法
+            print(f"   正在调用 diam_chart.plot_line...")
             self.diam_chart.plot_line(
                 time_data, diameter_data,
                 title="火球直径随时间变化",
@@ -289,6 +361,7 @@ class ExtractTab(QWidget):
                 color='#f59e0b'
             )
             
+            print("   ✅ diam_chart.plot_line 调用完成")
             print("✅ 直径图表更新完成")
             
         except Exception as e:
@@ -297,10 +370,10 @@ class ExtractTab(QWidget):
             traceback.print_exc()
     
     def start_feature_extraction(self):
-        """开始特征提取"""
+        """开始特征提取（调用分割脚本）"""
         try:
             print("🔥 开始特征提取...")
-            self.extract_status.setText("正在提取特征...")
+            self.extract_status.setText("正在检查序列文件...")
             self.extract_btn.setEnabled(False)
             
             # 检查是否有序列数据
@@ -310,30 +383,63 @@ class ExtractTab(QWidget):
                 self.extract_btn.setEnabled(True)
                 return
             
-            # 获取材料类型（从序列数据中获取）
-            material_type = self.sequence_data.get('parameters', {}).get('material_type', '40%Al/Rubber')
+            # 检查序列文件路径
+            if not hasattr(self, '_current_sequence_file_path') or not self._current_sequence_file_path:
+                QMessageBox.warning(self, "警告", "无法找到序列文件路径！")
+                self.extract_status.setText("序列文件路径丢失")
+                self.extract_btn.setEnabled(True)
+                return
             
-            # 映射材料类型到计算器中的名称
-            material_mapping = {
-                '40% Al / Rubber': '40%Al/Rubber',
-                '30% Al / Rubber': '30%Al/Rubber', 
-                '50% Al / Rubber': '50%Al/Rubber',
-                '60% Al / Rubber': '60%Al/Rubber',
-                'Polyurethane': 'Polyurethane'
-            }
+            # 检查分割状态
+            segmentation_status = self.check_segmentation_status()
             
-            material_name = material_mapping.get(material_type, '40%Al/Rubber')
-            print(f"使用材料类型: {material_name}")
+            if segmentation_status == 'no_prompt_data':
+                # 情况1：没有prompt数据
+                QMessageBox.warning(self, "警告", 
+                    "序列文件中没有特征点数据！\n\n请先：\n1. 点击'开始选择参考点'\n2. 在图像上选择正负点\n3. 完成特征点选择后再进行提取")
+                self.extract_status.setText("请先选择特征点")
+                self.extract_btn.setEnabled(True)
+                return
+                
+            elif segmentation_status == 'already_segmented':
+                # 情况2：已有分割结果
+                reply = QMessageBox.question(self, "提示", 
+                    "检测到序列文件中已包含分割结果！\n\n特征提取已经完成。\n\n如需重新提取，请：\n1. 点击'重新提取'\n2. 重新选择特征点\n3. 再次执行提取",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No)
+                
+                if reply == QMessageBox.Yes:
+                    # 用户选择重新提取
+                    self.prepare_for_reextraction()
+                else:
+                    # 用户取消，恢复按钮状态
+                    self.extract_btn.setEnabled(True)
+                    self.extract_status.setText("已有分割结果")
+                    return
             
-            # 计算火球直径随时间变化
-            self.calculate_fireball_diameter_curve(material_name)
+            # 情况3：有prompt数据但没有分割结果，执行分割
+            print("开始执行分割脚本...")
+            self.extract_status.setText("正在执行分割脚本...")
             
-            # 更新状态
-            self.extract_status.setText("特征提取完成")
-            self.save_button.setEnabled(True)
+            # 调用分割脚本
+            success = self.run_segmentation_script(self._current_sequence_file_path)
+            
+            if success:
+                # 分割成功，重新加载序列文件
+                print("分割完成，重新加载序列文件...")
+                self.extract_status.setText("正在加载分割结果...")
+                
+                # 重新加载序列文件以获取分割结果
+                self.reload_sequence_with_segmentation_results()
+                
+                self.extract_status.setText("特征提取完成")
+                self.save_button.setEnabled(True)
+                print("✅ 特征提取完成！")
+            else:
+                self.extract_status.setText("特征提取失败")
+                QMessageBox.critical(self, "错误", "分割脚本执行失败！\n请检查控制台输出获取详细信息。")
+            
             self.extract_btn.setEnabled(True)
-            
-            print("✅ 特征提取完成！")
             
         except Exception as e:
             print(f"❌ 特征提取失败: {e}")
@@ -379,6 +485,305 @@ class ExtractTab(QWidget):
             import traceback
             traceback.print_exc()
             raise e
+    
+    def check_segmentation_status(self):
+        """
+        检查序列文件的分割状态
+        
+        Returns:
+            str: 'no_prompt_data' | 'already_segmented' | 'ready_for_segmentation'
+        """
+        try:
+            # 检查是否有分割结果
+            if self.sequence_manager.has_segmentation_results(self.sequence_data):
+                return 'already_segmented'
+            
+            # 检查是否有prompt数据
+            prompt_data = self.sequence_manager.get_prompt_data_from_sequence(self.sequence_data)
+            if not prompt_data:
+                return 'no_prompt_data'
+            
+            return 'ready_for_segmentation'
+            
+        except Exception as e:
+            print(f"❌ 检查分割状态失败: {e}")
+            return 'no_prompt_data'
+    
+    def run_segmentation_script(self, sequence_file_path: str) -> bool:
+        """
+        调用test_complete_propagation.py脚本执行分割
+        
+        Args:
+            sequence_file_path: 序列文件路径
+            
+        Returns:
+            bool: 执行是否成功
+        """
+        try:
+            # 构建脚本路径
+            script_dir = os.path.join(os.path.dirname(__file__), '..', 'image_segment')
+            script_path = os.path.join(script_dir, 'test_complete_propagation.py')
+            
+            if not os.path.exists(script_path):
+                print(f"❌ 分割脚本不存在: {script_path}")
+                return False
+            
+            print(f"正在执行分割脚本: {script_path}")
+            print(f"序列文件: {sequence_file_path}")
+            
+            # 设置环境变量以确保Python路径正确
+            env = os.environ.copy()
+            project_root = os.path.join(os.path.dirname(__file__), '..', '..')
+            env['PYTHONPATH'] = os.path.abspath(os.path.join(project_root, 'source'))
+            
+            print(f"设置PYTHONPATH: {env['PYTHONPATH']}")
+            
+            # 调用脚本
+            result = subprocess.run([
+                sys.executable, script_path, sequence_file_path
+            ], capture_output=True, text=True, cwd=script_dir, env=env)
+            
+            # 输出结果
+            if result.stdout:
+                print("脚本输出:")
+                print(result.stdout)
+            
+            if result.stderr:
+                print("脚本错误:")
+                print(result.stderr)
+            
+            # 检查执行结果
+            if result.returncode == 0:
+                print("✅ 分割脚本执行成功")
+                return True
+            else:
+                print(f"❌ 分割脚本执行失败，退出码: {result.returncode}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ 执行分割脚本异常: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def prepare_for_reextraction(self):
+        """准备重新提取：清除分割结果，重置为特征点选择模式"""
+        try:
+            # 清除分割结果数据
+            self.segmentation_results = []
+            self.has_segmentation_data = False
+            
+            # 清除JSON文件中的分割结果
+            if hasattr(self, '_current_sequence_file_path') and self._current_sequence_file_path:
+                success, message = self.sequence_manager.clear_segmentation_results_from_sequence(self._current_sequence_file_path)
+                if success:
+                    print(f"✅ {message}")
+                else:
+                    print(f"❌ {message}")
+            
+            # 重置显示模式
+            self.extract_preview.set_show_segmentation(False)
+            
+            # 重新加载特征点数据
+            prompt_data = self.sequence_manager.get_prompt_data_from_sequence(self.sequence_data)
+            if prompt_data:
+                self.prompt_data = prompt_data
+                self.load_points_for_current_image()
+                self.update_prompt_info_display()
+            
+            # 更新状态
+            self.extract_status.setText("已清除分割结果，请重新选择特征点")
+            
+            print("✅ 已准备重新提取")
+            
+        except Exception as e:
+            print(f"❌ 准备重新提取失败: {e}")
+    
+    def reload_sequence_with_segmentation_results(self):
+        """重新加载序列文件并显示分割结果"""
+        try:
+            # 重新加载序列文件
+            success, sequence_data, message = self.sequence_manager.load_sequence_file(self._current_sequence_file_path)
+            
+            if not success:
+                print(f"❌ 重新加载序列文件失败: {message}")
+                return False
+            
+            # 更新序列数据
+            self.sequence_data = sequence_data
+            
+            # 检查并加载分割结果
+            if self.sequence_manager.has_segmentation_results(sequence_data):
+                segmentation_results = self.sequence_manager.get_segmentation_results_from_sequence(sequence_data)
+                print(f"加载分割结果: {len(segmentation_results)} 张图像")
+                
+                # 设置分割结果显示
+                self.segmentation_results = segmentation_results
+                self.has_segmentation_data = True
+                
+                # 清除特征点数据，避免显示冲突
+                self.prompt_data = {}
+                self.ignition_point = None
+                
+                # 显示当前图像的分割结果
+                self.display_image_at_index(self.current_image_index)
+                
+                # 更新信息面板
+                successful_count = sum(1 for result in segmentation_results if result.get('success', False))
+                self.update_segmentation_info_display(successful_count, len(segmentation_results))
+                
+                # 更新直径图表
+                self.update_diameter_chart_from_segmentation_results(segmentation_results)
+                
+                print(f"✅ 分割结果显示完成: {successful_count}/{len(segmentation_results)} 张图像成功")
+                return True
+            else:
+                print("❌ 序列文件中没有分割结果")
+                return False
+                
+        except Exception as e:
+            print(f"❌ 重新加载序列文件失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def update_diameter_chart_from_segmentation_results(self, segmentation_results):
+        """根据分割结果更新直径图表"""
+        try:
+            print(f"📊 开始从分割结果更新直径图表...")
+            print(f"   分割结果数量: {len(segmentation_results)}")
+            
+            # 提取时间和直径数据
+            time_data = []
+            diameter_data = []
+            
+            total_images = len(segmentation_results)
+            
+            # 统计有效数据
+            valid_results = 0
+            invalid_results = 0
+            
+            for i, result in enumerate(segmentation_results):
+                # 计算时间（毫秒）
+                if total_images > 1:
+                    time_ms = (i / (total_images - 1)) * self.explosion_duration
+                else:
+                    time_ms = 0
+                time_data.append(time_ms)
+                
+                # 提取直径数据
+                if result and result.get('success', False):
+                    max_radius = result.get('max_radius')
+                    
+                    # 检查max_radius是否为有效的数据
+                    if max_radius is not None:
+                        try:
+                            # max_radius可能是字典或数字
+                            if isinstance(max_radius, dict):
+                                # 如果是字典，提取value字段
+                                radius_value = float(max_radius.get('value', 0))
+                            else:
+                                # 如果是数字，直接转换
+                                radius_value = float(max_radius)
+                            
+                            if radius_value > 0:  # 确保半径为正数
+                                diameter = 2 * radius_value
+                                diameter_data.append(diameter)
+                                valid_results += 1
+                                if i < 3:  # 只打印前几个的详细信息
+                                    print(f"   图像 {i}: 半径={radius_value:.3f}m, 直径={diameter:.3f}m")
+                            else:
+                                diameter_data.append(None)
+                                invalid_results += 1
+                                if i < 3:
+                                    print(f"   图像 {i}: 半径值无效 ({radius_value})")
+                        except (ValueError, TypeError, KeyError) as e:
+                            diameter_data.append(None)
+                            invalid_results += 1
+                            if i < 3:
+                                if isinstance(max_radius, dict):
+                                    print(f"   图像 {i}: 半径数据解析错误 - 字典结构: {list(max_radius.keys()) if max_radius else 'None'}")
+                                else:
+                                    print(f"   图像 {i}: 半径数据解析错误 ({type(max_radius)}: {max_radius})")
+                    else:
+                        diameter_data.append(None)
+                        invalid_results += 1
+                        if i < 3:
+                            print(f"   图像 {i}: max_radius为None")
+                else:
+                    # 如果分割失败，跳过
+                    diameter_data.append(None)
+                    invalid_results += 1
+                    if i < 3:  # 只打印前几个的详细信息
+                        success_status = result.get('success', False) if result else False
+                        max_radius_info = result.get('max_radius') if result else None
+                        print(f"   图像 {i}: 分割失败 (success={success_status}, max_radius_type={type(max_radius_info)})")
+            
+            
+            print(f"   统计: 有效数据 {valid_results} 个, 无效数据 {invalid_results} 个")
+            print(f"   爆炸时长: {self.explosion_duration} ms")
+            
+            if valid_results == 0:
+                print("   ❌ 所有图片都没有有效的分割结果，无法绘制直径图表")
+                return
+            
+            # 处理缺失数据（简单的线性插值）
+            diameter_data_cleaned = self.interpolate_missing_values(diameter_data)
+            
+            if diameter_data_cleaned:
+                print(f"   插值后数据点: {len(diameter_data_cleaned)} 个")
+                print(f"   时间范围: {min(time_data):.1f} - {max(time_data):.1f} ms")
+                valid_diameters = [d for d in diameter_data_cleaned if d is not None and d > 0]
+                if valid_diameters:
+                    print(f"   直径范围: {min(valid_diameters):.3f} - {max(valid_diameters):.3f} m")
+                    
+                    # 更新图表
+                    print(f"   正在调用 update_diameter_chart...")
+                    self.update_diameter_chart(time_data, diameter_data_cleaned)
+                    print(f"   ✅ 直径图表更新完成")
+                else:
+                    print(f"   ❌ 插值后仍无有效直径数据")
+            else:
+                print("   ❌ 没有有效的直径数据")
+                
+        except Exception as e:
+            print(f"❌ 更新直径图表失败: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def interpolate_missing_values(self, data):
+        """简单的线性插值处理缺失值"""
+        try:
+            if not data:
+                return []
+            
+            # 转换为numpy数组以便处理
+            data_array = np.array(data, dtype=float)
+            
+            # 找到有效数据的索引
+            valid_mask = ~np.isnan(data_array)
+            valid_indices = np.where(valid_mask)[0]
+            
+            if len(valid_indices) == 0:
+                return []
+            
+            if len(valid_indices) == 1:
+                # 只有一个有效值，用这个值填充所有缺失值
+                return [data_array[valid_indices[0]]] * len(data)
+            
+            # 线性插值
+            interpolated = np.interp(
+                np.arange(len(data)),
+                valid_indices,
+                data_array[valid_indices]
+            )
+            
+            return interpolated.tolist()
+            
+        except Exception as e:
+            print(f"❌ 插值失败: {e}")
+            # 返回原始数据，去除None值
+            return [d for d in data if d is not None]
     
     def toggle_prompt_selection(self):
         """切换prompt点选择模式"""
@@ -457,6 +862,40 @@ class ExtractTab(QWidget):
             return 'ignition'
         else:
             return 'positive'  # 默认返回正点
+    
+    def start_reextraction(self):
+        """开始重新提取"""
+        try:
+            print("🔄 开始重新提取...")
+            
+            # 检查是否有序列数据
+            if not self.sequence_data:
+                QMessageBox.warning(self, "警告", "请先加载火球爆炸序列文件！")
+                return
+            
+            # 确认操作
+            reply = QMessageBox.question(self, "确认重新提取", 
+                "重新提取将会：\n\n"
+                "1. 清除当前的分割结果\n"
+                "2. 恢复特征点选择模式\n"
+                "3. 您需要重新选择特征点\n\n"
+                "是否继续？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No)
+            
+            if reply == QMessageBox.Yes:
+                # 准备重新提取
+                self.prepare_for_reextraction()
+                
+                # 隐藏重新提取按钮，显示正常提取按钮
+                self.reextract_btn.setVisible(False)
+                self.extract_btn.setVisible(True)
+                
+                print("✅ 已准备重新提取，请重新选择特征点")
+                
+        except Exception as e:
+            print(f"❌ 重新提取失败: {e}")
+            QMessageBox.critical(self, "错误", f"重新提取失败:\n{str(e)}")
     
     def add_prompt_point(self, image_index: int, x: int, y: int, is_positive: bool = True):
         """
@@ -561,6 +1000,28 @@ class ExtractTab(QWidget):
             
         except Exception as e:
             print(f"❌ 更新参考点信息显示失败: {e}")
+            self.prompt_info_text.setPlainText(f"显示错误: {str(e)}")
+    
+    def update_segmentation_info_display(self, successful_count: int, total_count: int):
+        """更新分割结果信息显示"""
+        try:
+            info_lines = []
+            info_lines.append("🎯 分割结果信息")
+            info_lines.append("=" * 30)
+            info_lines.append(f"总图片数: {total_count}")
+            info_lines.append(f"成功分割: {successful_count}")
+            info_lines.append(f"失败分割: {total_count - successful_count}")
+            info_lines.append(f"成功率: {successful_count/total_count*100:.1f}%")
+            info_lines.append("")
+            info_lines.append("💡 当前显示分割结果（轮廓+质心+半径）")
+            info_lines.append("   - 蓝色轮廓: 火球边界")
+            info_lines.append("   - 绿色质心: 爆心位置")
+            info_lines.append("   - 绿色箭头: 最大半径方向")
+            
+            self.prompt_info_text.setPlainText("\n".join(info_lines))
+            
+        except Exception as e:
+            print(f"❌ 更新分割结果信息显示失败: {e}")
             self.prompt_info_text.setPlainText(f"显示错误: {str(e)}")
     
     def export_prompt_data_to_json(self, file_path: str):
@@ -770,3 +1231,42 @@ class ExtractTab(QWidget):
         except Exception as e:
             print(f"❌ 跳转到图片失败: {e}")
             QMessageBox.critical(self, "错误", f"跳转失败:\n{str(e)}")
+    
+    def test_diameter_chart_update(self):
+        """测试直径图表更新功能"""
+        try:
+            print("🧪 测试直径图表更新功能")
+            
+            # 创建测试数据
+            test_segmentation_results = [
+                {
+                    'success': True,
+                    'max_radius': 1.5,
+                    'centroid': [100, 100],
+                    'contour': [[90, 90], [110, 90], [110, 110], [90, 110]]
+                },
+                {
+                    'success': True, 
+                    'max_radius': 2.0,
+                    'centroid': [105, 105],
+                    'contour': [[85, 85], [125, 85], [125, 125], [85, 125]]
+                },
+                {
+                    'success': True,
+                    'max_radius': 2.2,
+                    'centroid': [110, 110], 
+                    'contour': [[80, 80], [140, 80], [140, 140], [80, 140]]
+                }
+            ]
+            
+            print(f"   创建了 {len(test_segmentation_results)} 个测试分割结果")
+            
+            # 测试更新直径图表
+            self.update_diameter_chart_from_segmentation_results(test_segmentation_results)
+            
+            print("✅ 直径图表测试完成")
+            
+        except Exception as e:
+            print(f"❌ 直径图表测试失败: {e}")
+            import traceback
+            traceback.print_exc()

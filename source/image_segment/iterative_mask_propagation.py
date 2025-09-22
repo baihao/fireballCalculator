@@ -37,7 +37,7 @@ except ImportError:
 class IterativeMaskPropagationSegmenter:
     """迭代掩码传播分割器"""
     
-    def __init__(self, model_type: str = "vit_l", 
+    def __init__(self, model_type: str = "vit_b", 
                  checkpoint_path: Optional[str] = None,
                  device: str = "auto",
                  enable_postprocessing: bool = True):
@@ -468,7 +468,7 @@ class IterativeMaskPropagationSegmenter:
                 point_coords=point_coords,
                 point_labels=point_labels,
                 box=input_boxes,
-                multimask_output=True,
+                multimask_output=False,
             )
             
             # 返回masks和对应的scores
@@ -532,7 +532,7 @@ class IterativeMaskPropagationSegmenter:
             masks, scores, logits = self.predictor.predict(
                 point_coords=point_coords,
                 point_labels=point_labels,
-                multimask_output=True,
+                multimask_output=False,
             )
             
             if len(masks) > 0:
@@ -619,7 +619,7 @@ class IterativeMaskPropagationSegmenter:
     
 
 
-def create_iterative_segmenter(model_type: str = "vit_l", 
+def create_iterative_segmenter(model_type: str = "vit_b", 
                                checkpoint_path: Optional[str] = None,
                                device: str = "auto",
                                enable_postprocessing: bool = True) -> IterativeMaskPropagationSegmenter:
