@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QLabel, QWidget
 from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QMouseEvent
 from typing import List, Tuple, Optional, Dict, Any
+from collections import OrderedDict
 
 
 class InteractiveImageWidget(QLabel):
@@ -55,6 +56,28 @@ class InteractiveImageWidget(QLabel):
         
         # 启用鼠标跟踪
         self.setMouseTracking(True)
+        
+        # 图像缓存（LRU）
+        self._image_cache: "OrderedDict[str, np.ndarray]" = OrderedDict()
+        self._cache_capacity: int = 1024  # 默认最多缓存1024张图像
+    
+    def set_cache_capacity(self, capacity: int):
+        """
+        设置缓存容量（按图片张数计）。
+        """
+        try:
+            if capacity <= 0:
+                capacity = 1
+            self._cache_capacity = int(capacity)
+            # 超出容量则立刻裁剪
+            while len(self._image_cache) > self._cache_capacity:
+                self._image_cache.popitem(last=False)
+        except Exception as _:
+            pass
+    
+    def clear_image_cache(self):
+        """清空已缓存的图像。"""
+        self._image_cache.clear()
     
     def set_image(self, image_path: str):
         """
@@ -64,14 +87,24 @@ class InteractiveImageWidget(QLabel):
             image_path: 图像文件路径
         """
         try:
-            # 读取图像
-            image = cv2.imread(image_path)
-            if image is None:
-                self.setText(f"无法加载图像: {image_path}")
-                return False
-            
-            # 转换为RGB格式
-            self.original_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            # 优先从缓存读取
+            cached = self._image_cache.get(image_path)
+            if cached is None:
+                image = cv2.imread(image_path)
+                if image is None:
+                    self.setText(f"无法加载图像: {image_path}")
+                    return False
+                # 转换为RGB并放入缓存（LRU）
+                converted = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                self._image_cache[image_path] = converted
+                # 控制缓存容量
+                if len(self._image_cache) > self._cache_capacity:
+                    self._image_cache.popitem(last=False)
+                self.original_image = converted
+            else:
+                # 命中缓存，更新为最近使用
+                self._image_cache.move_to_end(image_path, last=True)
+                self.original_image = cached
             self.image_path = image_path
             
             # 清空之前的点标记
@@ -247,12 +280,10 @@ class InteractiveImageWidget(QLabel):
             # 创建显示图像的副本
             display_image = self.original_image.copy()
             
-            # 绘制分割结果（在点标记之前绘制，作为背景）
+            # 绘制分割结果或点标记（二选一，互斥显示）
             if self.show_segmentation:
                 self._draw_segmentation_on_image(display_image)
-            
-            # 只有在不显示分割结果时才绘制点标记（避免视觉混乱）
-            if not self.show_segmentation:
+            else:
                 self._draw_points_on_image(display_image)
             
             # 转换为QPixmap并缩放显示
