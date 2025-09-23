@@ -522,7 +522,7 @@ class ExtractTab(QWidget):
             
             # 检查是否有prompt数据
             prompt_data = self.sequence_manager.get_prompt_data_from_sequence(self.sequence_data)
-            if not prompt_data:
+            if not prompt_data or (isinstance(prompt_data, dict) and len(prompt_data.keys()) == 0):
                 return 'no_prompt_data'
             
             return 'ready_for_segmentation'
@@ -731,6 +731,24 @@ class ExtractTab(QWidget):
             if success:
                 print(f"✅ 自动保存prompt数据和起爆点成功: {message}")
                 self.extract_status.setText("参考点数据已自动保存")
+                # 同步更新内存中的 sequence_data，避免后续再次读取文件
+                try:
+                    if isinstance(self.sequence_data, dict):
+                        # 确保 image_sequence 节点存在
+                        if 'image_sequence' not in self.sequence_data or not isinstance(self.sequence_data['image_sequence'], dict):
+                            self.sequence_data['image_sequence'] = {}
+                        image_seq = self.sequence_data['image_sequence']
+                        # 写入 prompt_data（键使用字符串以保持与文件一致）
+                        image_seq['prompt_data'] = {str(k): v for k, v in self.prompt_data.items()}
+                        # 写入起爆点
+                        if self.ignition_point is not None:
+                            image_seq['target_center'] = list(self.ignition_point)
+                        else:
+                            # 若起爆点被清除
+                            if 'target_center' in image_seq:
+                                del image_seq['target_center']
+                except Exception as _:
+                    pass
             else:
                 print(f"❌ 自动保存参考点数据失败: {message}")
                 self.extract_status.setText("参考点数据保存失败")
