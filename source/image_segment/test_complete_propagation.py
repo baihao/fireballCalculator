@@ -281,7 +281,7 @@ def test_from_json(json_path: str):
         print("   ✓ 分割器创建成功（后处理已禁用）")
         
         # 执行分割
-        print("\n4. 执行迭代掩码传播分割...")
+        print("\n4. 执行迭代掩码传播分割...", flush=True)
         masks, geometries = segmenter.segment_sequence_with_iterative_propagation(
             image_paths=image_paths,
             prompt_data=prompt_data,

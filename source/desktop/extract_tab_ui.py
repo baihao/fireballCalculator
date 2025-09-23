@@ -115,10 +115,16 @@ class ExtractTabUI:
         # 添加弹性空间，将状态标签推到最下面
         left_layout.addStretch()
         
-        # 状态标签
+        # 状态标签 - 改为多行显示
         self.ui_components['extract_status'] = QLabel("待开始")
-        self.ui_components['extract_status'].setStyleSheet("color: #9ca3af; font-size: 12px; padding: 10px; text-align: center;")
-        self.ui_components['extract_status'].setAlignment(Qt.AlignCenter)
+        self.ui_components['extract_status'].setStyleSheet("color: #9ca3af; font-size: 11px; padding: 8px; text-align: left;")
+        self.ui_components['extract_status'].setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        # 设置状态标签的固定宽度和高度，支持多行显示
+        self.ui_components['extract_status'].setWordWrap(True)
+        self.ui_components['extract_status'].setMaximumWidth(400)  # 限制最大宽度，与图像预览最小宽度一致
+        self.ui_components['extract_status'].setMinimumWidth(200)  # 设置最小宽度
+        self.ui_components['extract_status'].setMaximumHeight(120)  # 设置最大高度，约5行文本
+        self.ui_components['extract_status'].setMinimumHeight(60)   # 设置最小高度
         left_layout.addWidget(self.ui_components['extract_status'])
         
         left_widget.setLayout(left_layout)

@@ -265,7 +265,7 @@ class IterativeMaskPropagationSegmenter:
                 print(f"⚠️ 索引 {idx} 超出图像序列范围，跳过")
                 continue
             
-            print(f"处理第 {idx+1}/{len(image_paths)} 张图片 (有prompt点): {os.path.basename(image_paths[idx])}")
+            print(f"处理第 {idx+1}/{len(image_paths)} 张图片 (有prompt点): {os.path.basename(image_paths[idx])}", flush=True)
             
             # 记录开始时间
             start_time = time.time()
@@ -314,7 +314,7 @@ class IterativeMaskPropagationSegmenter:
             # 更新当前迭代次数用于debug
             self.current_iteration = iteration
             print(f"\n--- 第 {iteration} 次迭代 ---")
-            print(f"已处理: {len(self.processed_indices)}/{len(image_paths)} 张图片")
+            print(f"已处理: {len(self.processed_indices)}/{len(image_paths)} 张图片", flush=True)
             print(f"已处理索引: {sorted(self.processed_indices)}")
             print(f"已失败索引: {sorted(self.failed_indices)}")
             
@@ -348,7 +348,7 @@ class IterativeMaskPropagationSegmenter:
                 
                 # 处理该组中的所有未处理图片
                 for unprocessed_idx in unprocessed_indices:
-                    print(f"    处理第 {unprocessed_idx+1} 张图片")
+                    print(f"    处理第 {unprocessed_idx+1} 张图片", flush=True)
                     
                     # 记录开始时间
                     start_time = time.time()
