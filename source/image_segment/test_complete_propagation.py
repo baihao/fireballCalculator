@@ -142,10 +142,10 @@ def test_complete_propagation():
     print("=" * 60)
     
     try:
-        # 创建分割器（默认不启用后处理）
+        # 创建分割器（默认启用后处理）
         print("1. 创建分割器...")
-        segmenter = create_iterative_segmenter(enable_postprocessing=False)
-        print("   ✓ 分割器创建成功（后处理已禁用）")
+        segmenter = create_iterative_segmenter(enable_postprocessing=True)
+        print("   ✓ 分割器创建成功（后处理已启用）")
         
         # 创建测试图片
         print("\n2. 创建测试图片...")
@@ -275,10 +275,10 @@ def test_from_json(json_path: str):
         
         image_paths = valid_paths
         
-        # 创建分割器（默认不启用后处理）
+        # 创建分割器（默认启用后处理）
         print("\n3. 创建分割器...")
-        segmenter = create_iterative_segmenter(enable_postprocessing=False)
-        print("   ✓ 分割器创建成功（后处理已禁用）")
+        segmenter = create_iterative_segmenter(enable_postprocessing=True)
+        print("   ✓ 分割器创建成功（后处理已启用）")
         
         # 执行分割
         print("\n4. 执行迭代掩码传播分割...", flush=True)

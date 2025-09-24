@@ -321,10 +321,10 @@ class PromptPointGenerator:
             for ref_rgb in reference_positive_rgbs:
                 if self.is_rgb_very_similar(target_rgb, ref_rgb):
                     similar_count += 1
-            
-            # 至少与两个参考正点非常相似
-            if similar_count >= 2:
-                valid_points.append((x, y))
+                    # 找到两个相似点即可，直接添加并跳出
+                    if similar_count >= 2:
+                        valid_points.append((x, y))
+                        break
         
         return valid_points
     
@@ -343,12 +343,18 @@ class PromptPointGenerator:
             for ref_rgb in reference_positive_rgbs:
                 if self.is_rgb_very_similar(target_rgb, ref_rgb):
                     very_similar_count += 1
+                    # 发现非常相似，立即跳出（不满足负点条件）
+                    break
                 elif self.is_rgb_similar(target_rgb, ref_rgb):
                     similar_count += 1
+                    # 发现超过1个相似点，立即跳出（不满足负点条件）
+                    if similar_count > 1:
+                        break
             
             # 负点条件：不能非常相似，至多与一个正点相似
-            if very_similar_count == 0 and similar_count <= 1:
-                valid_points.append((x, y))
+            if very_similar_count > 0 or similar_count > 1:
+                continue
+            valid_points.append((x, y))
         
         return valid_points
     

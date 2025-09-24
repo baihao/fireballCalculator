@@ -23,13 +23,15 @@ except ImportError:
 try:
     from .prompt_generation import create_prompt_generator
     from .adjacent_group_finder import create_adjacent_group_finder
-    from .mask_utils import create_mask_analyzer, create_failure_analyzer
+    from .mask_utils import create_mask_analyzer
+    from .failure_analyzer import create_failure_analyzer
     from .mask_postprocessing import create_contour_processor
     from .output_manager import create_output_manager
 except ImportError:
     from prompt_generation import create_prompt_generator
     from adjacent_group_finder import create_adjacent_group_finder
-    from mask_utils import create_mask_analyzer, create_failure_analyzer
+    from mask_utils import create_mask_analyzer
+    from failure_analyzer import create_failure_analyzer
     from mask_postprocessing import create_contour_processor
     from output_manager import create_output_manager
 
@@ -279,11 +281,18 @@ class IterativeMaskPropagationSegmenter:
                 
                 # 选择最佳掩码（使用SAM的scores）
                 best_mask, sam_quality = self._select_best_mask_with_sam_score(masks, scores)
-                self.all_masks[idx] = best_mask
+                original_area = int(np.sum(best_mask)) if best_mask is not None else 0
+                print(f"  📊 Prompt掩码: 面积={original_area}, SAM质量分数={sam_quality:.3f}")
+                
+                # 对直接用特征点得到的掩码执行后处理
+                final_mask = self._apply_mask_postprocessing(best_mask, original_area, sam_quality, idx)
+                
+                # 记录结果
+                self.all_masks[idx] = final_mask
                 self.processed_indices.add(idx)
                 
-                # 保存prompt图片详情和下次迭代的采样点
-                self._save_prompted_image_details(idx, best_mask, prompt_data[idx])
+                # 保存prompt图片详情和下次迭代的采样点（使用后处理后的掩码）
+                self._save_prompted_image_details(idx, final_mask, prompt_data[idx])
                 
                 # 计算处理时间
                 end_time = time.time()
@@ -294,7 +303,7 @@ class IterativeMaskPropagationSegmenter:
                 
                 # 保存结果
                 if output_dir:
-                    self.output_manager.save_mask_results(image_paths[idx], best_mask, idx, output_dir, save_masks, "prompted")
+                    self.output_manager.save_mask_results(image_paths[idx], final_mask, idx, output_dir, save_masks, "prompted")
             else:
                 # 计算处理时间（即使失败也要记录时间）
                 end_time = time.time()
@@ -577,13 +586,12 @@ class IterativeMaskPropagationSegmenter:
             np.ndarray: 处理后的最终掩码
         """
         if self.enable_postprocessing:
-            # 执行轮廓特征过滤
-            cleaned_mask = self.contour_processor.filter_mask_by_contour_quality(
-                best_mask, "fireball_optimized"
-            )
+            # 使用双连通域评分过滤并获取细节
+            details = self.contour_processor.filter_by_dual_connected_components_with_details(best_mask)
+            cleaned_mask = details.get("mask", best_mask)
             
             # 记录清理后的信息
-            cleaned_area = np.sum(cleaned_mask)
+            cleaned_area = np.sum(cleaned_mask) if cleaned_mask is not None else 0
             area_retention = cleaned_area / original_area if original_area > 0 else 0
             
             print(f"    🧹 清理后掩码: 面积={cleaned_area}, 保留率={area_retention:.3f}")
@@ -592,12 +600,20 @@ class IterativeMaskPropagationSegmenter:
             if target_idx in self.propagation_details:
                 self.propagation_details[target_idx]['original_mask'] = best_mask
                 self.propagation_details[target_idx]['cleaned_mask'] = cleaned_mask
-                self.propagation_details[target_idx]['postprocessing_stats'] = {
+                stats = {
                     'original_area': original_area,
                     'cleaned_area': cleaned_area,
                     'area_retention': area_retention,
                     'sam_quality': sam_quality  # SAM原生质量分数
                 }
+                # 附加后处理细节（面积、质心、得分等）
+                if isinstance(details, dict):
+                    stats.update({
+                        'pp_area': details.get('area', 0.0),
+                        'pp_centroid': details.get('centroid', (0.0, 0.0)),
+                        'pp_scores': details.get('scores', {})
+                    })
+                self.propagation_details[target_idx]['postprocessing_stats'] = stats
             
             return cleaned_mask
         else:
