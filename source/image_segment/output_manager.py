@@ -350,14 +350,18 @@ class SegmentationOutputManager:
                 
                 segmentation_results.append(result_item)
             
-            # 添加分割结果到原JSON数据中
+            # 添加分割结果到JSON数据中
             data["image_sequence_segmentation"] = segmentation_results
             
-            # 保存更新后的JSON文件
-            with open(json_path, 'w', encoding='utf-8') as f:
+            # 生成新的导出文件名：原文件名 + "_segmented"
+            p = Path(json_path)
+            export_path = p.with_name(f"{p.stem}_segmented{p.suffix}")
+            
+            # 保存为新文件，避免覆盖原始序列文件
+            with open(export_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
-            print(f"✅ 分割结果已导出到: {json_path}")
+            print(f"✅ 分割结果已导出到: {export_path}")
             successful_count = sum(1 for result in segmentation_results if result['success'])
             print(f"   成功分割: {successful_count}/{len(segmentation_results)} 张图片")
             
