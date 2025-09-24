@@ -637,15 +637,23 @@ class ExtractTab(QWidget):
     def reload_sequence_with_segmentation_results(self):
         """重新加载序列文件并显示分割结果"""
         try:
-            # 重新加载序列文件
-            success, sequence_data, message = self.sequence_manager.load_sequence_file(self._current_sequence_file_path)
+            # 重新加载分割后的序列文件（原文件名 + "_segmented"）
+            from pathlib import Path
+            original_path = Path(self._current_sequence_file_path)
+            segmented_path = original_path.with_name(f"{original_path.stem}_segmented{original_path.suffix}")
+
+            if not segmented_path.exists():
+                print(f"⚠️ 分割后的序列文件不存在: {segmented_path}")
+                return False
+
+            success, sequence_data, message = self.sequence_manager.load_sequence_file(str(segmented_path))
             
             if not success:
                 print(f"❌ 重新加载序列文件失败: {message}")
                 return False
             
             # 统一应用逻辑
-            return self._apply_sequence_data(sequence_data)
+            return self._apply_sequence_data(sequence_data, str(segmented_path))
                 
         except Exception as e:
             print(f"❌ 重新加载序列文件失败: {e}")
