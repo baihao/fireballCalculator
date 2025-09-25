@@ -151,8 +151,35 @@ class IterativeMaskPropagationSegmenter:
         mask_geometries = []
         for i, mask in enumerate(self.all_masks):
             if mask is not None:
-                geometry = self.mask_analyzer.analyze_mask_geometry(mask, target_centre)
-                geometry['image_index'] = i
+                # 优先使用后处理保存的信息
+                if i in self.propagation_details and 'postprocessing_details' in self.propagation_details[i]:
+                    pp_details = self.propagation_details[i]['postprocessing_details']
+                    area = pp_details['area']
+                    contour = pp_details['contour']
+                    
+                    # 如果提供了target_centre，则将其作为centroid，否则使用后处理的值
+                    if target_centre is not None:
+                        centroid = target_centre
+                        print(f"  🔄 图片 {i+1}: 使用后处理数据计算几何信息 (面积={area}, 质心=target_centre=({centroid[0]:.1f}, {centroid[1]:.1f}))")
+                    else:
+                        centroid = pp_details['centroid']
+                        print(f"  🔄 图片 {i+1}: 使用后处理数据计算几何信息 (面积={area}, 质心=后处理=({centroid[0]:.1f}, {centroid[1]:.1f}))")
+                    
+                    # 只需要计算最大半径
+                    max_radius, max_radius_point = self.mask_analyzer.calculate_max_radius_with_point(mask, centroid)
+                    
+                    geometry = {
+                        'image_index': i,
+                        'area': area,
+                        'centroid': centroid,
+                        'max_radius': max_radius,
+                        'max_radius_point': max_radius_point
+                    }
+                else:
+                    # 回退到完整计算（兼容没有后处理的情况）
+                    geometry = self.mask_analyzer.analyze_mask_geometry(mask, target_centre)
+                    geometry['image_index'] = i
+                
                 mask_geometries.append(geometry)
             else:
                 mask_geometries.append(None)
@@ -614,6 +641,14 @@ class IterativeMaskPropagationSegmenter:
                         'pp_scores': details.get('scores', {})
                     })
                 self.propagation_details[target_idx]['postprocessing_stats'] = stats
+                
+                # 保存后处理的详细信息供几何计算使用
+                self.propagation_details[target_idx]['postprocessing_details'] = {
+                    'area': details.get('area', 0.0),
+                    'centroid': details.get('centroid', (0.0, 0.0)),
+                    'contour': details.get('contour', None),
+                    'scores': details.get('scores', {})
+                }
             
             return cleaned_mask
         else:

@@ -107,9 +107,7 @@ class MaskValidator:
                 'area': 0,
                 'centroid': (0.0, 0.0),
                 'max_radius': 0.0,
-                'max_radius_point': (0.0, 0.0),
-                'bounding_box': (0, 0, 0, 0),
-                'aspect_ratio': 0.0
+                'max_radius_point': (0.0, 0.0)
             }
         
         # 基本信息
@@ -124,28 +122,12 @@ class MaskValidator:
         # 计算最大半径和对应的点坐标
         max_radius, max_radius_point = self.calculate_max_radius_with_point(mask, centroid)
         
-        # 边界框
-        y_coords, x_coords = np.where(mask > 0)
-        if len(x_coords) > 0:
-            min_x, max_x = int(np.min(x_coords)), int(np.max(x_coords))
-            min_y, max_y = int(np.min(y_coords)), int(np.max(y_coords))
-            bounding_box = (min_x, min_y, max_x - min_x, max_y - min_y)
-            
-            # 长宽比
-            width = max_x - min_x + 1
-            height = max_y - min_y + 1
-            aspect_ratio = float(min(width, height) / max(width, height)) if max(width, height) > 0 else 0.0
-        else:
-            bounding_box = (0, 0, 0, 0)
-            aspect_ratio = 0.0
         
         return {
             'area': area,
             'centroid': centroid,
             'max_radius': max_radius,
-            'max_radius_point': max_radius_point,
-            'bounding_box': bounding_box,
-            'aspect_ratio': aspect_ratio
+            'max_radius_point': max_radius_point
         }
     
     def validate_mask_quality(self, mask: np.ndarray, min_area_ratio: float = 0.01, max_area_ratio: float = 0.9) -> bool:
