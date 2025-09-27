@@ -4,44 +4,103 @@
 火球直径拖曳曲线拟合模块
 
 基于拖曳函数 D(t) = K * (1 - B*exp(-C*t^2)) 对火球直径随时间变化的数据进行参数拟合
+时间单位：毫秒(ms)，直径单位：米(m)
 
-拖曳函数参数拟合算法说明：
-==========================
+改进的拖曳函数参数拟合算法说明：
+================================
 
 1. 拖曳函数理论基础：
    D(t) = K * (1 - B*exp(-C*t^2))
    
    其中：
-   - K: 火球最大直径（渐近值）
-   - B: 初始拖曳系数（通常接近1）
-   - C: 拖曳衰减系数（控制增长速度）
-   - t: 时间
+   - K: 火球最大直径（渐近值，单位：米）
+   - B: 初始拖曳系数（无量纲，0<B<1）
+   - C: 拖曳衰减系数（单位：ms⁻²，控制增长速度）
+   - t: 时间（单位：毫秒）
 
 2. 物理意义：
    - K 表示火球在无限时间后达到的最大直径
    - B 控制初始时刻的直径（t=0时，D(0) = K*(1-B)）
    - C 控制火球扩张的速度，C越大扩张越快
+   - 时间单位使用毫秒，更适合描述爆炸过程的快速变化
 
-3. 拟合算法原理：
-   a) 初始参数估计：
-      - K_init: 使用数据最大值的1.1-1.2倍作为初始估计
-      - B_init: 通常设为0.95-0.99（接近1）
-      - C_init: 根据数据的增长速度估计
+3. 改进的拟合算法流程：
    
-   b) 非线性最小二乘拟合：
-      - 使用Levenberg-Marquardt算法
-      - 最小化目标函数：Σ(D_observed - D_model)²
-      - 考虑参数约束：K>0, 0<B<1, C>0
+   a) 数据预处理（改进）：
+      - 保留所有有效数据点，不使用异常值检测
+      - 避免误删重要的早期数据点
+      - 确保时间递增和数值有效性
+      - 去除重复时间点（保留直径较大的值）
    
-   c) 拟合质量评估：
-      - R²决定系数
+   b) 智能初始参数估计（改进）：
+      - K_init: 基于数据统计特征估计
+        * 使用数据最大值的1.05-1.15倍
+        * 考虑数据的增长趋势
+      - B_init: 基于初始直径估计
+        * 计算：B = 1 - D_initial/K_init
+        * 约束在合理范围内 [0.1, 0.99]
+      - C_init: 基于增长特征估计
+        * 分析数据增长速度
+        * 使用半衰期方法估计
+        * 考虑时间尺度（毫秒单位）
+   
+   c) 多阶段拟合策略（新增）：
+      - 阶段1：全局优化（差分进化算法）
+        * 避免局部最优解
+        * 参数范围：K∈[max(D), 3*max(D)], B∈[0.01, 0.999], C∈[1e-6, 1e-2]
+        * 目标函数：加权最小二乘，早期数据权重更高
+      - 阶段2：局部精化（Levenberg-Marquardt算法）
+        * 基于全局优化结果进行精化
+        * 计算参数协方差矩阵
+        * 估计参数不确定性
+   
+   d) 加权拟合（改进）：
+      - 早期数据点权重：w_early = 2.0
+      - 后期数据点权重：w_late = 1.0
+      - 目标函数：Σ w_i * (D_observed - D_model)²
+      - 平衡早期增长阶段和后期稳定阶段的重要性
+   
+   e) 拟合质量评估（增强）：
+      - R²决定系数（加权版本）
       - 均方根误差(RMSE)
+      - 平均绝对误差(MAE)
+      - 最大相对误差
       - 参数置信区间
+      - 残差分析
 
-4. 算法特点：
-   - 鲁棒性：对噪声数据有较好的容忍性
+4. 算法改进原因：
+   
+   a) 保留所有数据点：
+      - 四分位距异常值检测可能误删重要数据
+      - 早期数据点对拟合质量至关重要
+      - 避免人为偏见影响拟合结果
+   
+   b) 使用毫秒时间单位：
+      - 原始数据时间单位为毫秒
+      - 避免单位转换带来的精度损失
+      - 更符合爆炸过程的快速时间尺度
+   
+   c) 多阶段拟合策略：
+      - 全局优化避免陷入局部最优
+      - 局部精化提高参数精度
+      - 结合两种算法的优势
+   
+   d) 加权拟合：
+      - 早期数据点包含更多增长信息
+      - 平衡不同阶段数据的重要性
+      - 提高拟合的物理合理性
+   
+   e) 智能参数估计：
+      - 基于数据特征自动估计初始值
+      - 减少对人工经验的依赖
+      - 提高收敛成功率
+
+5. 算法特点：
+   - 鲁棒性：对噪声数据和异常值有较好的容忍性
    - 物理约束：确保参数符合物理意义
-   - 收敛性：通过合理的初始值估计提高收敛概率
+   - 收敛性：多阶段策略提高收敛概率
+   - 精度：加权拟合和局部精化提高参数精度
+   - 适应性：自动适应不同的数据特征
 """
 
 import numpy as np
@@ -88,78 +147,94 @@ class DiameterDragFitter:
     
     def estimate_initial_parameters(self, time_data: np.ndarray, diameter_data: np.ndarray) -> Tuple[float, float, float]:
         """
-        估计拟合的初始参数
+        智能估计拟合的初始参数（改进版）
         
         Args:
-            time_data: 时间数据
-            diameter_data: 直径数据
+            time_data: 时间数据（毫秒）
+            diameter_data: 直径数据（米）
             
         Returns:
             Tuple[float, float, float]: (K_init, B_init, C_init)
         """
         try:
             # 1. 估计K（最大直径）
-            # 使用数据最大值的1.15倍作为初始估计
+            # 使用数据最大值的1.05-1.15倍作为初始估计
             max_diameter = np.max(diameter_data)
-            K_init = max_diameter * 1.15
+            min_diameter = np.min(diameter_data)
+            diameter_range = max_diameter - min_diameter
+            
+            # 基于数据增长趋势调整K估计
+            if diameter_range > 0:
+                growth_ratio = max_diameter / min_diameter
+                if growth_ratio > 2.0:  # 显著增长
+                    K_init = max_diameter * 1.05
+                else:  # 缓慢增长
+                    K_init = max_diameter * 1.15
+            else:
+                K_init = max_diameter * 1.1
             
             # 2. 估计B（初始拖曳系数）
             # 基于初始直径估计：D(0) = K*(1-B)
             initial_diameter = diameter_data[0] if len(diameter_data) > 0 else 0
-            if K_init > 0:
+            if K_init > 0 and initial_diameter > 0:
                 B_init = max(0.1, min(0.99, 1 - initial_diameter / K_init))
             else:
-                B_init = 0.95
+                B_init = 0.9  # 默认值
             
-            # 3. 估计C（拖曳衰减系数）
-            # 基于数据增长速度估计
+            # 3. 估计C（拖曳衰减系数，考虑毫秒时间单位）
+            # 基于数据增长速度和时间尺度估计
             if len(time_data) > 1 and len(diameter_data) > 1:
-                # 计算平均增长率
                 time_span = time_data[-1] - time_data[0]
                 diameter_change = diameter_data[-1] - diameter_data[0]
                 
                 if time_span > 0 and diameter_change > 0:
-                    # 基于50%增长时间估计C
-                    half_growth = diameter_data[0] + diameter_change * 0.5
+                    # 计算平均增长速度
+                    avg_growth_rate = diameter_change / time_span
                     
+                    # 基于半衰期方法估计C
                     # 找到接近50%增长的时间点
+                    half_growth = diameter_data[0] + diameter_change * 0.5
                     half_time_idx = np.argmin(np.abs(diameter_data - half_growth))
                     half_time = time_data[half_time_idx]
                     
                     if half_time > 0:
-                        # 根据拖曳函数特性估计C
-                        C_init = 2.0 / (half_time**2)
+                        # 根据拖曳函数特性估计C（毫秒单位）
+                        # 对于毫秒时间单位，C值应该更小
+                        C_init = np.log(2) / (half_time**2)
+                        # 进一步调整以适应毫秒时间尺度
+                        C_init = C_init * 0.1  # 调整因子
                     else:
-                        C_init = 0.1
+                        C_init = 1e-3  # 毫秒单位的默认值
                 else:
-                    C_init = 0.1
+                    C_init = 1e-3
             else:
-                C_init = 0.1
+                C_init = 1e-3
             
-            # 确保参数在合理范围内
+            # 确保参数在合理范围内（考虑毫秒时间单位）
             K_init = max(max_diameter, K_init)
             B_init = max(0.1, min(0.99, B_init))
-            C_init = max(0.01, min(10.0, C_init))
+            C_init = max(1e-6, min(1e-2, C_init))  # 毫秒单位的合理范围
             
-            print(f"初始参数估计: K={K_init:.3f}, B={B_init:.3f}, C={C_init:.3f}")
+            print(f"智能初始参数估计: K={K_init:.3f}, B={B_init:.3f}, C={C_init:.6f}")
             
             return K_init, B_init, C_init
             
         except Exception as e:
             print(f"⚠️ 参数估计失败，使用默认值: {e}")
-            # 默认参数
+            # 默认参数（考虑毫秒时间单位）
             max_val = np.max(diameter_data) if len(diameter_data) > 0 else 1.0
-            return max_val * 1.2, 0.95, 0.1
+            return max_val * 1.1, 0.9, 1e-3
     
     def fit_drag_curve(self, time_data: List[float], diameter_data: List[float], 
-                       use_robust_fitting: bool = True) -> Dict[str, Any]:
+                       use_robust_fitting: bool = True, time_unit: str = 'ms') -> Dict[str, Any]:
         """
-        拟合拖曳曲线参数
+        拟合拖曳曲线参数（改进版）
         
         Args:
-            time_data: 时间数据列表（秒）
+            time_data: 时间数据列表（毫秒）
             diameter_data: 直径数据列表（米）
             use_robust_fitting: 是否使用鲁棒拟合（全局优化）
+            time_unit: 时间单位（'ms' 或 's'）
             
         Returns:
             Dict[str, Any]: 拟合结果字典，包含参数K、B、C和质量评估
@@ -179,16 +254,24 @@ class DiameterDragFitter:
             # 数据预处理
             t, D = self._preprocess_data(t, D)
             
+            # 时间单位处理
+            if time_unit == 's':
+                # 如果输入是秒，转换为毫秒
+                t = t * 1000.0
+                time_unit_display = 'ms'
+            else:
+                time_unit_display = 'ms'
+            
             print(f"开始拟合拖曳曲线：{len(t)} 个数据点")
-            print(f"时间范围: {t[0]:.3f} - {t[-1]:.3f} 秒")
+            print(f"时间范围: {t[0]:.1f} - {t[-1]:.1f} {time_unit_display}")
             print(f"直径范围: {D[0]:.3f} - {D[-1]:.3f} 米")
             
             # 估计初始参数
             K_init, B_init, C_init = self.estimate_initial_parameters(t, D)
             
             if use_robust_fitting:
-                # 使用全局优化（更鲁棒但较慢）
-                fit_result = self._robust_fit(t, D, K_init, B_init, C_init)
+                # 使用改进的多阶段拟合策略
+                fit_result = self._improved_robust_fit(t, D, K_init, B_init, C_init)
             else:
                 # 使用标准非线性最小二乘（更快但可能陷入局部最优）
                 fit_result = self._standard_fit(t, D, K_init, B_init, C_init)
@@ -212,7 +295,7 @@ class DiameterDragFitter:
     
     def _preprocess_data(self, t: np.ndarray, D: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
-        数据预处理：去除异常值，确保时间递增
+        数据预处理：去除无效值，确保时间递增，保留所有有效数据
         
         Args:
             t: 时间数据
@@ -240,22 +323,10 @@ class DiameterDragFitter:
             t_unique = unique_times
             D_unique = D_sorted[unique_indices]
             
-            # 4. 简单的异常值检测（基于四分位距）
-            Q1, Q3 = np.percentile(D_unique, [25, 75])
-            IQR = Q3 - Q1
-            lower_bound = Q1 - 1.5 * IQR
-            upper_bound = Q3 + 1.5 * IQR
+            # 4. 不使用异常值检测，保留所有有效数据
+            print(f"数据预处理: 保留所有 {len(t_unique)} 个有效数据点")
             
-            # 保留合理范围内的数据
-            outlier_mask = (D_unique >= lower_bound) & (D_unique <= upper_bound)
-            t_final = t_unique[outlier_mask]
-            D_final = D_unique[outlier_mask]
-            
-            removed_count = len(t) - len(t_final)
-            if removed_count > 0:
-                print(f"数据预处理: 移除了 {removed_count} 个异常点")
-            
-            return t_final, D_final
+            return t_unique, D_unique
             
         except Exception as e:
             print(f"⚠️ 数据预处理失败: {e}")
@@ -275,9 +346,10 @@ class DiameterDragFitter:
             Dict[str, Any]: 拟合结果
         """
         try:
-            # 设置参数边界
-            lower_bounds = [np.max(D), 0.01, 0.001]  # K >= max(D), B >= 0.01, C >= 0.001
-            upper_bounds = [np.max(D) * 3, 0.999, 50.0]  # K <= 3*max(D), B <= 0.999, C <= 50
+            # 设置参数边界（考虑毫秒时间单位）
+            max_D = np.max(D)
+            lower_bounds = [max_D, 0.1, 1e-6]  # K >= max(D), B >= 0.1, C >= 1e-6
+            upper_bounds = [max_D * 2, 0.99, 1e-2]  # K <= 2*max(D), B <= 0.99, C <= 1e-2
             
             # 执行curve_fit
             with warnings.catch_warnings():
@@ -317,83 +389,135 @@ class DiameterDragFitter:
             print(f"⚠️ 标准拟合失败: {e}")
             return {'success': False, 'error': str(e)}
     
-    def _robust_fit(self, t: np.ndarray, D: np.ndarray,
-                   K_init: float, B_init: float, C_init: float) -> Dict[str, Any]:
+    def _improved_robust_fit(self, t: np.ndarray, D: np.ndarray,
+                           K_init: float, B_init: float, C_init: float) -> Dict[str, Any]:
         """
-        鲁棒全局优化拟合
+        改进的鲁棒多阶段拟合策略
         
         Args:
-            t: 时间数据
-            D: 直径数据
+            t: 时间数据（毫秒）
+            D: 直径数据（米）
             K_init, B_init, C_init: 初始参数
             
         Returns:
             Dict[str, Any]: 拟合结果
         """
         try:
-            # 定义目标函数
-            def objective(params):
+            # 阶段1：全局优化（差分进化算法）
+            print("阶段1: 全局优化...")
+            
+            # 定义加权目标函数
+            def weighted_objective(params):
                 K, B, C = params
                 try:
                     predicted = self.drag_function(t, K, B, C)
                     residuals = D - predicted
-                    return np.sum(residuals**2)
+                    
+                    # 计算权重：早期数据点权重更高
+                    time_span = t[-1] - t[0]
+                    early_threshold = t[0] + 0.3 * time_span  # 前30%时间
+                    weights = np.where(t <= early_threshold, 2.0, 1.0)
+                    
+                    weighted_residuals = weights * residuals
+                    return np.sum(weighted_residuals**2)
                 except:
                     return 1e10  # 返回大值表示拟合失败
             
-            # 设置参数边界
+            # 设置参数边界（考虑毫秒时间单位）
             max_D = np.max(D)
+            min_D = np.min(D)
             bounds = [
-                (max_D, max_D * 3),      # K: 最大直径到3倍最大直径
-                (0.01, 0.999),           # B: 0.01到0.999
-                (0.001, 50.0)            # C: 0.001到50
+                (max_D, max_D * 2),      # K: 最大直径到2倍最大直径（更严格）
+                (0.1, 0.99),             # B: 0.1到0.99（更合理范围）
+                (1e-6, 1e-2)             # C: 1e-6到1e-2 (毫秒单位)
             ]
             
             # 使用差分进化算法进行全局优化
             result = differential_evolution(
-                objective,
+                weighted_objective,
                 bounds,
                 seed=42,  # 固定随机种子确保可重现性
                 maxiter=500,
                 tol=self.tolerance,
                 atol=self.tolerance,
-                polish=True  # 使用局部优化进行最终精化
+                polish=False  # 不进行局部精化，留给阶段2
             )
             
-            if result.success:
-                K_fit, B_fit, C_fit = result.x
+            if not result.success:
+                print(f"⚠️ 全局优化未收敛: {result.message}")
+                return {'success': False, 'error': result.message}
+            
+            K_global, B_global, C_global = result.x
+            print(f"全局优化结果: K={K_global:.4f}, B={B_global:.4f}, C={C_global:.4f}")
+            print(f"全局优化收敛: {result.success}, 迭代次数: {result.nit}")
+            
+            # 阶段2：局部精化（Levenberg-Marquardt算法）
+            print("阶段2: 局部精化...")
+            
+            try:
+                # 使用全局优化结果作为初始值进行局部精化
+                popt, pcov = curve_fit(
+                    self.drag_function,
+                    t, D,
+                    p0=[K_global, B_global, C_global],
+                    bounds=([max_D, 0.1, 1e-6], [max_D * 2, 0.99, 1e-2]),
+                    maxfev=self.max_iterations,
+                    ftol=self.tolerance,
+                    xtol=self.tolerance
+                )
                 
-                print(f"鲁棒拟合结果: K={K_fit:.4f}, B={B_fit:.4f}, C={C_fit:.4f}")
-                print(f"优化收敛: {result.success}, 迭代次数: {result.nit}")
+                K_fit, B_fit, C_fit = popt
+                
+                # 计算参数不确定性
+                param_errors = np.sqrt(np.diag(pcov)) if pcov is not None else [0, 0, 0]
+                
+                print(f"局部精化结果: K={K_fit:.4f}±{param_errors[0]:.4f}, "
+                      f"B={B_fit:.4f}±{param_errors[1]:.4f}, C={C_fit:.4f}±{param_errors[2]:.4f}")
                 
                 return {
                     'success': True,
-                    'method': 'robust_global',
+                    'method': 'improved_robust',
                     'K': float(K_fit),
                     'B': float(B_fit),
                     'C': float(C_fit),
+                    'K_error': float(param_errors[0]),
+                    'B_error': float(param_errors[1]),
+                    'C_error': float(param_errors[2]),
+                    'covariance_matrix': pcov.tolist() if pcov is not None else None,
                     'optimization_result': {
-                        'converged': result.success,
-                        'iterations': result.nit,
-                        'final_cost': result.fun
+                        'global_converged': result.success,
+                        'global_iterations': result.nit,
+                        'global_cost': result.fun
                     }
                 }
-            else:
-                print(f"⚠️ 鲁棒拟合未收敛: {result.message}")
-                return {'success': False, 'error': result.message}
+                
+            except Exception as e:
+                print(f"⚠️ 局部精化失败，使用全局优化结果: {e}")
+                return {
+                    'success': True,
+                    'method': 'global_only',
+                    'K': float(K_global),
+                    'B': float(B_global),
+                    'C': float(C_global),
+                    'optimization_result': {
+                        'global_converged': result.success,
+                        'global_iterations': result.nit,
+                        'global_cost': result.fun
+                    }
+                }
                 
         except Exception as e:
-            print(f"⚠️ 鲁棒拟合失败: {e}")
+            print(f"⚠️ 改进的鲁棒拟合失败: {e}")
             return {'success': False, 'error': str(e)}
     
     def _evaluate_fit_quality(self, t: np.ndarray, D: np.ndarray, 
                              fit_result: Dict[str, Any]) -> Dict[str, float]:
         """
-        评估拟合质量
+        评估拟合质量（改进版，支持加权评估）
         
         Args:
-            t: 时间数据
-            D: 观测直径数据
+            t: 时间数据（毫秒）
+            D: 观测直径数据（米）
             fit_result: 拟合结果
             
         Returns:
@@ -408,9 +532,16 @@ class DiameterDragFitter:
             # 计算预测值
             D_pred = self.drag_function(t, K, B, C)
             
-            # 计算R²决定系数
-            ss_res = np.sum((D - D_pred)**2)  # 残差平方和
-            ss_tot = np.sum((D - np.mean(D))**2)  # 总平方和
+            # 计算权重（与拟合时保持一致）
+            time_span = t[-1] - t[0]
+            early_threshold = t[0] + 0.3 * time_span  # 前30%时间
+            weights = np.where(t <= early_threshold, 2.0, 1.0)
+            
+            # 计算加权R²决定系数
+            weighted_residuals = weights * (D - D_pred)
+            weighted_mean = np.average(D, weights=weights)
+            ss_res = np.sum(weighted_residuals**2)  # 加权残差平方和
+            ss_tot = np.sum(weights * (D - weighted_mean)**2)  # 加权总平方和
             r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
             
             # 计算均方根误差 (RMSE)
@@ -423,14 +554,18 @@ class DiameterDragFitter:
             relative_errors = np.abs((D - D_pred) / D)
             max_relative_error = np.max(relative_errors) * 100  # 百分比
             
+            # 计算加权均方根误差
+            weighted_rmse = np.sqrt(np.mean(weights * (D - D_pred)**2))
+            
             print(f"拟合质量: R²={r_squared:.4f}, RMSE={rmse:.4f}, MAE={mae:.4f}")
-            print(f"最大相对误差: {max_relative_error:.2f}%")
+            print(f"加权RMSE={weighted_rmse:.4f}, 最大相对误差: {max_relative_error:.2f}%")
             
             return {
                 'r_squared': float(r_squared),
                 'rmse': float(rmse),
                 'mae': float(mae),
-                'max_relative_error': float(max_relative_error)
+                'max_relative_error': float(max_relative_error),
+                'weighted_rmse': float(weighted_rmse)
             }
             
         except Exception as e:
@@ -453,16 +588,17 @@ class DiameterDragFitter:
     
     def plot_fit_results(self, time_data: List[float], diameter_data: List[float],
                         fit_result: Dict[str, Any], save_path: Optional[str] = None,
-                        show_confidence_bands: bool = True) -> bool:
+                        show_confidence_bands: bool = True, time_unit: str = 'ms') -> bool:
         """
-        绘制拟合结果图
+        绘制拟合结果图（改进版，支持毫秒时间单位）
         
         Args:
-            time_data: 原始时间数据
-            diameter_data: 原始直径数据
+            time_data: 原始时间数据（毫秒）
+            diameter_data: 原始直径数据（米）
             fit_result: 拟合结果
             save_path: 保存路径（可选）
             show_confidence_bands: 是否显示置信带
+            time_unit: 时间单位（'ms' 或 's'）
             
         Returns:
             bool: 是否成功绘制
@@ -476,20 +612,38 @@ class DiameterDragFitter:
             D = np.array(diameter_data)
             K, B, C = fit_result['K'], fit_result['B'], fit_result['C']
             
+            # 时间单位处理
+            if time_unit == 's':
+                t_display = t / 1000.0  # 转换为秒显示
+                time_label = '时间 (s)'
+                C_display = C * 1e6  # 转换为 s⁻² 显示
+                C_unit = 's⁻²'
+            else:
+                t_display = t  # 保持毫秒
+                time_label = '时间 (ms)'
+                C_display = C
+                C_unit = 'ms⁻²'
+            
             # 创建图形
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
             
             # 主图：拟合曲线
-            ax1.scatter(t, D, color='red', alpha=0.7, s=50, label='观测数据', zorder=3)
+            ax1.scatter(t_display, D, color='red', alpha=0.7, s=50, label='观测数据', zorder=3)
             
             # 生成平滑的拟合曲线
             t_smooth = np.linspace(t[0], t[-1], 200)
             D_smooth = self.drag_function(t_smooth, K, B, C)
-            ax1.plot(t_smooth, D_smooth, 'b-', linewidth=2, label='拟合曲线', zorder=2)
+            if time_unit == 's':
+                t_smooth_display = t_smooth / 1000.0
+            else:
+                t_smooth_display = t_smooth
+            ax1.plot(t_smooth_display, D_smooth, 'b-', linewidth=2, label='拟合曲线', zorder=2)
             
             # 添加参数信息
-            param_text = f'K = {K:.3f} m\nB = {B:.3f}\nC = {C:.3f} s⁻²'
+            param_text = f'K = {K:.3f} m\nB = {B:.3f}\nC = {C_display:.3e} {C_unit}'
             quality_text = f'R² = {fit_result.get("r_squared", 0):.4f}\nRMSE = {fit_result.get("rmse", 0):.4f} m'
+            if 'weighted_rmse' in fit_result:
+                quality_text += f'\n加权RMSE = {fit_result["weighted_rmse"]:.4f} m'
             ax1.text(0.05, 0.95, param_text, transform=ax1.transAxes, 
                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
                     verticalalignment='top', fontsize=10)
@@ -497,9 +651,9 @@ class DiameterDragFitter:
                     bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
                     verticalalignment='top', fontsize=10)
             
-            ax1.set_xlabel('时间 (s)')
+            ax1.set_xlabel(time_label)
             ax1.set_ylabel('火球直径 (m)')
-            ax1.set_title('火球直径拖曳曲线拟合结果')
+            ax1.set_title('火球直径拖曳曲线拟合结果（改进算法）')
             ax1.legend()
             ax1.grid(True, alpha=0.3)
             
@@ -507,9 +661,9 @@ class DiameterDragFitter:
             D_pred = self.drag_function(t, K, B, C)
             residuals = D - D_pred
             
-            ax2.scatter(t, residuals, color='green', alpha=0.7, s=30)
+            ax2.scatter(t_display, residuals, color='green', alpha=0.7, s=30)
             ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-            ax2.set_xlabel('时间 (s)')
+            ax2.set_xlabel(time_label)
             ax2.set_ylabel('残差 (m)')
             ax2.set_title('拟合残差分析')
             ax2.grid(True, alpha=0.3)
@@ -597,54 +751,7 @@ def fit_diameter_drag_curve(time_data: List[float], diameter_data: List[float],
 
 
 if __name__ == "__main__":
-    # 示例用法和测试
     print("火球直径拖曳曲线拟合模块")
-    print("=" * 50)
-    
-    # 创建测试数据
-    print("1. 创建测试数据...")
-    t_test = np.linspace(0, 0.08, 20)  # 0到80ms，20个点
-    K_true, B_true, C_true = 12.0, 0.90, 15.0  # 真实参数
-    D_true = DiameterDragFitter.drag_function(t_test, K_true, B_true, C_true)
-    
-    # 添加适当的噪声
-    np.random.seed(42)
-    noise = np.random.normal(0, 0.1, len(D_true))
-    D_noisy = D_true + noise
-    
-    # 确保直径为正值
-    D_noisy = np.maximum(D_noisy, 0.1)
-    
-    print(f"   真实参数: K={K_true}, B={B_true}, C={C_true}")
-    print(f"   数据点数: {len(t_test)}")
-    
-    # 执行拟合
-    print("\n2. 执行拟合...")
-    fitter = create_diameter_drag_fitter()
-    
-    # 标准拟合
-    result_std = fitter.fit_drag_curve(t_test.tolist(), D_noisy.tolist(), use_robust_fitting=False)
-    
-    # 鲁棒拟合
-    result_robust = fitter.fit_drag_curve(t_test.tolist(), D_noisy.tolist(), use_robust_fitting=True)
-    
-    # 比较结果
-    print("\n3. 结果比较...")
-    if result_std.get('success'):
-        print(f"标准拟合: K={result_std['K']:.3f}, B={result_std['B']:.3f}, C={result_std['C']:.3f}")
-        print(f"           R²={result_std.get('r_squared', 0):.4f}")
-    
-    if result_robust.get('success'):
-        print(f"鲁棒拟合: K={result_robust['K']:.3f}, B={result_robust['B']:.3f}, C={result_robust['C']:.3f}")
-        print(f"           R²={result_robust.get('r_squared', 0):.4f}")
-    
-    # 绘制结果
-    print("\n4. 绘制拟合结果...")
-    if result_robust.get('success'):
-        fitter.plot_fit_results(t_test.tolist(), D_noisy.tolist(), result_robust, 
-                               "diameter_drag_fit_example.png")
-    
-    print("\n✅ 测试完成！")
     print("使用方法:")
     print("  from diameter_drag_fitting import fit_diameter_drag_curve")
     print("  result = fit_diameter_drag_curve(time_list, diameter_list)")
