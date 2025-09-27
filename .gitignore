@@ -23,6 +23,8 @@ source/image_segment/contour_visualization/**
 **/contour_visualization/
 **/*_output/
 **/*_output/**
+**/output/
+**/output/**
 
 # Generated images and masks
 *.png

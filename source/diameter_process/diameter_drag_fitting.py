@@ -104,7 +104,6 @@
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit, differential_evolution
 from typing import List, Tuple, Dict, Optional, Any
 import warnings
@@ -124,10 +123,6 @@ class DiameterDragFitter:
         self.max_iterations = max_iterations
         self.tolerance = tolerance
         self.fit_results = {}
-        
-        # 设置中文字体支持
-        plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
-        plt.rcParams['axes.unicode_minus'] = False
     
     @staticmethod
     def drag_function(t: np.ndarray, K: float, B: float, C: float) -> np.ndarray:
@@ -572,151 +567,7 @@ class DiameterDragFitter:
             print(f"⚠️ 质量评估失败: {e}")
             return {'r_squared': 0.0, 'rmse': float('inf'), 'mae': float('inf')}
     
-    def predict_diameter(self, time_points: List[float], K: float, B: float, C: float) -> np.ndarray:
-        """
-        使用拟合参数预测直径
-        
-        Args:
-            time_points: 预测时间点
-            K, B, C: 拟合参数
-            
-        Returns:
-            np.ndarray: 预测的直径值
-        """
-        t = np.array(time_points)
-        return self.drag_function(t, K, B, C)
     
-    def plot_fit_results(self, time_data: List[float], diameter_data: List[float],
-                        fit_result: Dict[str, Any], save_path: Optional[str] = None,
-                        show_confidence_bands: bool = True, time_unit: str = 'ms') -> bool:
-        """
-        绘制拟合结果图（改进版，支持毫秒时间单位）
-        
-        Args:
-            time_data: 原始时间数据（毫秒）
-            diameter_data: 原始直径数据（米）
-            fit_result: 拟合结果
-            save_path: 保存路径（可选）
-            show_confidence_bands: 是否显示置信带
-            time_unit: 时间单位（'ms' 或 's'）
-            
-        Returns:
-            bool: 是否成功绘制
-        """
-        try:
-            if not fit_result.get('success', False):
-                print("❌ 无法绘制：拟合失败")
-                return False
-            
-            t = np.array(time_data)
-            D = np.array(diameter_data)
-            K, B, C = fit_result['K'], fit_result['B'], fit_result['C']
-            
-            # 时间单位处理
-            if time_unit == 's':
-                t_display = t / 1000.0  # 转换为秒显示
-                time_label = '时间 (s)'
-                C_display = C * 1e6  # 转换为 s⁻² 显示
-                C_unit = 's⁻²'
-            else:
-                t_display = t  # 保持毫秒
-                time_label = '时间 (ms)'
-                C_display = C
-                C_unit = 'ms⁻²'
-            
-            # 创建图形
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-            
-            # 主图：拟合曲线
-            ax1.scatter(t_display, D, color='red', alpha=0.7, s=50, label='观测数据', zorder=3)
-            
-            # 生成平滑的拟合曲线
-            t_smooth = np.linspace(t[0], t[-1], 200)
-            D_smooth = self.drag_function(t_smooth, K, B, C)
-            if time_unit == 's':
-                t_smooth_display = t_smooth / 1000.0
-            else:
-                t_smooth_display = t_smooth
-            ax1.plot(t_smooth_display, D_smooth, 'b-', linewidth=2, label='拟合曲线', zorder=2)
-            
-            # 添加参数信息
-            param_text = f'K = {K:.3f} m\nB = {B:.3f}\nC = {C_display:.3e} {C_unit}'
-            quality_text = f'R² = {fit_result.get("r_squared", 0):.4f}\nRMSE = {fit_result.get("rmse", 0):.4f} m'
-            if 'weighted_rmse' in fit_result:
-                quality_text += f'\n加权RMSE = {fit_result["weighted_rmse"]:.4f} m'
-            ax1.text(0.05, 0.95, param_text, transform=ax1.transAxes, 
-                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
-                    verticalalignment='top', fontsize=10)
-            ax1.text(0.05, 0.75, quality_text, transform=ax1.transAxes,
-                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
-                    verticalalignment='top', fontsize=10)
-            
-            ax1.set_xlabel(time_label)
-            ax1.set_ylabel('火球直径 (m)')
-            ax1.set_title('火球直径拖曳曲线拟合结果（改进算法）')
-            ax1.legend()
-            ax1.grid(True, alpha=0.3)
-            
-            # 残差图
-            D_pred = self.drag_function(t, K, B, C)
-            residuals = D - D_pred
-            
-            ax2.scatter(t_display, residuals, color='green', alpha=0.7, s=30)
-            ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-            ax2.set_xlabel(time_label)
-            ax2.set_ylabel('残差 (m)')
-            ax2.set_title('拟合残差分析')
-            ax2.grid(True, alpha=0.3)
-            
-            # 添加残差统计
-            residual_std = np.std(residuals)
-            ax2.text(0.05, 0.95, f'残差标准差: {residual_std:.4f} m', 
-                    transform=ax2.transAxes, bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8),
-                    verticalalignment='top', fontsize=10)
-            
-            plt.tight_layout()
-            
-            # 保存图片
-            if save_path:
-                plt.savefig(save_path, dpi=300, bbox_inches='tight')
-                print(f"✅ 拟合结果图已保存: {save_path}")
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ 绘制拟合结果失败: {e}")
-            return False
-    
-    def get_fit_summary(self) -> Dict[str, Any]:
-        """
-        获取拟合结果摘要
-        
-        Returns:
-            Dict[str, Any]: 拟合摘要信息
-        """
-        if not self.fit_results:
-            return {"status": "未进行拟合"}
-        
-        if not self.fit_results.get('success', False):
-            return {
-                "status": "拟合失败",
-                "error": self.fit_results.get('error', '未知错误')
-            }
-        
-        return {
-            "status": "拟合成功",
-            "parameters": {
-                "K": self.fit_results['K'],
-                "B": self.fit_results['B'],
-                "C": self.fit_results['C']
-            },
-            "quality": {
-                "r_squared": self.fit_results.get('r_squared', 0),
-                "rmse": self.fit_results.get('rmse', 0),
-                "mae": self.fit_results.get('mae', 0)
-            },
-            "method": self.fit_results.get('method', 'unknown')
-        }
 
 
 def create_diameter_drag_fitter(max_iterations: int = 1000, tolerance: float = 1e-8) -> DiameterDragFitter:

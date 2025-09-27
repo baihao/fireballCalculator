@@ -21,6 +21,7 @@ sys.path.insert(0, source_path)
 from desktop.sequence_manager import SequenceManager
 from desktop.segment_utils import build_time_diameter_series
 from diameter_drag_fitting import DiameterDragFitter
+from drag_fit_plotter import DragFitPlotter
 
 
 def load_segmented_sequence(file_path: str) -> Tuple[bool, Dict[str, Any], str]:
@@ -168,7 +169,8 @@ def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = Non
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         plot_path = os.path.join(output_dir, f"{base_name}_drag_fit.png")
         
-        plot_success = fitter.plot_fit_results(time_data, diameter_data, fit_result, plot_path, time_unit='ms')
+        plotter = DragFitPlotter()
+        plot_success = plotter.plot_fit_results(time_data, diameter_data, fit_result, plot_path, time_unit='ms')
         
         if plot_success:
             print(f"✓ 拟合结果图已保存: {plot_path}")
