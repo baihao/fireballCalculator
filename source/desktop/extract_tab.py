@@ -23,6 +23,7 @@ from extract_tab_ui import ExtractTabUI
 # 添加路径以导入火球计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from fireball_radius_calculator import FireballCalculator
+from diameter_process.diameter_drag_fitting import DiameterDragFitter
 
 
 class ExtractTab(QWidget):
@@ -80,7 +81,7 @@ class ExtractTab(QWidget):
         self.extract_status = self.ui_components['extract_status']
         self.progress_label = self.ui_components['progress_label']
         
-        # 图表控件引用
+        # 图表控件引用（继承自 BaseChart）
         self.temp_chart = self.ui_components['temp_chart']
         self.diam_chart = self.ui_components['diam_chart']
         
@@ -362,16 +363,8 @@ class ExtractTab(QWidget):
         try:
             print(f"开始更新温度图表: {len(time_data)} 个数据点")
             
-            # 使用 MatplotlibWidget 的 plot_line 方法
             print(f"绘制温度曲线: 时间范围 {min(time_data)}-{max(time_data)} ms, 温度范围 {min(temp_data)}-{max(temp_data)} K")
-            
-            self.temp_chart.plot_line(
-                time_data, temp_data,
-                title="火球温度随时间变化",
-                xlabel="时间 (ms)",
-                ylabel="温度 (K)",
-                color='#38bdf8'
-            )
+            self.temp_chart.update_data(time_data, temp_data)
             
             print("✅ 温度图表更新完成")
             
@@ -388,15 +381,8 @@ class ExtractTab(QWidget):
             print(f"   直径数据点数: {len(diameter_data)}")
             print(f"   图表对象: {self.diam_chart}")
             
-            # 使用 MatplotlibWidget 的 plot_line 方法
-            print(f"   正在调用 diam_chart.plot_line...")
-            self.diam_chart.plot_line(
-                time_data, diameter_data,
-                title="火球直径随时间变化",
-                xlabel="时间 (ms)",
-                ylabel="直径 (m)",
-                color='#f59e0b'
-            )
+            print(f"   正在调用 diam_chart.update_data...")
+            self.diam_chart.update_data(time_data, diameter_data)
             
             print("   ✅ diam_chart.plot_line 调用完成")
             print("✅ 直径图表更新完成")
@@ -671,7 +657,36 @@ class ExtractTab(QWidget):
                 return
             time_data = [t for t, _ in series]
             diameter_data = [d for _, d in series]
-            self.update_diameter_chart(time_data, diameter_data)
+
+            # 调用拖曳曲线拟合，获取 K、B、C 与截断点
+            K = B = C = None
+            cutoff_ms = None
+            try:
+                fitter = DiameterDragFitter()
+                fit_result = fitter.fit_drag_curve(
+                    time_data,
+                    diameter_data,
+                    use_robust_fitting=True,
+                    time_unit='ms',
+                    enable_data_filtering=True,  # 强制启用数据过滤
+                    drop_threshold=0.02,
+                    window_size=10,
+                )
+                if fit_result.get('success', False):
+                    K = fit_result.get('K')
+                    B = fit_result.get('B')
+                    C = fit_result.get('C')
+                    df = fit_result.get('data_filtering', {}) or {}
+                    cutoff_ms = df.get('cutoff_time')
+            except Exception as e:
+                print(f"⚠️ 直径拖曳拟合失败，退回仅绘制数据点: {e}")
+
+            # 使用 DiameterChart 新接口绘制（带拟合与截断线，若有）
+            try:
+                self.diam_chart.update_data(time_data, diameter_data, K, B, C, cutoff_ms=cutoff_ms)
+            except Exception as e:
+                print(f"⚠️ 调用直径图更新接口失败，退回简单绘制: {e}")
+                self.update_diameter_chart(time_data, diameter_data)
         except Exception as e:
             print(f"❌ 更新直径图表失败: {e}")
             import traceback

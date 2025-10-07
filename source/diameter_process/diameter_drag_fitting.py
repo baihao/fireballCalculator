@@ -108,12 +108,18 @@ from scipy.optimize import curve_fit, differential_evolution
 from typing import List, Tuple, Dict, Optional, Any
 import warnings
 
-# 导入数据过滤模块
+# 导入数据过滤模块（优先相对导入，其次绝对导入）
+apply_data_filter = None
 try:
-    from data_filter import apply_data_filter
-except ImportError:
-    print("⚠️ 无法导入 data_filter 模块，将跳过数据过滤步骤")
-    apply_data_filter = None
+    from .data_filter import apply_data_filter  # 同包相对导入
+except Exception:
+    try:
+        from diameter_process.data_filter import apply_data_filter  # 绝对导入
+    except Exception:
+        try:
+            from data_filter import apply_data_filter  # 退而求其次的顶层导入
+        except Exception:
+            print("⚠️ 无法导入 data_filter 模块，将跳过数据过滤步骤")
 
 
 class DiameterDragFitter:

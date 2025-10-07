@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
+from temperature_chart import TemperatureChart
+from diameter_chart import DiameterChart
 from interactive_image_widget import create_interactive_image_widget
 
 
@@ -293,7 +295,7 @@ class ExtractTabUI:
         temp_layout = QVBoxLayout()
         temp_layout.setAlignment(Qt.AlignTop)
         
-        self.ui_components['temp_chart'] = MatplotlibWidget(width=4, height=2.5)
+        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=2.5)
         temp_layout.addWidget(self.ui_components['temp_chart'])
         
         temp_group.setLayout(temp_layout)
@@ -307,7 +309,7 @@ class ExtractTabUI:
         diam_layout = QVBoxLayout()
         diam_layout.setAlignment(Qt.AlignTop)
         
-        self.ui_components['diam_chart'] = MatplotlibWidget(width=4, height=2.5)
+        self.ui_components['diam_chart'] = DiameterChart(width=4, height=2.5)
         diam_layout.addWidget(self.ui_components['diam_chart'])
         
         diam_group.setLayout(diam_layout)
@@ -428,43 +430,8 @@ class ExtractTabUI:
     def init_temperature_chart(self):
         """初始化温度图表"""
         try:
-            temp_chart = self.ui_components['temp_chart']
-            temp_chart.clear()
-            
-            ax = temp_chart.figure.add_subplot(111)
-            
-            # 设置图表样式
-            temp_chart.figure.patch.set_facecolor('#111827')
-            ax.set_facecolor('#111827')
-            
-            # 设置坐标轴颜色
-            ax.tick_params(colors='#9ca3af', labelsize=9)
-            ax.spines['bottom'].set_color('#374151')
-            ax.spines['top'].set_color('#374151')
-            ax.spines['left'].set_color('#374151')
-            ax.spines['right'].set_color('#374151')
-            
-            # 设置标签颜色
-            ax.set_xlabel("时间 (ms)", color='#e5e7eb', fontsize=10)
-            ax.set_ylabel("温度 (K)", color='#e5e7eb', fontsize=10)
-            ax.set_title("火球温度随时间变化", color='#38bdf8', fontsize=11, fontweight='bold')
-            
-            # 设置坐标轴范围
-            ax.set_xlim(0, 140)
-            ax.set_ylim(1000, 1600)
-            
-            # 显示网格
-            ax.grid(True, alpha=0.3, color='#374151')
-            
-            # 显示提示文本
-            ax.text(70, 1300, "请加载序列文件", 
-                   ha='center', va='center', 
-                   color='#9ca3af', fontsize=10,
-                   bbox=dict(boxstyle="round,pad=0.3", facecolor='#1f2937', alpha=0.8))
-            
-            # 调整布局
-            temp_chart.figure.tight_layout(pad=1.0)
-            temp_chart.canvas.draw()
+            temp_chart: TemperatureChart = self.ui_components['temp_chart']
+            temp_chart.reset()
             
         except Exception as e:
             print(f"初始化温度图表失败: {e}")
@@ -472,43 +439,8 @@ class ExtractTabUI:
     def init_diameter_chart(self):
         """初始化直径图表"""
         try:
-            diam_chart = self.ui_components['diam_chart']
-            diam_chart.clear()
-            
-            ax = diam_chart.figure.add_subplot(111)
-            
-            # 设置图表样式
-            diam_chart.figure.patch.set_facecolor('#111827')
-            ax.set_facecolor('#111827')
-            
-            # 设置坐标轴颜色
-            ax.tick_params(colors='#9ca3af', labelsize=9)
-            ax.spines['bottom'].set_color('#374151')
-            ax.spines['top'].set_color('#374151')
-            ax.spines['left'].set_color('#374151')
-            ax.spines['right'].set_color('#374151')
-            
-            # 设置标签颜色
-            ax.set_xlabel("时间 (ms)", color='#e5e7eb', fontsize=10)
-            ax.set_ylabel("直径 (m)", color='#e5e7eb', fontsize=10)
-            ax.set_title("火球直径随时间变化", color='#38bdf8', fontsize=11, fontweight='bold')
-            
-            # 设置坐标轴范围
-            ax.set_xlim(0, 140)
-            ax.set_ylim(0, 2)
-            
-            # 显示网格
-            ax.grid(True, alpha=0.3, color='#374151')
-            
-            # 显示提示文本
-            ax.text(70, 1, "提取完成后显示", 
-                   ha='center', va='center', 
-                   color='#9ca3af', fontsize=10,
-                   bbox=dict(boxstyle="round,pad=0.3", facecolor='#1f2937', alpha=0.8))
-            
-            # 调整布局
-            diam_chart.figure.tight_layout(pad=1.0)
-            diam_chart.canvas.draw()
+            diam_chart: DiameterChart = self.ui_components['diam_chart']
+            diam_chart.reset()
             
         except Exception as e:
             print(f"初始化直径图表失败: {e}")
