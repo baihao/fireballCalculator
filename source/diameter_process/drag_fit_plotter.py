@@ -79,6 +79,25 @@ class DragFitPlotter:
             # 主图：拟合曲线
             ax1.scatter(t_display, D, color='red', alpha=0.7, s=50, label='观测数据', zorder=3)
             
+            # 检查是否有数据过滤信息，显示截断点
+            filtering_info = fit_result.get('data_filtering', {})
+            if filtering_info.get('enabled', False) and filtering_info.get('cutoff_time') is not None:
+                cutoff_time = filtering_info['cutoff_time']
+                if time_unit == 's':
+                    cutoff_display = cutoff_time / 1000.0
+                else:
+                    cutoff_display = cutoff_time
+                
+                # 标记截断点
+                ax1.axvline(x=cutoff_display, color='orange', linestyle='--', linewidth=2, 
+                           label=f'数据截断点 ({cutoff_display:.1f}{"s" if time_unit == "s" else "ms"})', zorder=1)
+                
+                # 标记过滤后的数据范围
+                filtered_mask = t <= cutoff_time
+                if np.any(filtered_mask):
+                    ax1.scatter(t_display[filtered_mask], D[filtered_mask], color='green', alpha=0.8, s=30, 
+                              label='过滤后数据', zorder=4)
+            
             # 生成平滑的拟合曲线
             t_smooth = np.linspace(t[0], t[-1], 200)
             D_smooth = self.drag_function(t_smooth, K, B, C)
@@ -93,11 +112,25 @@ class DragFitPlotter:
             quality_text = f'R² = {fit_result.get("r_squared", 0):.4f}\nRMSE = {fit_result.get("rmse", 0):.4f} m'
             if 'weighted_rmse' in fit_result:
                 quality_text += f'\n加权RMSE = {fit_result["weighted_rmse"]:.4f} m'
+            
+            # 添加数据过滤信息
+            filtering_text = ""
+            if filtering_info.get('enabled', False):
+                filtering_text = f'数据过滤: 启用\n'
+                filtering_text += f'保留率: {filtering_info.get("data_retention_rate", 1.0):.1%}\n'
+                if filtering_info.get('cutoff_time') is not None:
+                    filtering_text += f'截断时间: {filtering_info["cutoff_time"]:.1f}ms'
+            else:
+                filtering_text = '数据过滤: 禁用'
+            
             ax1.text(0.05, 0.95, param_text, transform=ax1.transAxes, 
                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
                     verticalalignment='top', fontsize=10)
             ax1.text(0.05, 0.75, quality_text, transform=ax1.transAxes,
                     bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
+                    verticalalignment='top', fontsize=10)
+            ax1.text(0.05, 0.55, filtering_text, transform=ax1.transAxes,
+                    bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8),
                     verticalalignment='top', fontsize=10)
             
             ax1.set_xlabel(time_label)

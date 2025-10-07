@@ -108,6 +108,13 @@ from scipy.optimize import curve_fit, differential_evolution
 from typing import List, Tuple, Dict, Optional, Any
 import warnings
 
+# 导入数据过滤模块
+try:
+    from data_filter import apply_data_filter
+except ImportError:
+    print("⚠️ 无法导入 data_filter 模块，将跳过数据过滤步骤")
+    apply_data_filter = None
+
 
 class DiameterDragFitter:
     """火球直径拖曳曲线拟合器"""
@@ -221,18 +228,23 @@ class DiameterDragFitter:
             return max_val * 1.1, 0.9, 1e-3
     
     def fit_drag_curve(self, time_data: List[float], diameter_data: List[float], 
-                       use_robust_fitting: bool = True, time_unit: str = 'ms') -> Dict[str, Any]:
+                       use_robust_fitting: bool = True, time_unit: str = 'ms',
+                       enable_data_filtering: bool = True, drop_threshold: float = 0.02,
+                       window_size: int = 10) -> Dict[str, Any]:
         """
-        拟合拖曳曲线参数（改进版）
+        拟合拖曳曲线参数（改进版，集成数据过滤）
         
         Args:
             time_data: 时间数据列表（毫秒）
             diameter_data: 直径数据列表（米）
             use_robust_fitting: 是否使用鲁棒拟合（全局优化）
             time_unit: 时间单位（'ms' 或 's'）
+            enable_data_filtering: 是否启用数据过滤
+            drop_threshold: 下降阈值（默认2%）
+            window_size: 滑动窗口大小（默认10）
             
         Returns:
-            Dict[str, Any]: 拟合结果字典，包含参数K、B、C和质量评估
+            Dict[str, Any]: 拟合结果字典，包含参数K、B、C、质量评估和数据过滤信息
         """
         try:
             # 数据验证
@@ -261,6 +273,39 @@ class DiameterDragFitter:
             print(f"时间范围: {t[0]:.1f} - {t[-1]:.1f} {time_unit_display}")
             print(f"直径范围: {D[0]:.3f} - {D[-1]:.3f} 米")
             
+            # 数据过滤（如果启用）
+            filtering_info = {}
+            if enable_data_filtering and apply_data_filter is not None:
+                print(f"\n执行数据过滤...")
+                original_t = t.copy()
+                original_D = D.copy()
+                
+                filtered_t, filtered_D = apply_data_filter(t.tolist(), D.tolist(), drop_threshold, window_size)
+                t = np.array(filtered_t)
+                D = np.array(filtered_D)
+                
+                filtering_info = {
+                    'enabled': True,
+                    'drop_threshold': drop_threshold,
+                    'window_size': window_size,
+                    'original_data_points': len(original_t),
+                    'filtered_data_points': len(t),
+                    'data_retention_rate': len(t) / len(original_t),
+                    'original_time_range': [float(original_t[0]), float(original_t[-1])],
+                    'filtered_time_range': [float(t[0]), float(t[-1])],
+                    'cutoff_time': float(t[-1]) if len(t) < len(original_t) else None
+                }
+                
+                print(f"数据过滤完成: 保留 {len(t)}/{len(original_t)} 个数据点 ({filtering_info['data_retention_rate']:.1%})")
+            else:
+                filtering_info = {
+                    'enabled': False,
+                    'original_data_points': len(t),
+                    'filtered_data_points': len(t),
+                    'data_retention_rate': 1.0
+                }
+                print("数据过滤已禁用，使用所有数据点")
+            
             # 估计初始参数
             K_init, B_init, C_init = self.estimate_initial_parameters(t, D)
             
@@ -273,6 +318,9 @@ class DiameterDragFitter:
             
             # 计算拟合质量
             fit_result.update(self._evaluate_fit_quality(t, D, fit_result))
+            
+            # 添加数据过滤信息
+            fit_result['data_filtering'] = filtering_info
             
             # 保存拟合结果
             self.fit_results = fit_result
@@ -417,6 +465,15 @@ class DiameterDragFitter:
                     return np.sum(weighted_residuals**2)
                 except:
                     return 1e10  # 返回大值表示拟合失败
+
+            def objective(params):
+                K, B, C = params
+                try:
+                    predicted = self.drag_function(t, K, B, C)
+                    residuals = D - predicted
+                    return np.sum(residuals**2)
+                except:
+                    return 1e10  # 返回大值表示拟合失败
             
             # 设置参数边界（考虑毫秒时间单位）
             max_D = np.max(D)
@@ -429,7 +486,7 @@ class DiameterDragFitter:
             
             # 使用差分进化算法进行全局优化
             result = differential_evolution(
-                weighted_objective,
+                objective,
                 bounds,
                 seed=42,  # 固定随机种子确保可重现性
                 maxiter=500,

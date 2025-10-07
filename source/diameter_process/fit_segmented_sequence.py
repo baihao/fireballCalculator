@@ -142,10 +142,11 @@ def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = Non
         
         print(f"✓ {extract_message}")
         
-        # 3. 执行拟合
+        # 3. 执行拟合（启用数据过滤）
         print(f"\n3. 执行拖曳曲线拟合...")
         fitter = DiameterDragFitter()
-        fit_result = fitter.fit_drag_curve(time_data, diameter_data, use_robust_fitting, time_unit='ms')
+        fit_result = fitter.fit_drag_curve(time_data, diameter_data, use_robust_fitting, time_unit='ms',
+                                         enable_data_filtering=True, drop_threshold=0.02, window_size=10)
         
         if not fit_result.get('success', False):
             return {
