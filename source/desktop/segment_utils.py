@@ -109,7 +109,7 @@ def run_segmentation_script(
         # 设置环境变量强制Python输出无缓冲
         env['PYTHONUNBUFFERED'] = '1'
         process = subprocess.Popen(
-            [sys.executable, '-u', script_path, sequence_file_path],  # -u 参数强制无缓冲输出
+            [sys.executable, '-u', script_path, sequence_file_path, '--no-viz'],  # -u 参数强制无缓冲输出，禁止可视化输出
             cwd=script_dir,
             env=env,
             stdout=subprocess.PIPE,
