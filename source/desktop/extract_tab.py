@@ -363,10 +363,7 @@ class ExtractTab(QWidget):
         """更新温度图表"""
         try:
             print(f"开始更新温度图表: {len(time_data)} 个数据点")
-            
-            print(f"绘制温度曲线: 时间范围 {min(time_data)}-{max(time_data)} ms, 温度范围 {min(temp_data)}-{max(temp_data)} K")
             self.temp_chart.update_data(time_data, temp_data)
-            
             print("✅ 温度图表更新完成")
             
         except Exception as e:
@@ -378,14 +375,7 @@ class ExtractTab(QWidget):
         """更新直径图表（提取完成后调用）"""
         try:
             print(f"📊 update_diameter_chart 被调用")
-            print(f"   时间数据点数: {len(time_data)}")
-            print(f"   直径数据点数: {len(diameter_data)}")
-            print(f"   图表对象: {self.diam_chart}")
-            
-            print(f"   正在调用 diam_chart.update_data...")
             self.diam_chart.update_data(time_data, diameter_data)
-            
-            print("   ✅ diam_chart.plot_line 调用完成")
             print("✅ 直径图表更新完成")
             
         except Exception as e:
