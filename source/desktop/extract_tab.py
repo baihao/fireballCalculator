@@ -40,6 +40,9 @@ class ExtractTab(QWidget):
         self.current_image_index = 0  # 当前显示的图像索引
         self.sequence_data = None  # 序列数据
         self.explosion_duration = 140  # 爆炸时长（毫秒）
+        # CheckBar 分组与标注跟踪
+        self.group_count = 1
+        self.annotated_indices = set()
         
         # 初始化prompt选择相关属性
         self.is_prompt_selection_mode = False  # 是否处于参考点选择模式
@@ -72,6 +75,18 @@ class ExtractTab(QWidget):
         # 连接异步信号
         self.log_received.connect(self._on_segmentation_log)
         self.seg_finished.connect(self._on_segmentation_finished)
+
+    def _refresh_checkbar(self):
+        """根据当前分组与已标注索引，刷新 CheckBar 显示。"""
+        try:
+            if 'check_bar' in self.ui_components and self.ui_components['check_bar'] is not None:
+                self.ui_components['check_bar'].update(
+                    length=len(self.image_paths),
+                    group_count=self.group_count,
+                    annotated_indices=sorted(self.annotated_indices)
+                )
+        except Exception:
+            pass
     
     def _setup_ui_component_references(self):
         """设置UI组件引用（向后兼容）"""
@@ -100,9 +115,10 @@ class ExtractTab(QWidget):
         self.negative_radio = self.ui_components['negative_radio']
         self.ignition_radio = self.ui_components['ignition_radio']
         
-        # 信息显示控件引用
+        # 信息显示与导航控件引用
         self.prompt_info_text = self.ui_components['prompt_info_text']
-        self.image_index_label = self.ui_components['image_index_label']
+        # 图片索引标签已被 CheckBar 替换
+        self.check_bar = self.ui_components.get('check_bar', None)
         self.jump_input = self.ui_components['jump_input']
         self.jump_btn = self.ui_components['jump_btn']
     
@@ -171,7 +187,6 @@ class ExtractTab(QWidget):
             try:
                 self.extract_slider.setRange(0, 0)
                 self.extract_slider.setValue(0)
-                self.image_index_label.setText("0/0")
                 self.extract_time_label.setText("t = 0 ms")
             except Exception as e:
                 print(f"⚠️ 重置时间轴时出错: {e}")
@@ -219,9 +234,27 @@ class ExtractTab(QWidget):
         self.image_paths = image_paths
         self.current_image_index = 0
 
+        # 计算分组（平均分组，至少2组；每组最多250张）
+        try:
+            total = len(self.image_paths)
+            if total > 0:
+                max_groups_by_size = (total + 249) // 250
+                # 至少分2组；若不足，按2组；否则取不超过max_groups_by_size且不超过total的合理值
+                self.group_count = max(2, max_groups_by_size)
+                self.group_count = min(self.group_count, total)
+            else:
+                self.group_count = 1
+        except Exception:
+            self.group_count = 1
+        # 重置标注集合
+        self.annotated_indices = set()
+
         # 设置时间轴范围
         self.extract_slider.setRange(0, len(self.image_paths) - 1)
         self.extract_slider.setValue(0)
+
+        # 初始化 CheckBar 显示
+        self._refresh_checkbar()
 
         # 设置图像控件为最大尺寸并显示第一张
         self.extract_preview.resize(self.extract_preview.maximumSize())
@@ -256,6 +289,20 @@ class ExtractTab(QWidget):
             prompt_data = self.sequence_manager.get_prompt_data_from_sequence(sequence_data)
             if prompt_data:
                 self.prompt_data = prompt_data
+                # 从已存在的 prompt_data 还原已标注索引集合，并刷新 CheckBar
+                try:
+                    self.annotated_indices = {
+                        idx for idx, d in self.prompt_data.items()
+                        if isinstance(d, dict) and len(d.get("points", [])) > 0
+                    }
+                    if 'check_bar' in self.ui_components:
+                        self.ui_components['check_bar'].update(
+                            length=len(self.image_paths),
+                            group_count=self.group_count,
+                            annotated_indices=sorted(self.annotated_indices)
+                        )
+                except Exception as _:
+                    pass
             ignition_point = self.sequence_manager.get_ignition_point_from_sequence(sequence_data)
             if ignition_point:
                 self.ignition_point = ignition_point
@@ -287,6 +334,13 @@ class ExtractTab(QWidget):
             
             # 显示对应的图像
             self.display_image_at_index(value)
+
+            # 高亮 CheckBar 当前分组
+            try:
+                if getattr(self, 'check_bar', None) is not None:
+                    self.check_bar.set_focus(value)
+            except Exception:
+                pass
         else:
             self.extract_time_label.setText(f"t = {value} ms")
     
@@ -674,16 +728,9 @@ class ExtractTab(QWidget):
                 # 完成选择参考点
                 self.is_prompt_selection_mode = False
                 self.prompt_btn.setText("开始选择参考点")
-                self.extract_status.setText("参考点选择完成")
-                
-                # 禁用交互
-                self.extract_preview.set_interaction_mode('none')
-                self.extract_preview.set_interactive_enabled(False)
-                
-                # 自动保存prompt数据和起爆点到序列文件
-                self._auto_save_prompt_data()
-                
-                print("✅ 参考点选择完成")
+                # 交由独立函数处理校验与后续动作
+                if not self._finalize_prompt_selection():
+                    return
                 
         except Exception as e:
             print(f"❌ 切换参考点选择模式失败: {e}")
@@ -739,6 +786,43 @@ class ExtractTab(QWidget):
                 
         except Exception as e:
             print(f"❌ 自动保存参考点数据异常: {e}")
+
+    def _finalize_prompt_selection(self) -> bool:
+        """
+        在用户点击“选择参考点完成”后执行最终校验与后续动作：
+        1) 校验每一分组都至少有一张已标注图片；
+        2) 未达成则保持选择模式并提示；
+        3) 通过则退出交互并自动保存。
+
+        Returns:
+            bool: 是否完成（通过校验并已保存）。未通过返回 False。
+        """
+        # 校验分组是否全部覆盖
+        all_marked = False
+        try:
+            if 'check_bar' in self.ui_components:
+                all_marked = self.ui_components['check_bar'].is_all_groups_marked()
+        except Exception:
+            all_marked = False
+
+        if not all_marked:
+            self.extract_status.setText("参考点选择未完成：存在未标注的分组")
+            QMessageBox.warning(self, "未完成标注", "请确保每个分组至少标注一张图片！")
+            # 保持在选择模式，便于继续补充标注
+            self.is_prompt_selection_mode = True
+            self.prompt_btn.setText("选择参考点完成")
+            current_type = self.get_current_point_type()
+            self.extract_preview.set_interaction_mode(current_type)
+            self.extract_preview.set_interactive_enabled(True)
+            return False
+
+        # 通过校验：退出交互并保存
+        self.extract_status.setText("参考点选择完成")
+        self.extract_preview.set_interaction_mode('none')
+        self.extract_preview.set_interactive_enabled(False)
+        self._auto_save_prompt_data()
+        print("✅ 参考点选择完成")
+        return True
     
     def get_current_point_type(self):
         """获取当前选择的点类型"""
@@ -810,6 +894,13 @@ class ExtractTab(QWidget):
             
             # 更新显示
             self.update_prompt_info_display()
+
+            # 标记该图片索引为已标注，并刷新 CheckBar
+            try:
+                self.annotated_indices.add(image_index)
+            except Exception:
+                pass
+            self._refresh_checkbar()
             
         except Exception as e:
             print(f"❌ 添加参考点失败: {e}")
@@ -820,6 +911,12 @@ class ExtractTab(QWidget):
         self.ignition_point = None
         self.update_prompt_info_display()
         print("🗑️ 已清空所有参考点数据")
+        # 清空标注并刷新 CheckBar
+        try:
+            self.annotated_indices.clear()
+        except Exception:
+            pass
+        self._refresh_checkbar()
     
     def update_prompt_info_display(self):
         """更新参考点信息显示"""
@@ -930,6 +1027,14 @@ class ExtractTab(QWidget):
                 
                 print(f"🗑️ 已取消图像{self.current_image_index}上的所有参考点")
                 self.extract_status.setText("已取消当前图像的参考点选择")
+
+                # 若该图片无点后，从已标注集合移除，并刷新 CheckBar
+                try:
+                    if self.current_image_index in self.annotated_indices:
+                        self.annotated_indices.remove(self.current_image_index)
+                except Exception:
+                    pass
+                self._refresh_checkbar()
                 
         except Exception as e:
             print(f"❌ 取消当前图像点失败: {e}")
@@ -996,15 +1101,15 @@ class ExtractTab(QWidget):
             self.extract_status.setText("保存失败")
     
     def update_image_index_display(self):
-        """更新图片索引显示"""
+        """更新图片索引相关的可视化（当前仅更新 CheckBar）。"""
         try:
-            if self.image_paths:
-                current = self.current_image_index + 1  # 显示从1开始
-                total = len(self.image_paths)
-                self.image_index_label.setText(f"{current}/{total}")
-            else:
-                self.image_index_label.setText("0/0")
-                
+            # 同步更新 CheckBar（长度不会变，仅在切换图片时无需变更标注集合）
+            if getattr(self, 'check_bar', None) is not None:
+                self.check_bar.update(
+                    length=len(self.image_paths),
+                    group_count=self.group_count,
+                    annotated_indices=sorted(self.annotated_indices)
+                )
         except Exception as e:
             print(f"❌ 更新图片索引显示失败: {e}")
     
@@ -1036,6 +1141,13 @@ class ExtractTab(QWidget):
                 
                 # 同步更新时间轴
                 self.extract_slider.setValue(image_index)
+
+                # 高亮 CheckBar 当前分组
+                try:
+                    if getattr(self, 'check_bar', None) is not None:
+                        self.check_bar.set_focus(image_index)
+                except Exception:
+                    pass
                 
                 # 清空输入框
                 self.jump_input.clear()

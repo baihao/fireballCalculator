@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
+from checkbar import create_checkbar
 from temperature_chart import TemperatureChart
 from diameter_chart import DiameterChart
 from interactive_image_widget import create_interactive_image_widget
@@ -190,21 +191,9 @@ class ExtractTabUI:
     
     def _add_image_navigation_controls(self, parent_layout: QVBoxLayout):
         """添加图片导航控件"""
-        # 图片索引信息标签
-        self.ui_components['image_index_label'] = QLabel("0/0")
-        self.ui_components['image_index_label'].setAlignment(Qt.AlignCenter)
-        self.ui_components['image_index_label'].setStyleSheet("""
-            QLabel {
-                color: #9ca3af;
-                font-size: 14px;
-                font-weight: bold;
-                padding: 5px;
-                background-color: #1f2937;
-                border: 1px solid #374151;
-                border-radius: 5px;
-            }
-        """)
-        parent_layout.addWidget(self.ui_components['image_index_label'])
+        # 分组检查条（替换原图片索引标签）
+        self.ui_components['check_bar'] = create_checkbar()
+        parent_layout.addWidget(self.ui_components['check_bar'])
         
         # 图片跳转控件
         jump_layout = QHBoxLayout()
