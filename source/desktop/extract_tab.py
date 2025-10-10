@@ -213,6 +213,7 @@ class ExtractTab(QWidget):
         # 提取参数
         parameters = self.sequence_manager.get_parameters_from_sequence(sequence_data)
         self.explosion_duration = int(parameters.get('explosion_duration', 140))
+        self.pixel_length = float(parameters.get('pixel_length', 1.0))
 
         # 设置图像路径和索引
         self.image_paths = image_paths
@@ -606,7 +607,11 @@ class ExtractTab(QWidget):
     def update_diameter_chart_from_segmentation_results(self, segmentation_results):
         """根据分割结果更新直径图表（仅绘制成功点，不插值）"""
         try:
-            series = build_time_diameter_series(segmentation_results, float(self.explosion_duration))
+            series = build_time_diameter_series(
+                segmentation_results, 
+                float(self.explosion_duration),
+                float(self.pixel_length)
+            )
             if not series:
                 # 清空图表
                 self.ui_builder.init_diameter_chart()

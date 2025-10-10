@@ -38,6 +38,7 @@ def _extract_radius_value(max_radius: Any) -> Optional[float]:
 def build_time_diameter_series(
     segmentation_results: List[Dict[str, Any]],
     explosion_duration_ms: float,
+    pixel_length: float = 1.0,
 ) -> List[Tuple[float, float]]:
     """
     根据分割结果构建用于绘图的(时间ms, 直径m)序列。
@@ -48,6 +49,7 @@ def build_time_diameter_series(
     Args:
         segmentation_results: image_sequence_segmentation 数组
         explosion_duration_ms: 爆炸时长（毫秒）
+        pixel_length: 每像素代表的长度（米），默认为1.0
 
     Returns:
         List[Tuple[float, float]]: 有效的数据点列表
@@ -68,7 +70,9 @@ def build_time_diameter_series(
         if radius_value is None:
             continue
 
-        diameter = 2.0 * radius_value
+        # 半径需要乘以每像素代表的长度，转换为实际物理单位（米）
+        radius_in_meters = radius_value * pixel_length
+        diameter = 2.0 * radius_in_meters
         series.append((float(time_ms), float(diameter)))
 
     return series
