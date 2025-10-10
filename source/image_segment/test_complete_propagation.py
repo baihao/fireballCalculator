@@ -135,8 +135,14 @@ def load_data_from_json(json_path: str) -> Tuple[List[str], Dict[int, Dict[str, 
         return [], {}, None
 
 
-def test_complete_propagation():
-    """测试完整的掩码传播流程"""
+def test_complete_propagation(generate_visualization: bool = True,
+                              output_dir: str = "test_output"):
+    """测试完整的掩码传播流程
+
+    Args:
+        generate_visualization: 是否生成可视化结果
+        output_dir: 输出目录
+    """
     print("=" * 60)
     print("测试完整的基于RGB相似性的掩码传播")
     print("=" * 60)
@@ -179,23 +185,21 @@ def test_complete_propagation():
         masks, geometries = segmenter.segment_sequence_with_iterative_propagation(
             image_paths=image_paths,
             prompt_data=prompt_data,
-            output_dir="test_output",
-            save_masks=True,
-            save_visualization=False  # 不需要单独的分割结果图片，只要合并的debug图片
+            output_dir=output_dir,
+            save_masks=generate_visualization,
+            save_visualization=generate_visualization
         )
 
-        # 4.5. 生成可视化
-        print("\n4.5. 生成可视化...")
-        visualizer = create_visualizer()
-        
-        # 生成debug可视化
-        visualizer.generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data)
-        
-        # 生成轮廓可视化
-        visualizer.save_contour_visualization(image_paths, masks, geometries=geometries)
-        
-        # 生成汇总可视化
-        visualizer.create_summary_visualization(image_paths, masks)
+        # 4.5. 生成可视化（可选）
+        if generate_visualization:
+            print("\n4.5. 生成可视化...")
+            visualizer = create_visualizer()
+            # 生成debug可视化
+            visualizer.generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data, output_dir)
+            # 生成轮廓可视化
+            visualizer.save_contour_visualization(image_paths, masks, output_dir, geometries)
+            # 生成汇总可视化
+            visualizer.create_summary_visualization(image_paths, masks, output_dir)
         
         # 分析结果
         print("\n5. 分析分割结果...")
@@ -244,8 +248,16 @@ def test_complete_propagation():
         traceback.print_exc()
         return False
 
-def test_from_json(json_path: str):
-    """从JSON文件测试掩码传播流程"""
+def test_from_json(json_path: str,
+                   generate_visualization: bool = True,
+                   output_dir: str = "json_test_output"):
+    """从JSON文件测试掩码传播流程
+
+    Args:
+        json_path: JSON文件路径
+        generate_visualization: 是否生成可视化结果
+        output_dir: 输出目录
+    """
     print("=" * 60)
     print("从JSON文件测试迭代掩码传播")
     print("=" * 60)
@@ -285,24 +297,22 @@ def test_from_json(json_path: str):
         masks, geometries = segmenter.segment_sequence_with_iterative_propagation(
             image_paths=image_paths,
             prompt_data=prompt_data,
-            output_dir="json_test_output",
-            save_masks=True,
-            save_visualization=False,
+            output_dir=output_dir,
+            save_masks=generate_visualization,
+            save_visualization=generate_visualization,
             target_centre=target_center
         )
         
-        # 生成可视化
-        print("\n5. 生成可视化...")
-        visualizer = create_visualizer()
-        
-        # 生成debug可视化
-        visualizer.generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data, "json_test_output")
-        
-        # 生成蓝色轮廓可视化
-        visualizer.save_contour_visualization(image_paths, masks, "json_test_output", geometries)
-        
-        # 生成汇总可视化
-        visualizer.create_summary_visualization(image_paths, masks, "json_test_output")
+        # 生成可视化（可选）
+        if generate_visualization:
+            print("\n5. 生成可视化...")
+            visualizer = create_visualizer()
+            # 生成debug可视化
+            visualizer.generate_merged_debug_visualization(segmenter, image_paths, masks, prompt_data, output_dir)
+            # 生成蓝色轮廓可视化
+            visualizer.save_contour_visualization(image_paths, masks, output_dir, geometries)
+            # 生成汇总可视化
+            visualizer.create_summary_visualization(image_paths, masks, output_dir)
         
         # 分析结果
         print("\n7. 分析分割结果...")
@@ -353,13 +363,29 @@ def main():
     """主测试函数"""
     print("基于RGB相似性的掩码传播完整测试")
     
-    # 检查是否提供了JSON文件参数
-    if len(sys.argv) > 1:
-        json_path = sys.argv[1]
+    # 命令行参数：json_path [--no-viz] [--out=DIR]
+    args = sys.argv[1:]
+    generate_visualization = True
+    output_dir = "json_test_output"
+    json_path = None
+
+    if args:
+        # 第一个非选项参数作为 json_path
+        if not args[0].startswith("--"):
+            json_path = args[0]
+            args = args[1:]
+        # 解析可选项
+        for arg in args:
+            if arg == "--no-viz":
+                generate_visualization = False
+            elif arg.startswith("--out="):
+                output_dir = arg.split("=", 1)[1].strip() or output_dir
+
+    if json_path:
         print(f"使用JSON文件: {json_path}")
         
         # 从JSON文件测试
-        test_passed = test_from_json(json_path)
+        test_passed = test_from_json(json_path, generate_visualization=generate_visualization, output_dir=output_dir)
         
         print(f"\n{'='*60}")
         print(f"测试总结:")
@@ -376,7 +402,7 @@ def main():
             print("⚠️ JSON测试失败，请检查输入数据和代码。")
     else:
         # 默认测试模式
-        test_passed = test_complete_propagation()
+        test_passed = test_complete_propagation(generate_visualization=generate_visualization, output_dir="test_output")
         
         print(f"\n{'='*60}")
         print(f"测试总结:")
@@ -389,7 +415,7 @@ def main():
             print("⚠️ 测试失败，请检查代码。")
         
         print("\n💡 提示: 也可以使用JSON文件测试:")
-        print("   python test_complete_propagation.py data.json")
+        print("   python test_complete_propagation.py data.json [--no-viz] [--out=DIR]")
 
 if __name__ == "__main__":
     main()

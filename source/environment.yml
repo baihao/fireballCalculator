@@ -13,3 +13,6 @@ dependencies:
   - pip:
     - PySide6>=6.9.0
     - opencv-python>=4.11.0
+    - torch>=2.0.0
+    - torchvision>=0.15.0
+    # segment-anything 通过 git submodule 管理，在 source/third_party/segment-anything/

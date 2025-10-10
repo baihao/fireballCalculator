@@ -46,6 +46,42 @@ if [ -d "third_party/segment-anything" ]; then
     conda run -n ${ENV_NAME} python -m pip install -e third_party/segment-anything || true
 fi
 
+# 3) 解决 OpenMP 库冲突（PyTorch 和其他库可能都包含 OpenMP）
+echo ""
+echo "配置环境变量（解决 OpenMP 冲突）..."
+CONDA_ENV_DIR="${CONDA_PREFIX%/*}/${ENV_NAME}"
+ACTIVATE_DIR="${CONDA_ENV_DIR}/etc/conda/activate.d"
+DEACTIVATE_DIR="${CONDA_ENV_DIR}/etc/conda/deactivate.d"
+
+mkdir -p "$ACTIVATE_DIR"
+mkdir -p "$DEACTIVATE_DIR"
+
+# 创建激活脚本
+cat > "$ACTIVATE_DIR/env_vars.sh" << 'EOF'
+#!/bin/bash
+# 解决 OpenMP 库冲突
+export KMP_DUPLICATE_LIB_OK=TRUE
+
+# 添加项目根目录到 PYTHONPATH（可选，便于导入模块）
+if [ -n "${FIREBALL_PROJECT_ROOT:-}" ]; then
+    export PYTHONPATH="${FIREBALL_PROJECT_ROOT}/source:${PYTHONPATH:-}"
+fi
+EOF
+
+# 创建停用脚本
+cat > "$DEACTIVATE_DIR/env_vars.sh" << 'EOF'
+#!/bin/bash
+# 清理环境变量
+unset KMP_DUPLICATE_LIB_OK
+EOF
+
+chmod +x "$ACTIVATE_DIR/env_vars.sh"
+chmod +x "$DEACTIVATE_DIR/env_vars.sh"
+
+echo "✓ 环境变量配置完成"
+echo "  - 自动设置 KMP_DUPLICATE_LIB_OK=TRUE（解决 OpenMP 冲突）"
+echo "  - 激活环境时自动应用，停用时自动清理"
+
 echo ""
 echo "=========================================="
 echo "环境准备完成"
@@ -53,7 +89,9 @@ echo "=========================================="
 echo ""
 echo "下一步："
 echo "1) 激活环境:    conda activate ${ENV_NAME}"
+echo "   （环境变量 KMP_DUPLICATE_LIB_OK 将自动设置）"
 echo "2) 运行应用:    python source/desktop/app.py"
+echo "3) 运行分割:    python source/image_segment/test_complete_propagation.py <json_file>"
 echo ""
 echo "环境管理："
 echo "- 删除环境:    conda env remove -n ${ENV_NAME} -y"

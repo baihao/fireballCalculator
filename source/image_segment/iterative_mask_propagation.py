@@ -329,7 +329,7 @@ class IterativeMaskPropagationSegmenter:
                 print(f"  ⏱️ 处理时间: {processing_time:.2f} 秒")
                 
                 # 保存结果
-                if output_dir:
+                if output_dir and save_masks:
                     self.output_manager.save_mask_results(image_paths[idx], final_mask, idx, output_dir, save_masks, "prompted")
             else:
                 # 计算处理时间（即使失败也要记录时间）
@@ -418,7 +418,7 @@ class IterativeMaskPropagationSegmenter:
                         print(f"      ⏱️ 处理时间: {processing_time:.2f} 秒")
                         
                         # 保存结果
-                        if output_dir:
+                        if output_dir and save_masks:
                             self.output_manager.save_mask_results(image_paths[unprocessed_idx], mask, 
                                                                 unprocessed_idx, output_dir, save_masks, "propagated")
                     else:
