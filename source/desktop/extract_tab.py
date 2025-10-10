@@ -43,6 +43,10 @@ class ExtractTab(QWidget):
         # CheckBar 分组与标注跟踪
         self.group_count = 1
         self.annotated_indices = set()
+        # 参数与分析缓存
+        self.parameters = {}
+        self.last_diameter_series = []  # List[Tuple[time_ms, diameter_m]]
+        self.last_drag_fit_result = None
         
         # 初始化prompt选择相关属性
         self.is_prompt_selection_mode = False  # 是否处于参考点选择模式
@@ -75,6 +79,23 @@ class ExtractTab(QWidget):
         # 连接异步信号
         self.log_received.connect(self._on_segmentation_log)
         self.seg_finished.connect(self._on_segmentation_finished)
+
+    def _has_analysis_results(self) -> bool:
+        """是否具备可保存的分析结果（直径曲线 + 拟合参数）。"""
+        try:
+            has_curve = bool(self.last_diameter_series)
+            has_fit = isinstance(self.last_drag_fit_result, dict) and self.last_drag_fit_result.get('K') is not None
+            return has_curve and has_fit
+        except Exception:
+            return False
+
+    def _update_save_button_state(self):
+        """统一刷新保存按钮可用状态。"""
+        try:
+            if hasattr(self, 'save_button'):
+                self.save_button.setEnabled(self._has_analysis_results())
+        except Exception:
+            pass
 
     def _refresh_checkbar(self):
         """根据当前分组与已标注索引，刷新 CheckBar 显示。"""
@@ -188,6 +209,8 @@ class ExtractTab(QWidget):
                 self.extract_slider.setRange(0, 0)
                 self.extract_slider.setValue(0)
                 self.extract_time_label.setText("t = 0 ms")
+                # 保存按钮初始禁用（等待生成直径/拟合结果）
+                self._update_save_button_state()
             except Exception as e:
                 print(f"⚠️ 重置时间轴时出错: {e}")
             
@@ -229,6 +252,7 @@ class ExtractTab(QWidget):
         parameters = self.sequence_manager.get_parameters_from_sequence(sequence_data)
         self.explosion_duration = int(parameters.get('explosion_duration', 140))
         self.pixel_length = float(parameters.get('pixel_length', 1.0))
+        self.parameters = parameters or {}
 
         # 设置图像路径和索引
         self.image_paths = image_paths
@@ -278,6 +302,8 @@ class ExtractTab(QWidget):
             successful_count = sum(1 for r in segmentation_results if r.get('success', False))
             self.update_segmentation_info_display(successful_count, len(segmentation_results))
             self.update_diameter_chart_from_segmentation_results(segmentation_results)
+            # 加载到现有分割结果后，也应允许保存分析结果（若具备）
+            self._update_save_button_state()
             # 切换按钮
             self.extract_btn.setVisible(False)
             self.reextract_btn.setVisible(True)
@@ -584,7 +610,8 @@ class ExtractTab(QWidget):
             self.extract_status.setText("分割完成，正在加载分割结果…")
             self.reload_sequence_with_segmentation_results()
             self.extract_status.setText("特征提取完成")
-            self.save_button.setEnabled(True)
+            # 依据分析结果是否就绪来控制保存按钮
+            self._update_save_button_state()
         else:
             self.extract_status.setText("分割脚本执行失败")
             QMessageBox.critical(self, "错误", "分割脚本执行失败！\n请检查控制台输出获取详细信息。")
@@ -672,6 +699,11 @@ class ExtractTab(QWidget):
                 return
             time_data = [t for t, _ in series]
             diameter_data = [d for _, d in series]
+            # 缓存曲线
+            try:
+                self.last_diameter_series = list(zip(time_data, diameter_data))
+            except Exception:
+                self.last_diameter_series = []
 
             # 调用拖曳曲线拟合，获取 K、B、C 与截断点
             K = B = C = None
@@ -693,6 +725,16 @@ class ExtractTab(QWidget):
                     C = fit_result.get('C')
                     df = fit_result.get('data_filtering', {}) or {}
                     cutoff_ms = df.get('cutoff_time')
+                # 缓存拟合结果（成功或失败都存）
+                try:
+                    self.last_drag_fit_result = {
+                        'success': bool(fit_result.get('success', False)),
+                        'K': K, 'B': B, 'C': C,
+                        'expression': 'D(t) = K * (1 - B * exp(-C * t^2))',
+                        'data_filtering': fit_result.get('data_filtering', {}),
+                    }
+                except Exception:
+                    self.last_drag_fit_result = None
             except Exception as e:
                 print(f"⚠️ 直径拖曳拟合失败，退回仅绘制数据点: {e}")
 
@@ -923,8 +965,7 @@ class ExtractTab(QWidget):
         try:
             text = build_prompt_info_text(self.prompt_data, self.ignition_point)
             self.prompt_info_text.setPlainText(text)
-            # 更新保存按钮状态（有参考点或起爆点时可保存）
-            self.save_button.setEnabled(len(self.prompt_data) > 0 or self.ignition_point is not None)
+            # 不在此处控制保存按钮（保存的是分析结果）
         except Exception as e:
             print(f"❌ 更新参考点信息显示失败: {e}")
             self.prompt_info_text.setPlainText(f"显示错误: {str(e)}")
@@ -948,7 +989,26 @@ class ExtractTab(QWidget):
         try:
             export_data = {
                 "image_paths": self.image_paths,
-                "prompt_data": {str(k): v for k, v in self.prompt_data.items()}  # 键转换为字符串
+                "prompt_data": {str(k): v for k, v in self.prompt_data.items()},  # 键转换为字符串
+                # 新增：各时刻直径曲线
+                "diameter_over_time": [
+                    {"time_ms": float(t), "diameter_m": float(d)}
+                    for (t, d) in (self.last_diameter_series or [])
+                ],
+                # 新增：爆炸基本参数（原 parameters 的子集/全部）
+                "parameters": {
+                    "material_type": self.parameters.get('material_type'),
+                    "equivalent": self.parameters.get('equivalent'),
+                    "al_percent": self.parameters.get('al_percent'),
+                    "explosion_duration": self.parameters.get('explosion_duration'),
+                    "pixel_length": self.parameters.get('pixel_length'),
+                },
+                # 新增：拖曳曲线拟合结果与表达式
+                "drag_fit": (self.last_drag_fit_result or {
+                    "success": False,
+                    "K": None, "B": None, "C": None,
+                    "expression": "D(t) = K * (1 - B * exp(-C * t^2))",
+                })
             }
             
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -1067,38 +1127,77 @@ class ExtractTab(QWidget):
     def save_extraction_sequence(self):
         """保存提取序列（按照example_data.json格式）"""
         try:
-            if not self.prompt_data:
-                QMessageBox.warning(self, "警告", "没有选择任何参考点，无法保存！")
+            # 改为保存直径与拟合参数结果
+            if not self.last_diameter_series:
+                QMessageBox.warning(self, "警告", "没有直径数据可保存！")
+                return
+
+            if not self.last_drag_fit_result or not (
+                isinstance(self.last_drag_fit_result, dict) and self.last_drag_fit_result.get('K') is not None
+            ):
+                QMessageBox.warning(self, "警告", "没有拖曳曲线拟合参数可保存！")
                 return
             
-            if not self.image_paths:
-                QMessageBox.warning(self, "警告", "没有加载图像序列，无法保存！")
-                return
-            
-            # 选择保存文件
+            # 选择保存文件（文件名反映保存内容）
             file_path, _ = QFileDialog.getSaveFileName(
-                self, "保存提取序列",
-                "fireball_prompt_data.json",
+                self, "保存直径与拟合结果",
+                "fireball_diameter_fit.json",
                 "JSON文件 (*.json);;所有文件 (*)"
             )
             
             if file_path:
-                # 导出数据
-                success = self.export_prompt_data_to_json(file_path)
+                # 导出分析结果
+                success = self.export_analysis_results_to_json(file_path)
                 
                 if success:
                     QMessageBox.information(self, "成功", 
-                                          f"提取序列已保存到:\n{file_path}\n\n"
-                                          f"包含 {len(self.prompt_data)} 张图像的参考点数据")
-                    self.extract_status.setText("序列保存成功")
+                                          f"分析结果已保存到:\n{file_path}\n\n"
+                                          f"包含 {len(self.last_diameter_series)} 个直径数据点与拟合参数")
+                    self.extract_status.setText("分析结果保存成功")
                 else:
                     QMessageBox.critical(self, "错误", "保存失败，请检查文件路径和权限！")
-                    self.extract_status.setText("序列保存失败")
+                    self.extract_status.setText("分析结果保存失败")
                     
         except Exception as e:
             print(f"❌ 保存提取序列失败: {e}")
             QMessageBox.critical(self, "错误", f"保存提取序列失败:\n{str(e)}")
             self.extract_status.setText("保存失败")
+
+    def export_analysis_results_to_json(self, file_path: str) -> bool:
+        """导出直径曲线、爆炸参数、拖曳拟合结果到 JSON 文件。"""
+        try:
+            from pathlib import Path
+            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+
+            export_data = {
+                # 各时刻直径
+                "diameter_over_time": [
+                    {"time_ms": float(t), "diameter_m": float(d)}
+                    for (t, d) in (self.last_diameter_series or [])
+                ],
+                # 爆炸基本参数
+                "parameters": {
+                    "material_type": self.parameters.get('material_type'),
+                    "equivalent": self.parameters.get('equivalent'),
+                    "al_percent": self.parameters.get('al_percent'),
+                    "explosion_duration": self.parameters.get('explosion_duration'),
+                    "pixel_length": self.parameters.get('pixel_length'),
+                },
+                # 拖曳曲线拟合参数与表达式
+                "drag_fit": (self.last_drag_fit_result or {
+                    "success": False,
+                    "K": None, "B": None, "C": None,
+                    "expression": "D(t) = K * (1 - B * exp(-C * t^2))",
+                })
+            }
+
+            import json
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as e:
+            print(f"❌ 导出分析结果失败: {e}")
+            return False
     
     def update_image_index_display(self):
         """更新图片索引相关的可视化（当前仅更新 CheckBar）。"""
