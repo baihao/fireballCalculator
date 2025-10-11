@@ -20,6 +20,7 @@ from segment_utils import build_time_diameter_series, run_segmentation_script
 from sequence_manager import SequenceManager
 from extract_tab_ui import ExtractTabUI
 from info_builder import build_prompt_info_text, build_segmentation_info_text
+from controllers.prompt_controller import PromptController
 
 # 添加路径以导入火球计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -40,19 +41,10 @@ class ExtractTab(QWidget):
         self.current_image_index = 0  # 当前显示的图像索引
         self.sequence_data = None  # 序列数据
         self.explosion_duration = 140  # 爆炸时长（毫秒）
-        # CheckBar 分组与标注跟踪
-        self.group_count = 1
-        self.annotated_indices = set()
         # 参数与分析缓存
         self.parameters = {}
         self.last_diameter_series = []  # List[Tuple[time_ms, diameter_m]]
         self.last_drag_fit_result = None
-        
-        # 初始化prompt选择相关属性
-        self.is_prompt_selection_mode = False  # 是否处于参考点选择模式
-        self.prompt_data = {}  # prompt数据：{image_index: {"points": [[x,y], ...], "labels": [1,0,1,...]}}
-        self.current_prompt_points = []  # 当前图像的参考点临时存储
-        self.ignition_point = None  # 起爆点坐标 (x, y) 或 None
         
         # 分割结果相关属性
         self.segmentation_results = []  # 分割结果列表
@@ -66,10 +58,16 @@ class ExtractTab(QWidget):
         self.fireball_calculator = FireballCalculator()
         self.sequence_manager = SequenceManager()
         
+        # 初始化控制器
+        self.prompt_controller = PromptController(self)
+        
         # 初始化UI构建器并创建界面
         self.ui_builder = ExtractTabUI()
         self.ui_builder.create_main_layout(self)
         self.ui_components = self.ui_builder.get_ui_components()
+        
+        # 设置控制器的 UI 组件引用
+        self.prompt_controller.setup_ui_components(self.ui_components)
         
         # 获取UI组件引用（为了向后兼容）
         self._setup_ui_component_references()
@@ -97,17 +95,6 @@ class ExtractTab(QWidget):
         except Exception:
             pass
 
-    def _refresh_checkbar(self):
-        """根据当前分组与已标注索引，刷新 CheckBar 显示。"""
-        try:
-            if 'check_bar' in self.ui_components and self.ui_components['check_bar'] is not None:
-                self.ui_components['check_bar'].update(
-                    length=len(self.image_paths),
-                    group_count=self.group_count,
-                    annotated_indices=sorted(self.annotated_indices)
-                )
-        except Exception:
-            pass
     
     def _setup_ui_component_references(self):
         """设置UI组件引用（向后兼容）"""
@@ -145,21 +132,14 @@ class ExtractTab(QWidget):
     
     def setup_connections(self):
         """设置信号连接"""
-        # 时间轴和图像控件
+        # 时间轴控件
         self.extract_slider.valueChanged.connect(self.on_time_changed)
-        self.extract_preview.point_clicked.connect(self.on_image_point_clicked)
         
-        # 侧边栏按钮
+        # 侧边栏按钮（PromptController 相关的信号已在控制器内部连接）
         self.sequence_btn.clicked.connect(self.select_sequence_folder)
-        self.prompt_btn.clicked.connect(self.toggle_prompt_selection)
         self.extract_btn.clicked.connect(self.start_feature_extraction)
         self.reextract_btn.clicked.connect(self.start_reextraction)
-        self.cancel_extract_btn.clicked.connect(self.cancel_current_image_points)
-        
-        # 单选按钮状态变化
-        self.positive_radio.toggled.connect(self.on_radio_button_changed)
-        self.negative_radio.toggled.connect(self.on_radio_button_changed)
-        self.ignition_radio.toggled.connect(self.on_radio_button_changed)
+        self.cancel_extract_btn.clicked.connect(self._cancel_current_image_points)
         
         # 图像导航
         self.jump_btn.clicked.connect(self.jump_to_image)
@@ -184,11 +164,10 @@ class ExtractTab(QWidget):
             self.image_paths = []
             self.current_image_index = 0
             self.sequence_data = None
-            self.prompt_data = {}
-            self.ignition_point = None
-            self.is_prompt_selection_mode = False
             self.segmentation_results = []
             self.has_segmentation_data = False
+            # 重置控制器状态
+            self.prompt_controller.reset_state()
             # 避免误用上一份文件路径
             if hasattr(self, '_current_sequence_file_path'):
                 delattr(self, '_current_sequence_file_path')
@@ -236,116 +215,106 @@ class ExtractTab(QWidget):
 
     def _apply_sequence_data(self, sequence_data: dict, sequence_file_path: Optional[str] = None) -> bool:
         """将已加载的序列数据应用到界面与状态中，返回是否存在分割结果。"""
-        # 保存序列数据和文件路径
-        self.sequence_data = sequence_data
-        if sequence_file_path:
-            self._current_sequence_file_path = sequence_file_path
-
-        # 提取图像路径
-        image_paths = self.sequence_manager.get_image_paths_from_sequence(sequence_data)
-        if not image_paths:
-            QMessageBox.warning(self, "警告", "序列文件中没有图像路径！")
-            self.extract_status.setText("无图像数据")
-            return False
-
-        # 提取参数
-        parameters = self.sequence_manager.get_parameters_from_sequence(sequence_data)
-        self.explosion_duration = int(parameters.get('explosion_duration', 140))
-        self.pixel_length = float(parameters.get('pixel_length', 1.0))
-        self.parameters = parameters or {}
-
-        # 设置图像路径和索引
-        self.image_paths = image_paths
-        self.current_image_index = 0
-
-        # 计算分组（平均分组，至少2组；每组最多250张）
         try:
-            total = len(self.image_paths)
-            if total > 0:
-                max_groups_by_size = (total + 249) // 250
-                # 至少分2组；若不足，按2组；否则取不超过max_groups_by_size且不超过total的合理值
-                self.group_count = max(2, max_groups_by_size)
-                self.group_count = min(self.group_count, total)
+            # 保存序列数据和文件路径
+            self.sequence_data = sequence_data
+            if sequence_file_path:
+                self._current_sequence_file_path = sequence_file_path
+            
+            # 提取图像路径
+            image_paths = self.sequence_manager.get_image_paths_from_sequence(sequence_data)
+            if not image_paths:
+                QMessageBox.warning(self, "警告", "序列文件中没有图像路径！")
+                self.extract_status.setText("无图像数据")
+                return False
+            
+            # 提取参数
+            parameters = self.sequence_manager.get_parameters_from_sequence(sequence_data)
+            self.explosion_duration = int(parameters.get('explosion_duration', 140))
+            self.pixel_length = float(parameters.get('pixel_length', 1.0))
+            self.parameters = parameters or {}
+            
+            # 设置图像路径和索引
+            self.image_paths = image_paths
+            self.current_image_index = 0
+            
+            # 计算分组（平均分组，至少2组；每组最多250张）
+            group_count = 1
+            try:
+                total = len(self.image_paths)
+                if total > 0:
+                    max_groups_by_size = (total + 249) // 250
+                    # 至少分2组；若不足，按2组；否则取不超过max_groups_by_size且不超过total的合理值
+                    group_count = max(2, max_groups_by_size)
+                    group_count = min(group_count, total)
+                else:
+                    group_count = 1
+            except Exception:
+                group_count = 1
+            
+            # 设置控制器的分组数量
+            self.prompt_controller.set_group_count(group_count)
+
+            # 设置时间轴范围
+            self.extract_slider.setRange(0, len(self.image_paths) - 1)
+            self.extract_slider.setValue(0)
+
+            # 设置图像控件为最大尺寸并显示第一张
+            self.extract_preview.resize(self.extract_preview.maximumSize())
+            self.display_image_at_index(0)
+
+            # 加载温度数据
+            time_data, temp_data = self.sequence_manager.get_temperature_data_from_sequence(sequence_data)
+            if time_data and temp_data:
+                self.update_temperature_chart(time_data, temp_data)
+
+            # 分割结果优先
+            has_segmentation_results = self.sequence_manager.has_segmentation_results(sequence_data)
+            if has_segmentation_results:
+                segmentation_results = self.sequence_manager.get_segmentation_results_from_sequence(sequence_data)
+                self.segmentation_results = segmentation_results
+                self.has_segmentation_data = True
+                # 清除prompt数据避免冲突
+                self.prompt_controller.reset_state()
+                # 信息面板与直径图
+                successful_count = sum(1 for r in segmentation_results if r.get('success', False))
+                self.update_segmentation_info_display(successful_count, len(segmentation_results))
+                self.update_diameter_chart_from_segmentation_results(segmentation_results)
+                # 加载到现有分割结果后，也应允许保存分析结果（若具备）
+                self._update_save_button_state()
+                # 切换按钮
+                self.extract_btn.setVisible(False)
+                self.reextract_btn.setVisible(True)
             else:
-                self.group_count = 1
-        except Exception:
-            self.group_count = 1
-        # 重置标注集合
-        self.annotated_indices = set()
+                # 加载prompt数据与起爆点
+                self.has_segmentation_data = False
+                self.extract_btn.setVisible(True)
+                self.reextract_btn.setVisible(False)
+                prompt_data = self.sequence_manager.get_prompt_data_from_sequence(sequence_data)
+                if prompt_data:
+                    self.prompt_controller.load_prompt_data(prompt_data)
+                ignition_point = self.sequence_manager.get_ignition_point_from_sequence(sequence_data)
+                if ignition_point:
+                    self.prompt_controller.set_ignition_point(ignition_point[0], ignition_point[1])
+                self.prompt_controller.update_prompt_info_display()
+                self.prompt_controller.load_points_for_current_image(0)
 
-        # 设置时间轴范围
-        self.extract_slider.setRange(0, len(self.image_paths) - 1)
-        self.extract_slider.setValue(0)
-
-        # 初始化 CheckBar 显示
-        self._refresh_checkbar()
-
-        # 设置图像控件为最大尺寸并显示第一张
-        self.extract_preview.resize(self.extract_preview.maximumSize())
-        self.display_image_at_index(0)
-
-        # 加载温度数据
-        time_data, temp_data = self.sequence_manager.get_temperature_data_from_sequence(sequence_data)
-        if time_data and temp_data:
-            self.update_temperature_chart(time_data, temp_data)
-
-        # 分割结果优先
-        has_segmentation_results = self.sequence_manager.has_segmentation_results(sequence_data)
-        if has_segmentation_results:
-            segmentation_results = self.sequence_manager.get_segmentation_results_from_sequence(sequence_data)
-            self.segmentation_results = segmentation_results
-            self.has_segmentation_data = True
-            # 清除prompt数据避免冲突
-            self.prompt_data = {}
-            self.ignition_point = None
-            # 信息面板与直径图
-            successful_count = sum(1 for r in segmentation_results if r.get('success', False))
-            self.update_segmentation_info_display(successful_count, len(segmentation_results))
-            self.update_diameter_chart_from_segmentation_results(segmentation_results)
-            # 加载到现有分割结果后，也应允许保存分析结果（若具备）
-            self._update_save_button_state()
-            # 切换按钮
-            self.extract_btn.setVisible(False)
-            self.reextract_btn.setVisible(True)
-        else:
-            # 加载prompt数据与起爆点
-            self.has_segmentation_data = False
-            self.extract_btn.setVisible(True)
-            self.reextract_btn.setVisible(False)
-            prompt_data = self.sequence_manager.get_prompt_data_from_sequence(sequence_data)
-            if prompt_data:
-                self.prompt_data = prompt_data
-                # 从已存在的 prompt_data 还原已标注索引集合，并刷新 CheckBar
-                try:
-                    self.annotated_indices = {
-                        idx for idx, d in self.prompt_data.items()
-                        if isinstance(d, dict) and len(d.get("points", [])) > 0
-                    }
-                    if 'check_bar' in self.ui_components:
-                        self.ui_components['check_bar'].update(
-                            length=len(self.image_paths),
-                            group_count=self.group_count,
-                            annotated_indices=sorted(self.annotated_indices)
-                        )
-                except Exception as _:
-                    pass
-            ignition_point = self.sequence_manager.get_ignition_point_from_sequence(sequence_data)
-            if ignition_point:
-                self.ignition_point = ignition_point
-            self.update_prompt_info_display()
-            self.load_points_for_current_image()
-
-        # 序列摘要与状态
-        summary = self.sequence_manager.get_sequence_summary(sequence_data)
-        status_msg = f"已加载序列: {summary['image_count']} 个文件，时长: {self.explosion_duration}ms"
-        if summary['has_temperature_data']:
-            status_msg += f"，温度数据: {summary['temperature_points']} 点"
-        if summary['has_prompt_data']:
-            status_msg += f"，参考点数据: {summary['total_prompt_points']} 点"
-        if summary['has_ignition_point']:
-            status_msg += f"，起爆点: {summary['ignition_point']}"
-        self.extract_status.setText(status_msg)
-        return has_segmentation_results
+            # 序列摘要与状态
+            summary = self.sequence_manager.get_sequence_summary(sequence_data)
+            status_msg = f"已加载序列: {summary['image_count']} 个文件，时长: {self.explosion_duration}ms"
+            if summary['has_temperature_data']:
+                status_msg += f"，温度数据: {summary['temperature_points']} 点"
+            if summary['has_prompt_data']:
+                status_msg += f"，参考点数据: {summary['total_prompt_points']} 点"
+            if summary['has_ignition_point']:
+                status_msg += f"，起爆点: {summary['ignition_point']}"
+            self.extract_status.setText(status_msg)
+            return has_segmentation_results
+            
+        except Exception as e:
+            print(f"❌ 应用序列数据失败: {e}")
+            QMessageBox.critical(self, "错误", f"应用序列数据失败:\n{str(e)}")
+            return False
     
     def on_time_changed(self, value):
         """时间轴变化"""
@@ -381,6 +350,8 @@ class ExtractTab(QWidget):
             success = self.extract_preview.set_image(image_path)
             if success:
                 self.current_image_index = index
+                # 同步到 PromptController
+                self.prompt_controller.set_current_image_index(index)
                 
                 # 优先显示分割结果，如果有的话
                 if self.has_segmentation_data and index < len(self.segmentation_results):
@@ -393,7 +364,7 @@ class ExtractTab(QWidget):
                 else:
                     # 没有分割结果：正常加载特征点
                     self.extract_preview.set_show_segmentation(False)
-                    self.load_points_for_current_image()
+                    self.prompt_controller.load_points_for_current_image(index)
                     print(f"显示图像: {image_path} (索引: {index}) - 特征点模式")
                 
                 # 更新图片索引显示
@@ -544,7 +515,7 @@ class ExtractTab(QWidget):
                 return 'already_segmented'
             
             # 检查是否有prompt数据
-            prompt_data = self.sequence_manager.get_prompt_data_from_sequence(self.sequence_data)
+            prompt_data = self.prompt_controller.get_prompt_data()
             if not prompt_data or (isinstance(prompt_data, dict) and len(prompt_data.keys()) == 0):
                 return 'no_prompt_data'
             
@@ -634,7 +605,7 @@ class ExtractTab(QWidget):
                         self.sequence_data = new_data
                 else:
                     print(f"❌ {message}")
-            
+                
             # 重置显示模式
             self.extract_preview.set_show_segmentation(False)
             # 清空直径图表（用户反馈：未被清空）
@@ -646,15 +617,15 @@ class ExtractTab(QWidget):
             # 重新加载特征点数据
             prompt_data = self.sequence_manager.get_prompt_data_from_sequence(self.sequence_data)
             if prompt_data:
-                self.prompt_data = prompt_data
-                self.load_points_for_current_image()
-                self.update_prompt_info_display()
+                self.prompt_controller.load_prompt_data(prompt_data)
+                self.prompt_controller.load_points_for_current_image(self.current_image_index)
+                self.prompt_controller.update_prompt_info_display()
             
             # 更新状态
             self.extract_status.setText("已清除分割结果，请重新选择特征点")
             
             print("✅ 已准备重新提取")
-            
+                
         except Exception as e:
             print(f"❌ 准备重新提取失败: {e}")
     
@@ -678,7 +649,7 @@ class ExtractTab(QWidget):
             
             # 统一应用逻辑
             return self._apply_sequence_data(sequence_data, str(segmented_path))
-                
+            
         except Exception as e:
             print(f"❌ 重新加载序列文件失败: {e}")
             import traceback
@@ -751,131 +722,6 @@ class ExtractTab(QWidget):
     
     
     
-    def toggle_prompt_selection(self):
-        """切换prompt点选择模式"""
-        try:
-            if not self.is_prompt_selection_mode:
-                # 开始选择prompt点
-                self.is_prompt_selection_mode = True
-                self.prompt_btn.setText("选择参考点完成")
-                self.extract_status.setText("正在选择参考点...")
-                
-                # 根据当前单选按钮状态设置交互模式
-                current_type = self.get_current_point_type()
-                self.extract_preview.set_interaction_mode(current_type)
-                self.extract_preview.set_interactive_enabled(True)
-                
-                print(f"🎯 开始参考点选择模式: {current_type}")
-            else:
-                # 完成选择参考点
-                self.is_prompt_selection_mode = False
-                self.prompt_btn.setText("开始选择参考点")
-                # 交由独立函数处理校验与后续动作
-                if not self._finalize_prompt_selection():
-                    return
-                
-        except Exception as e:
-            print(f"❌ 切换参考点选择模式失败: {e}")
-            QMessageBox.critical(self, "错误", f"切换参考点选择模式失败:\n{str(e)}")
-    
-    def _auto_save_prompt_data(self):
-        """自动保存prompt数据和起爆点到当前序列文件"""
-        try:
-            # 检查是否有序列数据
-            if not self.sequence_data:
-                print("没有序列数据，无法自动保存prompt数据")
-                return
-            
-            # 检查是否有数据需要保存
-            if not self.prompt_data and not self.ignition_point:
-                print("没有prompt数据或起爆点，无需保存")
-                return
-            
-            # 检查是否有原始文件路径（从序列加载时保存）
-            if not hasattr(self, '_current_sequence_file_path'):
-                print("没有当前序列文件路径，无法自动保存")
-                return
-            
-            # 使用序列管理器保存prompt数据和起爆点
-            success, message = self.sequence_manager.save_prompt_and_ignition_data_to_sequence(
-                self._current_sequence_file_path, self.prompt_data, self.ignition_point
-            )
-            
-            if success:
-                print(f"✅ 自动保存prompt数据和起爆点成功: {message}")
-                self.extract_status.setText("参考点数据已自动保存")
-                # 同步更新内存中的 sequence_data，避免后续再次读取文件
-                try:
-                    if isinstance(self.sequence_data, dict):
-                        # 确保 image_sequence 节点存在
-                        if 'image_sequence' not in self.sequence_data or not isinstance(self.sequence_data['image_sequence'], dict):
-                            self.sequence_data['image_sequence'] = {}
-                        image_seq = self.sequence_data['image_sequence']
-                        # 写入 prompt_data（键使用字符串以保持与文件一致）
-                        image_seq['prompt_data'] = {str(k): v for k, v in self.prompt_data.items()}
-                        # 写入起爆点
-                        if self.ignition_point is not None:
-                            image_seq['target_center'] = list(self.ignition_point)
-                        else:
-                            # 若起爆点被清除
-                            if 'target_center' in image_seq:
-                                del image_seq['target_center']
-                except Exception as _:
-                    pass
-            else:
-                print(f"❌ 自动保存参考点数据失败: {message}")
-                self.extract_status.setText("参考点数据保存失败")
-                
-        except Exception as e:
-            print(f"❌ 自动保存参考点数据异常: {e}")
-
-    def _finalize_prompt_selection(self) -> bool:
-        """
-        在用户点击“选择参考点完成”后执行最终校验与后续动作：
-        1) 校验每一分组都至少有一张已标注图片；
-        2) 未达成则保持选择模式并提示；
-        3) 通过则退出交互并自动保存。
-
-        Returns:
-            bool: 是否完成（通过校验并已保存）。未通过返回 False。
-        """
-        # 校验分组是否全部覆盖
-        all_marked = False
-        try:
-            if 'check_bar' in self.ui_components:
-                all_marked = self.ui_components['check_bar'].is_all_groups_marked()
-        except Exception:
-            all_marked = False
-
-        if not all_marked:
-            self.extract_status.setText("参考点选择未完成：存在未标注的分组")
-            QMessageBox.warning(self, "未完成标注", "请确保每个分组至少标注一张图片！")
-            # 保持在选择模式，便于继续补充标注
-            self.is_prompt_selection_mode = True
-            self.prompt_btn.setText("选择参考点完成")
-            current_type = self.get_current_point_type()
-            self.extract_preview.set_interaction_mode(current_type)
-            self.extract_preview.set_interactive_enabled(True)
-            return False
-
-        # 通过校验：退出交互并保存
-        self.extract_status.setText("参考点选择完成")
-        self.extract_preview.set_interaction_mode('none')
-        self.extract_preview.set_interactive_enabled(False)
-        self._auto_save_prompt_data()
-        print("✅ 参考点选择完成")
-        return True
-    
-    def get_current_point_type(self):
-        """获取当前选择的点类型"""
-        if hasattr(self, 'positive_radio') and self.positive_radio.isChecked():
-            return 'positive'
-        elif hasattr(self, 'negative_radio') and self.negative_radio.isChecked():
-            return 'negative'
-        elif hasattr(self, 'ignition_radio') and self.ignition_radio.isChecked():
-            return 'ignition'
-        else:
-            return 'positive'  # 默认返回正点
     
     def start_reextraction(self):
         """开始重新提取"""
@@ -906,69 +752,10 @@ class ExtractTab(QWidget):
                 self.extract_btn.setVisible(True)
                 
                 print("✅ 已准备重新提取，请重新选择特征点")
-                
+            
         except Exception as e:
             print(f"❌ 重新提取失败: {e}")
             QMessageBox.critical(self, "错误", f"重新提取失败:\n{str(e)}")
-    
-    def add_prompt_point(self, image_index: int, x: int, y: int, is_positive: bool = True):
-        """
-        添加prompt点到数据结构
-        
-        Args:
-            image_index: 图像索引
-            x, y: 点坐标
-            is_positive: 是否为正点
-        """
-        try:
-            # 确保数据结构存在
-            if image_index not in self.prompt_data:
-                self.prompt_data[image_index] = {
-                    "points": [],
-                    "labels": []
-                }
-            
-            # 添加点坐标和标签
-            self.prompt_data[image_index]["points"].append([x, y])
-            self.prompt_data[image_index]["labels"].append(1 if is_positive else 0)
-            
-            print(f"添加参考点: 图像{image_index}, 坐标({x}, {y}), 类型: {'正点' if is_positive else '负点'}")
-            
-            # 更新显示
-            self.update_prompt_info_display()
-
-            # 标记该图片索引为已标注，并刷新 CheckBar
-            try:
-                self.annotated_indices.add(image_index)
-            except Exception:
-                pass
-            self._refresh_checkbar()
-            
-        except Exception as e:
-            print(f"❌ 添加参考点失败: {e}")
-    
-    def clear_prompt_data(self):
-        """清空所有prompt数据"""
-        self.prompt_data = {}
-        self.ignition_point = None
-        self.update_prompt_info_display()
-        print("🗑️ 已清空所有参考点数据")
-        # 清空标注并刷新 CheckBar
-        try:
-            self.annotated_indices.clear()
-        except Exception:
-            pass
-        self._refresh_checkbar()
-    
-    def update_prompt_info_display(self):
-        """更新参考点信息显示"""
-        try:
-            text = build_prompt_info_text(self.prompt_data, self.ignition_point)
-            self.prompt_info_text.setPlainText(text)
-            # 不在此处控制保存按钮（保存的是分析结果）
-        except Exception as e:
-            print(f"❌ 更新参考点信息显示失败: {e}")
-            self.prompt_info_text.setPlainText(f"显示错误: {str(e)}")
     
     def update_segmentation_info_display(self, successful_count: int, total_count: int):
         """更新分割结果信息显示"""
@@ -979,150 +766,25 @@ class ExtractTab(QWidget):
             print(f"❌ 更新分割结果信息显示失败: {e}")
             self.prompt_info_text.setPlainText(f"显示错误: {str(e)}")
     
-    def export_prompt_data_to_json(self, file_path: str):
-        """
-        导出prompt数据到JSON文件
-        
-        Args:
-            file_path: 导出文件路径
-        """
+    def _cancel_current_image_points(self):
+        """取消当前图像上的所有点"""
         try:
-            export_data = {
-                "image_paths": self.image_paths,
-                "prompt_data": {str(k): v for k, v in self.prompt_data.items()},  # 键转换为字符串
-                # 新增：各时刻直径曲线
-                "diameter_over_time": [
-                    {"time_ms": float(t), "diameter_m": float(d)}
-                    for (t, d) in (self.last_diameter_series or [])
-                ],
-                # 新增：爆炸基本参数（原 parameters 的子集/全部）
-                "parameters": {
-                    "material_type": self.parameters.get('material_type'),
-                    "equivalent": self.parameters.get('equivalent'),
-                    "al_percent": self.parameters.get('al_percent'),
-                    "explosion_duration": self.parameters.get('explosion_duration'),
-                    "pixel_length": self.parameters.get('pixel_length'),
-                },
-                # 新增：拖曳曲线拟合结果与表达式
-                "drag_fit": (self.last_drag_fit_result or {
-                    "success": False,
-                    "K": None, "B": None, "C": None,
-                    "expression": "D(t) = K * (1 - B * exp(-C * t^2))",
-                })
-            }
-            
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, indent=4, ensure_ascii=False)
-            
-            print(f"✅ 参考点数据已导出到: {file_path}")
-            return True
-            
+            self.prompt_controller.cancel_current_image_points(self.current_image_index)
+            # 清空图像控件中的点显示
+            self.extract_preview.clear_points()
+            self.extract_status.setText("已取消当前图像的参考点选择")
         except Exception as e:
-            print(f"❌ 导出参考点数据失败: {e}")
-            return False
-    
-    def on_image_point_clicked(self, x: int, y: int, point_type: str):
-        """
-        处理图像点击事件
-        
-        Args:
-            x, y: 点击的图像坐标
-            point_type: 点类型 ('positive', 'negative', 'ignition')
-        """
-        try:
-            if not self.is_prompt_selection_mode:
-                return
-            
-            if point_type == 'ignition':
-                # 设置起爆点（全局唯一）
-                self.ignition_point = (x, y)
-                print(f"设置起爆点: 坐标({x}, {y})")
-                # 更新所有图像的起爆点显示
-                self.update_ignition_point_display()
-                # 更新信息面板显示
-                self.update_prompt_info_display()
-            else:
-                # 添加正负点到数据结构
-                is_positive = (point_type == 'positive')
-                self.add_prompt_point(self.current_image_index, x, y, is_positive)
-            
-            print(f"图像点击: 索引{self.current_image_index}, 坐标({x}, {y}), 类型: {point_type}")
-            
-        except Exception as e:
-            print(f"❌ 处理图像点击失败: {e}")
+            print(f"❌ 取消当前图像点失败: {e}")
     
     def update_ignition_point_display(self):
         """更新起爆点显示"""
         try:
             # 更新当前图像的起爆点显示
-            self.load_points_for_current_image()
-            
+            self.prompt_controller.load_points_for_current_image(self.current_image_index)
+                
         except Exception as e:
             print(f"❌ 更新起爆点显示失败: {e}")
     
-    def on_radio_button_changed(self):
-        """处理单选按钮状态变化"""
-        try:
-            if self.is_prompt_selection_mode:
-                # 更新交互模式
-                current_type = self.get_current_point_type()
-                self.extract_preview.set_interaction_mode(current_type)
-                print(f"切换点选择类型为: {current_type}")
-                
-        except Exception as e:
-            print(f"❌ 处理单选按钮变化失败: {e}")
-    
-    def cancel_current_image_points(self):
-        """取消当前图像上的所有点"""
-        try:
-            if self.current_image_index in self.prompt_data:
-                # 移除数据结构中的点
-                del self.prompt_data[self.current_image_index]
-                
-                # 清空图像控件中的点显示
-                self.extract_preview.clear_points()
-                
-                # 更新信息显示
-                self.update_prompt_info_display()
-                
-                print(f"🗑️ 已取消图像{self.current_image_index}上的所有参考点")
-                self.extract_status.setText("已取消当前图像的参考点选择")
-
-                # 若该图片无点后，从已标注集合移除，并刷新 CheckBar
-                try:
-                    if self.current_image_index in self.annotated_indices:
-                        self.annotated_indices.remove(self.current_image_index)
-                except Exception:
-                    pass
-                self._refresh_checkbar()
-                
-        except Exception as e:
-            print(f"❌ 取消当前图像点失败: {e}")
-    
-    def load_points_for_current_image(self):
-        """为当前图像加载已有的点标记"""
-        try:
-            positive_points = []
-            negative_points = []
-            
-            if self.current_image_index in self.prompt_data:
-                points = self.prompt_data[self.current_image_index]["points"]
-                labels = self.prompt_data[self.current_image_index]["labels"]
-                
-                # 分离正负点
-                for point, label in zip(points, labels):
-                    if label == 1:
-                        positive_points.append(tuple(point))
-                    else:
-                        negative_points.append(tuple(point))
-            
-            # 设置到图像控件（包括起爆点）
-            self.extract_preview.set_points(positive_points, negative_points, self.ignition_point)
-            
-            print(f"为图像{self.current_image_index}加载了{len(positive_points)}个正点, {len(negative_points)}个负点, 起爆点: {self.ignition_point}")
-                
-        except Exception as e:
-            print(f"❌ 加载当前图像点失败: {e}")
     
     def save_extraction_sequence(self):
         """保存提取序列（按照example_data.json格式）"""
@@ -1131,7 +793,7 @@ class ExtractTab(QWidget):
             if not self.last_diameter_series:
                 QMessageBox.warning(self, "警告", "没有直径数据可保存！")
                 return
-
+            
             if not self.last_drag_fit_result or not (
                 isinstance(self.last_drag_fit_result, dict) and self.last_drag_fit_result.get('K') is not None
             ):
@@ -1162,7 +824,7 @@ class ExtractTab(QWidget):
             print(f"❌ 保存提取序列失败: {e}")
             QMessageBox.critical(self, "错误", f"保存提取序列失败:\n{str(e)}")
             self.extract_status.setText("保存失败")
-
+    
     def export_analysis_results_to_json(self, file_path: str) -> bool:
         """导出直径曲线、爆炸参数、拖曳拟合结果到 JSON 文件。"""
         try:
@@ -1206,8 +868,8 @@ class ExtractTab(QWidget):
             if getattr(self, 'check_bar', None) is not None:
                 self.check_bar.update(
                     length=len(self.image_paths),
-                    group_count=self.group_count,
-                    annotated_indices=sorted(self.annotated_indices)
+                    group_count=self.prompt_controller.group_count,
+                    annotated_indices=sorted(self.prompt_controller.get_annotated_indices())
                 )
         except Exception as e:
             print(f"❌ 更新图片索引显示失败: {e}")
