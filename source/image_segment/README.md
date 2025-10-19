@@ -59,7 +59,7 @@ best_mask = argmax(M_i) S_i
 
 即选择SAM质量分数最高的掩码作为最终结果。
 
-![分割结果示例](../example/q0099_contour.png)
+![分割结果示例](example/q0099_contour.png)
 
 *上图展示了单个分割目标轮廓的示例，白色区域为分割结果*
 
@@ -253,7 +253,7 @@ def filter_negative_points(self, candidate_points, target_image, reference_posit
 **实际应用效果**：
 RGB相似性验证机制在实际应用中表现出色，能够有效处理目标移动、光照变化、视角变化等常见问题，确保传播过程的稳定性和准确性。
 
-![传播过程可视化](../example/q0099_merged_debug.png)
+![传播过程可视化](example/q0099_merged_debug.png)
 
 *上图展示了完整的传播过程，包括参考分割、点映射、筛选和最终分割结果*
 
@@ -350,7 +350,7 @@ best_candidate = max(candidates, key=lambda x: x['total_score'])
 }
 ```
 
-![优化后的掩码](../example/q0099_propagated_mask.png)
+![优化后的掩码](example/q0099_propagated_mask.png)
 
 *上图展示了经过连通域分析和轮廓优化后的最终分割掩码*
 

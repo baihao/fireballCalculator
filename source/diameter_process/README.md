@@ -35,7 +35,7 @@ D(t) = K * (1 - B*exp(-C*t²))
 - **稳定阶段**: 火球达到最大直径，保持相对稳定
 - **干扰阶段**: 火球被烟雾遮挡，数据不可信
 
-![拟合结果示例](../example/fireball_sequence_segmented_drag_fit.png)
+![拟合结果示例](example/fireball_sequence_segmented_drag_fit.png)
 
 #### 1.2 烟雾干扰数据过滤策略
 
