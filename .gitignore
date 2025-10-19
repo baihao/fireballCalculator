@@ -43,12 +43,9 @@ source/image_segment/contour_visualization/**
 !papers/**
 !document/
 !document/**
+!source/image_segment/example/
+!source/image_segment/example/**
 
-# Ignore example directories and their contents
-source/image_segment/example/
-source/image_segment/example/**
-**/example/
-**/example/**
 
 # Processing logs and summaries
 source/image_segment/processing_log.txt
