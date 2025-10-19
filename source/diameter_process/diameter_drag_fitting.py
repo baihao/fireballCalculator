@@ -48,20 +48,18 @@
       - 阶段1：全局优化（差分进化算法）
         * 避免局部最优解
         * 参数范围：K∈[max(D), 3*max(D)], B∈[0.01, 0.999], C∈[1e-6, 1e-2]
-        * 目标函数：加权最小二乘，早期数据权重更高
+        * 目标函数：标准最小二乘
       - 阶段2：局部精化（Levenberg-Marquardt算法）
         * 基于全局优化结果进行精化
         * 计算参数协方差矩阵
         * 估计参数不确定性
    
-   d) 加权拟合（改进）：
-      - 早期数据点权重：w_early = 2.0
-      - 后期数据点权重：w_late = 1.0
-      - 目标函数：Σ w_i * (D_observed - D_model)²
-      - 平衡早期增长阶段和后期稳定阶段的重要性
+   d) 标准拟合：
+      - 目标函数：Σ (D_observed - D_model)²
+      - 使用标准最小二乘法进行参数拟合
    
    e) 拟合质量评估（增强）：
-      - R²决定系数（加权版本）
+      - R²决定系数
       - 均方根误差(RMSE)
       - 平均绝对误差(MAE)
       - 最大相对误差
@@ -85,10 +83,10 @@
       - 局部精化提高参数精度
       - 结合两种算法的优势
    
-   d) 加权拟合：
-      - 早期数据点包含更多增长信息
-      - 平衡不同阶段数据的重要性
-      - 提高拟合的物理合理性
+   d) 标准拟合：
+      - 使用标准最小二乘法
+      - 简化拟合过程，提高计算效率
+      - 保持拟合的物理合理性
    
    e) 智能参数估计：
       - 基于数据特征自动估计初始值
@@ -99,7 +97,7 @@
    - 鲁棒性：对噪声数据和异常值有较好的容忍性
    - 物理约束：确保参数符合物理意义
    - 收敛性：多阶段策略提高收敛概率
-   - 精度：加权拟合和局部精化提高参数精度
+   - 精度：标准拟合和局部精化提高参数精度
    - 适应性：自动适应不同的数据特征
 """
 
@@ -455,23 +453,6 @@ class DiameterDragFitter:
             # 阶段1：全局优化（差分进化算法）
             print("阶段1: 全局优化...")
             
-            # 定义加权目标函数
-            def weighted_objective(params):
-                K, B, C = params
-                try:
-                    predicted = self.drag_function(t, K, B, C)
-                    residuals = D - predicted
-                    
-                    # 计算权重：早期数据点权重更高
-                    time_span = t[-1] - t[0]
-                    early_threshold = t[0] + 0.3 * time_span  # 前30%时间
-                    weights = np.where(t <= early_threshold, 2.0, 1.0)
-                    
-                    weighted_residuals = weights * residuals
-                    return np.sum(weighted_residuals**2)
-                except:
-                    return 1e10  # 返回大值表示拟合失败
-
             def objective(params):
                 K, B, C = params
                 try:
@@ -571,7 +552,7 @@ class DiameterDragFitter:
     def _evaluate_fit_quality(self, t: np.ndarray, D: np.ndarray, 
                              fit_result: Dict[str, Any]) -> Dict[str, float]:
         """
-        评估拟合质量（改进版，支持加权评估）
+        评估拟合质量
         
         Args:
             t: 时间数据（毫秒）
@@ -590,16 +571,9 @@ class DiameterDragFitter:
             # 计算预测值
             D_pred = self.drag_function(t, K, B, C)
             
-            # 计算权重（与拟合时保持一致）
-            time_span = t[-1] - t[0]
-            early_threshold = t[0] + 0.3 * time_span  # 前30%时间
-            weights = np.where(t <= early_threshold, 2.0, 1.0)
-            
-            # 计算加权R²决定系数
-            weighted_residuals = weights * (D - D_pred)
-            weighted_mean = np.average(D, weights=weights)
-            ss_res = np.sum(weighted_residuals**2)  # 加权残差平方和
-            ss_tot = np.sum(weights * (D - weighted_mean)**2)  # 加权总平方和
+            # 计算标准R²决定系数
+            ss_res = np.sum((D - D_pred)**2)  # 残差平方和
+            ss_tot = np.sum((D - np.mean(D))**2)  # 总平方和
             r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
             
             # 计算均方根误差 (RMSE)
@@ -612,18 +586,14 @@ class DiameterDragFitter:
             relative_errors = np.abs((D - D_pred) / D)
             max_relative_error = np.max(relative_errors) * 100  # 百分比
             
-            # 计算加权均方根误差
-            weighted_rmse = np.sqrt(np.mean(weights * (D - D_pred)**2))
-            
             print(f"拟合质量: R²={r_squared:.4f}, RMSE={rmse:.4f}, MAE={mae:.4f}")
-            print(f"加权RMSE={weighted_rmse:.4f}, 最大相对误差: {max_relative_error:.2f}%")
+            print(f"最大相对误差: {max_relative_error:.2f}%")
             
             return {
                 'r_squared': float(r_squared),
                 'rmse': float(rmse),
                 'mae': float(mae),
-                'max_relative_error': float(max_relative_error),
-                'weighted_rmse': float(weighted_rmse)
+                'max_relative_error': float(max_relative_error)
             }
             
         except Exception as e:
