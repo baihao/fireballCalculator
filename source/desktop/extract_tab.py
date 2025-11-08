@@ -21,6 +21,7 @@ from sequence_manager import SequenceManager
 from extract_tab_ui import ExtractTabUI
 from info_builder import build_prompt_info_text, build_segmentation_info_text
 from controllers.prompt_controller import PromptController
+from controllers.chart_controller import ChartController
 
 # 添加路径以导入火球计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -43,8 +44,6 @@ class ExtractTab(QWidget):
         self.explosion_duration = 140  # 爆炸时长（毫秒）
         # 参数与分析缓存
         self.parameters = {}
-        self.last_diameter_series = []  # List[Tuple[time_ms, diameter_m]]
-        self.last_drag_fit_result = None
         
         # 分割结果相关属性
         self.segmentation_results = []  # 分割结果列表
@@ -60,6 +59,7 @@ class ExtractTab(QWidget):
         
         # 初始化控制器
         self.prompt_controller = PromptController(self)
+        self.chart_controller = ChartController()
         
         # 初始化UI构建器并创建界面
         self.ui_builder = ExtractTabUI()
@@ -68,6 +68,10 @@ class ExtractTab(QWidget):
         
         # 设置控制器的 UI 组件引用
         self.prompt_controller.setup_ui_components(self.ui_components)
+        self.chart_controller.set_widgets(
+            self.ui_components['temp_chart'],
+            self.ui_components['diam_chart']
+        )
         
         # 获取UI组件引用（为了向后兼容）
         self._setup_ui_component_references()
@@ -81,9 +85,7 @@ class ExtractTab(QWidget):
     def _has_analysis_results(self) -> bool:
         """是否具备可保存的分析结果（直径曲线 + 拟合参数）。"""
         try:
-            has_curve = bool(self.last_diameter_series)
-            has_fit = isinstance(self.last_drag_fit_result, dict) and self.last_drag_fit_result.get('K') is not None
-            return has_curve and has_fit
+            return self.chart_controller.has_analysis_results()
         except Exception:
             return False
 
@@ -195,8 +197,7 @@ class ExtractTab(QWidget):
             
             # 4) 重置图表
             try:
-                self.ui_builder.init_temperature_chart()
-                self.ui_builder.init_diameter_chart()
+                self.chart_controller.reset()
             except Exception as e:
                 print(f"⚠️ 重置图表时出错: {e}")
             
@@ -407,15 +408,13 @@ class ExtractTab(QWidget):
     
     def init_charts(self):
         """初始化图表"""
-        # 使用UI构建器初始化图表
-        self.ui_builder.init_temperature_chart()
-        self.ui_builder.init_diameter_chart()
+        self.chart_controller.reset()
     
     def update_temperature_chart(self, time_data, temp_data):
         """更新温度图表"""
         try:
             print(f"开始更新温度图表: {len(time_data)} 个数据点")
-            self.temp_chart.update_data(time_data, temp_data)
+            self.chart_controller.update_temperature(time_data, temp_data)
             print("✅ 温度图表更新完成")
             
         except Exception as e:
@@ -427,7 +426,7 @@ class ExtractTab(QWidget):
         """更新直径图表（提取完成后调用）"""
         try:
             print(f"📊 update_diameter_chart 被调用")
-            self.diam_chart.update_data(time_data, diameter_data)
+            self.chart_controller.update_diameter_raw(time_data, diameter_data)
             print("✅ 直径图表更新完成")
             
         except Exception as e:
@@ -666,19 +665,13 @@ class ExtractTab(QWidget):
             )
             if not series:
                 # 清空图表
-                self.ui_builder.init_diameter_chart()
+                self.chart_controller.clear_diameter()
                 return
             time_data = [t for t, _ in series]
             diameter_data = [d for _, d in series]
-            # 缓存曲线
-            try:
-                self.last_diameter_series = list(zip(time_data, diameter_data))
-            except Exception:
-                self.last_diameter_series = []
 
             # 调用拖曳曲线拟合，获取 K、B、C 与截断点
-            K = B = C = None
-            cutoff_ms = None
+            fit_result = None
             try:
                 fitter = DiameterDragFitter()
                 fit_result = fitter.fit_drag_curve(
@@ -690,31 +683,19 @@ class ExtractTab(QWidget):
                     drop_threshold=0.02,
                     window_size=10,
                 )
-                if fit_result.get('success', False):
-                    K = fit_result.get('K')
-                    B = fit_result.get('B')
-                    C = fit_result.get('C')
-                    df = fit_result.get('data_filtering', {}) or {}
-                    cutoff_ms = df.get('cutoff_time')
-                # 缓存拟合结果（成功或失败都存）
-                try:
-                    self.last_drag_fit_result = {
-                        'success': bool(fit_result.get('success', False)),
-                        'K': K, 'B': B, 'C': C,
-                        'expression': 'D(t) = K * (1 - B * exp(-C * t^2))',
-                        'data_filtering': fit_result.get('data_filtering', {}),
-                    }
-                except Exception:
-                    self.last_drag_fit_result = None
             except Exception as e:
                 print(f"⚠️ 直径拖曳拟合失败，退回仅绘制数据点: {e}")
+                fit_result = None
 
-            # 使用 DiameterChart 新接口绘制（带拟合与截断线，若有）
+            # 使用 ChartController 绘制（带拟合与截断线，若有）
             try:
-                self.diam_chart.update_data(time_data, diameter_data, K, B, C, cutoff_ms=cutoff_ms)
+                if fit_result and fit_result.get('success', False):
+                    self.chart_controller.update_diameter_with_fit(time_data, diameter_data, fit_result)
+                else:
+                    self.chart_controller.update_diameter_raw(time_data, diameter_data)
             except Exception as e:
                 print(f"⚠️ 调用直径图更新接口失败，退回简单绘制: {e}")
-                self.update_diameter_chart(time_data, diameter_data)
+                self.chart_controller.update_diameter_raw(time_data, diameter_data)
         except Exception as e:
             print(f"❌ 更新直径图表失败: {e}")
             import traceback
@@ -790,12 +771,14 @@ class ExtractTab(QWidget):
         """保存提取序列（按照example_data.json格式）"""
         try:
             # 改为保存直径与拟合参数结果
-            if not self.last_diameter_series:
+            diameter_series = self.chart_controller.get_cached_diameter()
+            if not diameter_series:
                 QMessageBox.warning(self, "警告", "没有直径数据可保存！")
                 return
             
-            if not self.last_drag_fit_result or not (
-                isinstance(self.last_drag_fit_result, dict) and self.last_drag_fit_result.get('K') is not None
+            drag_fit_result = self.chart_controller.get_cached_drag_fit()
+            if not drag_fit_result or not (
+                isinstance(drag_fit_result, dict) and drag_fit_result.get('K') is not None
             ):
                 QMessageBox.warning(self, "警告", "没有拖曳曲线拟合参数可保存！")
                 return
@@ -814,7 +797,7 @@ class ExtractTab(QWidget):
                 if success:
                     QMessageBox.information(self, "成功", 
                                           f"分析结果已保存到:\n{file_path}\n\n"
-                                          f"包含 {len(self.last_diameter_series)} 个直径数据点与拟合参数")
+                                          f"包含 {len(diameter_series)} 个直径数据点与拟合参数")
                     self.extract_status.setText("分析结果保存成功")
                 else:
                     QMessageBox.critical(self, "错误", "保存失败，请检查文件路径和权限！")
@@ -835,7 +818,7 @@ class ExtractTab(QWidget):
                 # 各时刻直径
                 "diameter_over_time": [
                     {"time_ms": float(t), "diameter_m": float(d)}
-                    for (t, d) in (self.last_diameter_series or [])
+                    for (t, d) in (self.chart_controller.get_cached_diameter() or [])
                 ],
                 # 爆炸基本参数
                 "parameters": {
@@ -846,7 +829,7 @@ class ExtractTab(QWidget):
                     "pixel_length": self.parameters.get('pixel_length'),
                 },
                 # 拖曳曲线拟合参数与表达式
-                "drag_fit": (self.last_drag_fit_result or {
+                "drag_fit": (self.chart_controller.get_cached_drag_fit() or {
                     "success": False,
                     "K": None, "B": None, "C": None,
                     "expression": "D(t) = K * (1 - B * exp(-C * t^2))",
