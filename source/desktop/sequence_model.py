@@ -274,9 +274,17 @@ class SequenceModel:
         self._group_count = min(group_count, total)
 
     def _load_prompt_artifacts_from_sequence(self) -> None:
+        # 先读取起爆点，避免后续写入 prompt 时误删
+        ignition_point = self._manager.get_ignition_point_from_sequence(self._sequence_data)
+        try:
+            print(f"[SequenceModel] ignition_point(from manager) = {ignition_point}")
+        except Exception:
+            pass
+        self._ignition_point = ignition_point
+
+        # 再读取 prompt 数据（内部可能会同步到内存 image_sequence，但不应覆盖/删除已有起爆点）
         prompt_data = self._manager.get_prompt_data_from_sequence(self._sequence_data)
         self.set_prompt_data(prompt_data or {})
-        self._ignition_point = self._manager.get_ignition_point_from_sequence(self._sequence_data)
 
     def _apply_prompt_to_sequence_data(self) -> None:
         """在内存中同步 prompt / ignition 数据，避免重复读取文件。"""

@@ -56,7 +56,7 @@ class ExtractTab(QWidget):
         self.display_controller = SequencyDisplayController(
             self.ui_builder,
             self.sequence_model,
-            self.prompt_controller
+            self.prompt_controller,
         )
         
         self.chart_controller.set_widgets(
@@ -118,8 +118,7 @@ class ExtractTab(QWidget):
         self.prompt_info_text = self.ui_components['prompt_info_text']
         # 图片索引标签已被 CheckBar 替换
         self.check_bar = self.ui_components.get('check_bar', None)
-        self.jump_input = self.ui_components['jump_input']
-        self.jump_btn = self.ui_components['jump_btn']
+        # 图像导航控件已由 SequencyDisplayController 管理
     
     def setup_connections(self):
         """设置信号连接"""
@@ -131,9 +130,7 @@ class ExtractTab(QWidget):
         self.reextract_btn.clicked.connect(self.start_reextraction)
         self.cancel_extract_btn.clicked.connect(self._cancel_current_image_points)
         
-        # 图像导航
-        self.jump_btn.clicked.connect(self.jump_to_image)
-        self.jump_input.returnPressed.connect(self.jump_to_image)
+        # 图像导航（由 SequencyDisplayController 内部处理）
         
         # 保存按钮
         self.save_button.clicked.connect(self.save_extraction_sequence)
@@ -662,44 +659,4 @@ class ExtractTab(QWidget):
         except Exception as e:
             print(f"❌ 导出分析结果失败: {e}")
             return False
-    
-    def jump_to_image(self):
-        """跳转到指定图片"""
-        try:
-            image_paths = self.sequence_model.image_paths
-            if not image_paths:
-                QMessageBox.warning(self, "警告", "请先加载图像序列！")
-                return
-            
-            # 获取输入的图片编号
-            input_text = self.jump_input.text().strip()
-            if not input_text:
-                return
-            
-            try:
-                # 转换为索引（用户输入从1开始，内部索引从0开始）
-                image_number = int(input_text)
-                image_index = image_number - 1
-                
-                # 检查索引范围
-                if image_index < 0 or image_index >= len(image_paths):
-                    QMessageBox.warning(self, "警告", 
-                                      f"图片编号超出范围！\n有效范围: 1-{len(image_paths)}")
-                    return
-                
-                # 跳转到指定图片（controller 内部会自动更新 slider 和 time label）
-                self.display_controller.display_image(image_index)
-                
-                # 清空输入框
-                self.jump_input.clear()
-                
-                print(f"跳转到图片 {image_number} (索引: {image_index})")
-                
-            except ValueError:
-                QMessageBox.warning(self, "警告", "请输入有效的数字！")
-                
-        except Exception as e:
-            print(f"❌ 跳转到图片失败: {e}")
-            QMessageBox.critical(self, "错误", f"跳转失败:\n{str(e)}")
-    
     

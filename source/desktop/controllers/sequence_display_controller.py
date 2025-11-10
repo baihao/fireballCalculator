@@ -5,8 +5,7 @@
 负责管理图像序列的显示、时间轴同步、CheckBar 高亮等所有显示相关的逻辑
 """
 
-from typing import Optional, Any, Dict
-from PySide6.QtWidgets import QSlider, QLabel
+from PySide6.QtWidgets import QSlider, QLabel, QPushButton, QLineEdit
 from extract_tab_ui import ExtractTabUI
 from sequence_model import SequenceModel
 from controllers.prompt_controller import PromptController
@@ -39,10 +38,15 @@ class SequencyDisplayController:
         self.slider: QSlider = ui_components.get('extract_slider')
         self.time_label: QLabel = ui_components.get('extract_time_label')
         self.check_bar = ui_components.get('check_bar')
+        self.jump_input: QLineEdit = ui_components.get('jump_input')
+        self.jump_btn: QPushButton = ui_components.get('jump_btn')
         
         # 当前显示的图像索引
         self._current_index: int = 0
         
+        # 初始禁用跳转控件，待序列加载后启用
+        self._set_jump_controls_enabled(False)
+
         # 连接信号
         self._connect_signals()
     
@@ -51,6 +55,11 @@ class SequencyDisplayController:
         try:
             if self.slider:
                 self.slider.valueChanged.connect(self._on_slider_changed)
+            # 图像导航控件
+            if self.jump_btn:
+                self.jump_btn.clicked.connect(self.jump_to_image)
+            if self.jump_input:
+                self.jump_input.returnPressed.connect(self.jump_to_image)
             print("✅ SequencyDisplayController 信号连接完成")
         except Exception as e:
             print(f"⚠️ SequencyDisplayController 信号连接失败: {e}")
@@ -82,6 +91,7 @@ class SequencyDisplayController:
                 self.time_label.setText("t = 0 ms")
             
             self._current_index = 0
+            self._set_jump_controls_enabled(False)
             
         except Exception as e:
             print(f"⚠️ 重置显示状态失败: {e}")
@@ -91,6 +101,7 @@ class SequencyDisplayController:
         try:
             image_paths = self.sequence_model.image_paths
             if not image_paths:
+                self._set_jump_controls_enabled(False)
                 return
             
             # 设置时间轴范围
@@ -102,6 +113,8 @@ class SequencyDisplayController:
             if self.preview:
                 self.preview.resize(self.preview.maximumSize())
             
+            self._set_jump_controls_enabled(True)
+
             # 显示第一张图像
             self.display_image(0)
             
@@ -224,8 +237,57 @@ class SequencyDisplayController:
                 self.check_bar.set_focus(index)
         except Exception as e:
             print(f"⚠️ 高亮当前分组失败: {e}")
+
+    def _set_jump_controls_enabled(self, enabled: bool):
+        """启用或禁用跳转相关控件"""
+        try:
+            if self.jump_btn:
+                self.jump_btn.setEnabled(enabled)
+            if self.jump_input:
+                self.jump_input.setEnabled(enabled)
+        except Exception as e:
+            print(f"⚠️ 设置跳转控件状态失败: {e}")
     
     def get_current_index(self) -> int:
         """获取当前显示的图像索引"""
         return self._current_index
+    
+    def jump_to_image(self):
+        """跳转到指定图片"""
+        try:
+            image_paths = self.sequence_model.image_paths
+            if not image_paths:
+                self._set_jump_controls_enabled(False)
+                return
+            
+            # 获取输入的图片编号
+            if not self.jump_input:
+                return
+            input_text = self.jump_input.text().strip()
+            if not input_text:
+                return
+            
+            try:
+                # 转换为索引（用户输入从1开始，内部索引从0开始）
+                image_number = int(input_text)
+                image_index = image_number - 1
+                
+                # 检查索引范围
+                if image_index < 0 or image_index >= len(image_paths):
+                    print(f"⚠️ 图片编号超出范围！有效范围: 1-{len(image_paths)}")
+                    return
+                
+                # 跳转到指定图片（内部会自动更新 slider 和 time label）
+                self.display_image(image_index)
+                
+                # 清空输入框
+                self.jump_input.clear()
+                
+                print(f"跳转到图片 {image_number} (索引: {image_index})")
+                
+            except ValueError:
+                print("⚠️ 跳转输入无效：请输入数字")
+                
+        except Exception as e:
+            print(f"❌ 跳转到图片失败: {e}")
 
