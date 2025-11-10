@@ -86,34 +86,24 @@ class ExtractTab(QWidget):
     
     def _setup_ui_component_references(self):
         """设置UI组件引用（向后兼容）"""
-        # 主要控件引用
-        self.extract_preview = self.ui_components['extract_preview']
-        self.extract_slider = self.ui_components['extract_slider']
-        self.extract_time_label = self.ui_components['extract_time_label']
+        # 状态显示控件（仍在使用）
         self.extract_status = self.ui_components['extract_status']
-        # 图表控件引用（继承自 BaseChart）
-        self.temp_chart = self.ui_components['temp_chart']
-        self.diam_chart = self.ui_components['diam_chart']
         
-        # 按钮控件引用
+        # 按钮控件引用（仍在使用）
         self.sequence_btn = self.ui_components['sequence_btn']
-        self.prompt_btn = self.ui_components['prompt_btn']
         self.extract_btn = self.ui_components['extract_btn']
         self.reextract_btn = self.ui_components['reextract_btn']
         self.cancel_extract_btn = self.ui_components['cancel_extract_btn']
         self.save_button = self.ui_components['save_button']
         
-        # 单选按钮和组引用
-        self.point_type_group = self.ui_components['point_type_group']
-        self.positive_radio = self.ui_components['positive_radio']
-        self.negative_radio = self.ui_components['negative_radio']
-        self.ignition_radio = self.ui_components['ignition_radio']
-        
-        # 信息显示与导航控件引用
+        # 信息显示控件（仍在使用）
         self.prompt_info_text = self.ui_components['prompt_info_text']
-        # 图片索引标签已被 CheckBar 替换
-        self.check_bar = self.ui_components.get('check_bar', None)
-        # 图像导航控件已由 SequencyDisplayController 管理
+        
+        # 以下控件已由各自的控制器管理，不再需要直接引用：
+        # - extract_preview, extract_slider, extract_time_label: 由 SequencyDisplayController 管理
+        # - temp_chart, diam_chart: 由 ChartController 管理
+        # - prompt_btn, point_type_group, positive_radio, negative_radio, ignition_radio: 由 PromptController 管理
+        # - check_bar: 由 SequencyDisplayController 管理
     
     def setup_connections(self):
         """设置信号连接"""
@@ -378,7 +368,7 @@ class ExtractTab(QWidget):
         # 1) 禁用交互控件
         try:
             for w in [
-                self.sequence_btn, self.prompt_btn, self.extract_btn, self.reextract_btn,
+                self.sequence_btn, self.ui_components['prompt_btn'], self.extract_btn, self.reextract_btn,
                 self.cancel_extract_btn, self.save_button
             ]:
                 if hasattr(w, 'setEnabled'):
@@ -417,7 +407,7 @@ class ExtractTab(QWidget):
         # 恢复控件
         try:
             for w in [
-                self.sequence_btn, self.prompt_btn, self.extract_btn, self.reextract_btn,
+                self.sequence_btn, self.ui_components['prompt_btn'], self.extract_btn, self.reextract_btn,
                 self.cancel_extract_btn, self.save_button
             ]:
                 if hasattr(w, 'setEnabled'):
