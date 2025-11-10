@@ -286,6 +286,8 @@ class PromptController:
             self.update_prompt_info_display()
             print(f"🗑️ 已取消图像{image_index}上的所有参考点")
             self._refresh_checkbar()
+            # 刷新当前图像的显示（清除图像控件上的点标记）
+            self.load_points_for_current_image(image_index)
         except Exception as e:
             print(f"❌ 取消当前图像点失败: {e}")
     

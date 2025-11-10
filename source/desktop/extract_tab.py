@@ -20,6 +20,7 @@ from extract_tab_ui import ExtractTabUI
 from info_builder import build_segmentation_info_text
 from controllers.prompt_controller import PromptController
 from controllers.chart_controller import ChartController
+from controllers.sequence_display_controller import SequencyDisplayController
 
 # 添加路径以导入火球计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -35,9 +36,6 @@ class ExtractTab(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 初始化图像序列相关属性
-        self.current_image_index = 0  # 当前显示的图像索引
-        
         # 状态日志缓冲区（用于多行显示）
         self.status_log_buffer = []
         self.max_status_lines = 5  # 最多显示5行
@@ -55,6 +53,11 @@ class ExtractTab(QWidget):
         # 初始化控制器
         self.prompt_controller = PromptController(self, self.ui_builder, self.sequence_model)
         self.chart_controller = ChartController()
+        self.display_controller = SequencyDisplayController(
+            self.ui_builder,
+            self.sequence_model,
+            self.prompt_controller
+        )
         
         self.chart_controller.set_widgets(
             self.ui_components['temp_chart'],
@@ -93,8 +96,6 @@ class ExtractTab(QWidget):
         self.extract_slider = self.ui_components['extract_slider']
         self.extract_time_label = self.ui_components['extract_time_label']
         self.extract_status = self.ui_components['extract_status']
-        self.progress_label = self.ui_components['progress_label']
-        
         # 图表控件引用（继承自 BaseChart）
         self.temp_chart = self.ui_components['temp_chart']
         self.diam_chart = self.ui_components['diam_chart']
@@ -122,8 +123,7 @@ class ExtractTab(QWidget):
     
     def setup_connections(self):
         """设置信号连接"""
-        # 时间轴控件
-        self.extract_slider.valueChanged.connect(self.on_time_changed)
+        # 时间轴控件（由 SequencyDisplayController 内部处理）
         
         # 侧边栏按钮（PromptController 相关的信号已在控制器内部连接）
         self.sequence_btn.clicked.connect(self.select_sequence_folder)
@@ -152,38 +152,20 @@ class ExtractTab(QWidget):
             print("🧹 重置状态：清空旧的序列、特征点与分割结果…")
             # 1) 清空内存数据
             self.sequence_model.reset()
-            self.current_image_index = 0
             # 重置控制器状态
             self.prompt_controller.reset()
+            self.display_controller.reset()
             
-            # 2) 重置图像显示
-            try:
-                if hasattr(self.extract_preview, 'clear_segmentation_result'):
-                    self.extract_preview.clear_segmentation_result()
-                if hasattr(self.extract_preview, 'clear_points'):
-                    self.extract_preview.clear_points()
-                if hasattr(self.extract_preview, 'set_show_segmentation'):
-                    self.extract_preview.set_show_segmentation(False)
-            except Exception as e:
-                print(f"⚠️ 重置图像显示时出错: {e}")
+            # 2) 保存按钮初始禁用（等待生成直径/拟合结果）
+            self._update_save_button_state()
             
-            # 3) 重置时间轴与索引
-            try:
-                self.extract_slider.setRange(0, 0)
-                self.extract_slider.setValue(0)
-                self.extract_time_label.setText("t = 0 ms")
-                # 保存按钮初始禁用（等待生成直径/拟合结果）
-                self._update_save_button_state()
-            except Exception as e:
-                print(f"⚠️ 重置时间轴时出错: {e}")
-            
-            # 4) 重置图表
+            # 3) 重置图表
             try:
                 self.chart_controller.reset()
             except Exception as e:
                 print(f"⚠️ 重置图表时出错: {e}")
             
-            # 5) 重置状态文本与按钮
+            # 4) 重置状态文本与按钮
             try:
                 self.extract_status.setText("待开始")
                 self.extract_btn.setVisible(True)
@@ -208,16 +190,8 @@ class ExtractTab(QWidget):
                 self.extract_status.setText("无图像数据")
                 return False
 
-            # 更新基本参数缓存（供后续方法使用）
-            self.current_image_index = 0
-
-            # 设置时间轴范围
-            self.extract_slider.setRange(0, len(image_paths) - 1)
-            self.extract_slider.setValue(0)
-
-            # 设置图像控件为最大尺寸并显示第一张
-            self.extract_preview.resize(self.extract_preview.maximumSize())
-            self.display_image_at_index(0)
+            # 应用序列显示（设置时间轴、显示第一张图像等）
+            self.display_controller.apply_sequence()
 
             # 加载温度数据
             time_data, temp_data = self.sequence_model.get_temperature_series()
@@ -233,10 +207,14 @@ class ExtractTab(QWidget):
                 self._update_save_button_state()
                 self.extract_btn.setVisible(False)
                 self.reextract_btn.setVisible(True)
+                # 同步显示控制器以刷新显示模式
+                self.display_controller.sync_to_model()
             else:
                 self.extract_btn.setVisible(True)
                 self.reextract_btn.setVisible(False)
                 self.prompt_controller.sync_from_model()
+                # 同步显示控制器以刷新显示模式
+                self.display_controller.sync_to_model()
 
             # 序列摘要与状态
             summary = self.sequence_model.get_sequence_summary()
@@ -255,68 +233,6 @@ class ExtractTab(QWidget):
             QMessageBox.critical(self, "错误", f"应用序列数据失败:\n{str(e)}")
             return False
     
-    def on_time_changed(self, value):
-        """时间轴变化"""
-        image_paths = self.sequence_model.image_paths
-        if image_paths:
-            # 计算实际时间（毫秒）
-            total_frames = len(image_paths)
-            if total_frames > 1:
-                time_ms = (value / (total_frames - 1)) * self.sequence_model.explosion_duration_ms
-            else:
-                time_ms = 0
-            self.extract_time_label.setText(f"t = {time_ms:.1f} ms (帧 {value + 1}/{total_frames})")
-            
-            # 显示对应的图像
-            self.display_image_at_index(value)
-
-            # 高亮 CheckBar 当前分组
-            try:
-                if getattr(self, 'check_bar', None) is not None:
-                    self.check_bar.set_focus(value)
-            except Exception:
-                pass
-        else:
-            self.extract_time_label.setText(f"t = {value} ms")
-    
-    def display_image_at_index(self, index):
-        """显示指定索引的图像"""
-        image_paths = self.sequence_model.image_paths
-        if not image_paths or index < 0 or index >= len(image_paths):
-            return
-        
-        try:
-            image_path = image_paths[index]
-            # 使用交互式图像控件的 set_image 方法
-            success = self.extract_preview.set_image(image_path)
-            if success:
-                self.current_image_index = index
-                # 同步到 PromptController
-                self.prompt_controller.set_current_image_index(index)
-                
-                # 优先显示分割结果，如果有的话
-                segmentation_results = self.sequence_model.get_segmentation_results()
-                if (self.sequence_model.has_segmentation_data()
-                        and index < len(segmentation_results)):
-                    # 有分割结果：显示分割结果，不显示特征点
-                    segmentation_data = segmentation_results[index]
-                    self.extract_preview.set_segmentation_result(segmentation_data)
-                    self.extract_preview.set_show_segmentation(True)
-                    self.extract_preview.clear_points()  # 清除特征点
-                    print(f"显示图像: {image_path} (索引: {index}) - 分割结果模式")
-                else:
-                    # 没有分割结果：正常加载特征点
-                    self.extract_preview.set_show_segmentation(False)
-                    self.prompt_controller.load_points_for_current_image(index)
-                    print(f"显示图像: {image_path} (索引: {index}) - 特征点模式")
-                
-                # 更新图片索引显示
-                self.update_image_index_display()
-            else:
-                print(f"图像加载失败: {image_path}")
-                
-        except Exception as e:
-            print(f"显示图像失败: {e}")
     
     def select_sequence_folder(self):
         """选择火球爆炸序列JSON文件"""
@@ -534,8 +450,6 @@ class ExtractTab(QWidget):
             if message:
                 print(("✅ " if success else "❌ ") + message)
                 
-            # 重置显示模式
-            self.extract_preview.set_show_segmentation(False)
             # 清空直径图表（用户反馈：未被清空）
             try:
                 self.ui_builder.init_diameter_chart()
@@ -544,7 +458,9 @@ class ExtractTab(QWidget):
             
             # 重新加载特征点数据
             self.prompt_controller.sync_from_model()
-            self.prompt_controller.load_points_for_current_image(self.current_image_index)
+            
+            # 刷新显示控制器以切换到 prompt 模式
+            self.display_controller.handle_segmentation_update()
 
             # 更新状态
             self.extract_status.setText("已清除分割结果，请重新选择特征点")
@@ -576,7 +492,7 @@ class ExtractTab(QWidget):
                 print(f"❌ 重新加载序列文件失败: {message}")
                 return False
             
-            # 统一应用逻辑
+            # 统一应用逻辑（内部会调用 display_controller.apply_sequence 和 sync_to_model）
             return self._apply_sequence_data(sequence_data, str(segmented_path))
             
         except Exception as e:
@@ -681,9 +597,8 @@ class ExtractTab(QWidget):
     def _cancel_current_image_points(self):
         """取消当前图像上的所有点"""
         try:
-            self.prompt_controller.cancel_current_image_points(self.current_image_index)
-            # 清空图像控件中的点显示
-            self.extract_preview.clear_points()
+            current_index = self.display_controller.get_current_index()
+            self.prompt_controller.cancel_current_image_points(current_index)
             self.extract_status.setText("已取消当前图像的参考点选择")
         except Exception as e:
             print(f"❌ 取消当前图像点失败: {e}")
@@ -748,19 +663,6 @@ class ExtractTab(QWidget):
             print(f"❌ 导出分析结果失败: {e}")
             return False
     
-    def update_image_index_display(self):
-        """更新图片索引相关的可视化（当前仅更新 CheckBar）。"""
-        try:
-            # 同步更新 CheckBar（长度不会变，仅在切换图片时无需变更标注集合）
-            if getattr(self, 'check_bar', None) is not None:
-                self.check_bar.update(
-                    length=len(self.sequence_model.image_paths),
-                    group_count=self.sequence_model.group_count,
-                    annotated_indices=sorted(self.sequence_model.get_annotated_indices())
-                )
-        except Exception as e:
-            print(f"❌ 更新图片索引显示失败: {e}")
-    
     def jump_to_image(self):
         """跳转到指定图片"""
         try:
@@ -785,18 +687,8 @@ class ExtractTab(QWidget):
                                       f"图片编号超出范围！\n有效范围: 1-{len(image_paths)}")
                     return
                 
-                # 跳转到指定图片
-                self.display_image_at_index(image_index)
-                
-                # 同步更新时间轴
-                self.extract_slider.setValue(image_index)
-
-                # 高亮 CheckBar 当前分组
-                try:
-                    if getattr(self, 'check_bar', None) is not None:
-                        self.check_bar.set_focus(image_index)
-                except Exception:
-                    pass
+                # 跳转到指定图片（controller 内部会自动更新 slider 和 time label）
+                self.display_controller.display_image(image_index)
                 
                 # 清空输入框
                 self.jump_input.clear()
