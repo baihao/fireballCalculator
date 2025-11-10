@@ -52,17 +52,11 @@ class ExtractTab(QWidget):
         
         # 初始化控制器
         self.prompt_controller = PromptController(self, self.ui_builder, self.sequence_model)
-        self.chart_controller = ChartController()
+        self.chart_controller = ChartController(self.ui_builder)
         self.display_controller = SequencyDisplayController(
             self.ui_builder,
             self.sequence_model,
             self.prompt_controller,
-        )
-        
-        self.chart_controller.set_widgets(
-            self.ui_components['temp_chart'],
-            self.ui_components['diam_chart'],
-            self.ui_components['diam_vel_chart']
         )
         
         # 获取UI组件引用（为了向后兼容）

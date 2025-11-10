@@ -21,14 +21,25 @@ from diameter_velocity_chart import DiameterVelocityChart
 class ChartController:
     """温度图与直径图的统一控制器。"""
 
-    def __init__(self) -> None:
-        self._temp_chart: Optional[TemperatureChart] = None
-        self._diam_chart: Optional[DiameterChart] = None
-        self._diam_vel_chart: Optional[DiameterVelocityChart] = None
+    def __init__(self, ui_builder) -> None:
+        """
+        初始化图表控制器。
+        
+        Args:
+            ui_builder: ExtractTabUI 实例，用于获取图表 UI 组件
+        """
+        # 从 UI 构建器获取图表组件
+        ui_components = ui_builder.get_ui_components()
+        self._temp_chart: Optional[TemperatureChart] = ui_components.get('temp_chart')
+        self._diam_chart: Optional[DiameterChart] = ui_components.get('diam_chart')
+        self._diam_vel_chart: Optional[DiameterVelocityChart] = ui_components.get('diam_vel_chart')
 
         self._last_temperature: Optional[List[Tuple[float, float]]] = None
         self._last_diameter: Optional[List[Tuple[float, float]]] = None
         self._last_drag_fit: Optional[Dict[str, Any]] = None
+        
+        # 初始化时重置图表
+        self.reset()
 
     # ------------------------------------------------------------------ #
     # 依赖注入与重置
@@ -37,7 +48,11 @@ class ChartController:
                     temp_chart: TemperatureChart,
                     diam_chart: DiameterChart,
                     diam_vel_chart: DiameterVelocityChart) -> None:
-        """注入温度、直径与直径速率图组件。"""
+        """
+        注入温度、直径与直径速率图组件（向后兼容方法，已废弃）。
+        
+        注意：此方法已废弃，图表组件应在初始化时通过 ui_builder 传入。
+        """
         self._temp_chart = temp_chart
         self._diam_chart = diam_chart
         self._diam_vel_chart = diam_vel_chart
@@ -180,7 +195,7 @@ class ChartController:
     # ------------------------------------------------------------------ #
     def _ensure_chart_initialized(self) -> None:
         if not (self._temp_chart and self._diam_chart and self._diam_vel_chart):
-            raise RuntimeError("ChartController 尚未通过 set_widgets 初始化图表组件")
+            raise RuntimeError("ChartController 的图表组件未正确初始化，请检查 ui_builder 是否包含所需的图表组件")
 
     @staticmethod
     def _validate_length(x: Sequence[Any],
