@@ -8,17 +8,19 @@
 from typing import Dict, List, Set, Tuple, Optional, Any
 from PySide6.QtWidgets import QMessageBox
 from info_builder import build_prompt_info_text
+from extract_tab_ui import ExtractTabUI
 
 
 class PromptController:
     """参考点选择控制器"""
     
-    def __init__(self, parent_tab):
+    def __init__(self, parent_tab, ui_builder: ExtractTabUI):
         """
         初始化控制器
         
         Args:
             parent_tab: 父标签页实例，用于访问序列管理器等共享资源
+            ui_builder: UI 构建器，用于获取控件引用
         """
         self.parent = parent_tab
         
@@ -44,8 +46,11 @@ class PromptController:
         # CheckBar 分组与标注跟踪
         self.group_count = 1
         self.annotated_indices: Set[int] = set()
+        
+        # 初始化 UI 组件引用
+        self._setup_ui_components(ui_builder.get_ui_components())
     
-    def setup_ui_components(self, ui_components: Dict[str, Any]):
+    def _setup_ui_components(self, ui_components: Dict[str, Any]):
         """
         设置 UI 组件引用并连接信号
         

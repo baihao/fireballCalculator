@@ -57,17 +57,15 @@ class ExtractTab(QWidget):
         self.fireball_calculator = FireballCalculator()
         self.sequence_manager = SequenceManager()
         
-        # 初始化控制器
-        self.prompt_controller = PromptController(self)
-        self.chart_controller = ChartController()
-        
         # 初始化UI构建器并创建界面
         self.ui_builder = ExtractTabUI()
         self.ui_builder.create_main_layout(self)
         self.ui_components = self.ui_builder.get_ui_components()
         
-        # 设置控制器的 UI 组件引用
-        self.prompt_controller.setup_ui_components(self.ui_components)
+        # 初始化控制器
+        self.prompt_controller = PromptController(self, self.ui_builder)
+        self.chart_controller = ChartController()
+        
         self.chart_controller.set_widgets(
             self.ui_components['temp_chart'],
             self.ui_components['diam_chart']

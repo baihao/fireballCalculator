@@ -6,6 +6,7 @@
 """
 
 import os
+from typing import Any, Dict
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
