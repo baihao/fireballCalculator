@@ -15,6 +15,7 @@ from framework import MatplotlibWidget, ImagePreviewWidget
 from checkbar import create_checkbar
 from temperature_chart import TemperatureChart
 from diameter_chart import DiameterChart
+from diameter_velocity_chart import DiameterVelocityChart
 from interactive_image_widget import create_interactive_image_widget
 
 
@@ -270,6 +271,10 @@ class ExtractTabUI:
         diam_group = self._create_diameter_chart_group()
         right_layout.addWidget(diam_group)
         
+        # 直径变化速率图表组（显示在直径图表下方）
+        diam_vel_group = self._create_diameter_velocity_chart_group()
+        right_layout.addWidget(diam_vel_group)
+        
         # 控制按钮
         button_layout = self._create_control_buttons()
         right_layout.addLayout(button_layout)
@@ -304,6 +309,20 @@ class ExtractTabUI:
         
         diam_group.setLayout(diam_layout)
         return diam_group
+    
+    def _create_diameter_velocity_chart_group(self) -> QGroupBox:
+        """创建直径变化速率图表组"""
+        diam_vel_group = QGroupBox("火球直径变化速率随时间变化")
+        diam_vel_group.setStyleSheet(self._get_chart_group_style())
+        
+        diam_vel_layout = QVBoxLayout()
+        diam_vel_layout.setAlignment(Qt.AlignTop)
+        
+        self.ui_components['diam_vel_chart'] = DiameterVelocityChart(width=4, height=2.0)
+        diam_vel_layout.addWidget(self.ui_components['diam_vel_chart'])
+        
+        diam_vel_group.setLayout(diam_vel_layout)
+        return diam_vel_group
     
     def _create_control_buttons(self) -> QHBoxLayout:
         """创建控制按钮"""
@@ -434,6 +453,14 @@ class ExtractTabUI:
             
         except Exception as e:
             print(f"初始化直径图表失败: {e}")
+    
+    def init_diameter_velocity_chart(self):
+        """初始化直径变化速率图表"""
+        try:
+            diam_vel_chart: DiameterVelocityChart = self.ui_components['diam_vel_chart']
+            diam_vel_chart.reset()
+        except Exception as e:
+            print(f"初始化直径变化速率图表失败: {e}")
     
     def get_ui_components(self) -> dict:
         """

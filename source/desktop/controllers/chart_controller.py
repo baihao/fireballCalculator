@@ -15,6 +15,7 @@ from typing import Iterable, List, Optional, Sequence, Tuple, Dict, Any
 
 from temperature_chart import TemperatureChart
 from diameter_chart import DiameterChart
+from diameter_velocity_chart import DiameterVelocityChart
 
 
 class ChartController:
@@ -23,6 +24,7 @@ class ChartController:
     def __init__(self) -> None:
         self._temp_chart: Optional[TemperatureChart] = None
         self._diam_chart: Optional[DiameterChart] = None
+        self._diam_vel_chart: Optional[DiameterVelocityChart] = None
 
         self._last_temperature: Optional[List[Tuple[float, float]]] = None
         self._last_diameter: Optional[List[Tuple[float, float]]] = None
@@ -33,10 +35,12 @@ class ChartController:
     # ------------------------------------------------------------------ #
     def set_widgets(self,
                     temp_chart: TemperatureChart,
-                    diam_chart: DiameterChart) -> None:
-        """注入温度与直径图组件。"""
+                    diam_chart: DiameterChart,
+                    diam_vel_chart: DiameterVelocityChart) -> None:
+        """注入温度、直径与直径速率图组件。"""
         self._temp_chart = temp_chart
         self._diam_chart = diam_chart
+        self._diam_vel_chart = diam_vel_chart
         self.reset()
 
     def reset(self) -> None:
@@ -45,6 +49,8 @@ class ChartController:
             self._temp_chart.reset()
         if self._diam_chart:
             self._diam_chart.reset()
+        if self._diam_vel_chart:
+            self._diam_vel_chart.reset()
         self._last_temperature = None
         self._last_diameter = None
         self._last_drag_fit = None
@@ -72,6 +78,8 @@ class ChartController:
         self._ensure_chart_initialized()
         self._validate_length(time_ms, diameter_m, "直径数据")
         self._diam_chart.update_data(time_ms, diameter_m)  # type: ignore[arg-type]
+        if self._diam_vel_chart:
+            self._diam_vel_chart.update_data(time_ms, diameter_m)  # 仅原始速率
         self._last_diameter = list(zip(map(float, time_ms),
                                        map(float, diameter_m)))
         self._last_drag_fit = None
@@ -126,6 +134,15 @@ class ChartController:
             C=C,
             cutoff_ms=cutoff_ms,
         )
+        if self._diam_vel_chart:
+            self._diam_vel_chart.update_data(  # type: ignore[arg-type]
+                time_ms,
+                diameter_m,
+                K=K,
+                B=B,
+                C=C,
+                cutoff_ms=cutoff_ms,
+            )
         self._last_diameter = list(zip(map(float, time_ms),
                                        map(float, diameter_m)))
         self._last_drag_fit = prepared_fit
@@ -134,6 +151,8 @@ class ChartController:
         """清空直径图显示与缓存。"""
         if self._diam_chart:
             self._diam_chart.reset()
+        if self._diam_vel_chart:
+            self._diam_vel_chart.reset()
         self._last_diameter = None
         self._last_drag_fit = None
 
@@ -160,7 +179,7 @@ class ChartController:
     # 内部工具
     # ------------------------------------------------------------------ #
     def _ensure_chart_initialized(self) -> None:
-        if not (self._temp_chart and self._diam_chart):
+        if not (self._temp_chart and self._diam_chart and self._diam_vel_chart):
             raise RuntimeError("ChartController 尚未通过 set_widgets 初始化图表组件")
 
     @staticmethod
