@@ -261,7 +261,9 @@ class ExtractTabUI:
         right_widget = QWidget()
         right_layout = QVBoxLayout()
         right_layout.setAlignment(Qt.AlignTop)
-        right_layout.setSpacing(10)
+        # 收紧右侧整体留白
+        right_layout.setSpacing(6)
+        right_layout.setContentsMargins(6, 6, 6, 6)
         
         # 温度图表组
         temp_group = self._create_temperature_chart_group()
@@ -289,8 +291,11 @@ class ExtractTabUI:
         
         temp_layout = QVBoxLayout()
         temp_layout.setAlignment(Qt.AlignTop)
+        # 收紧组内边距
+        temp_layout.setContentsMargins(6, 4, 6, 6)
+        temp_layout.setSpacing(4)
         
-        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=2.5)
+        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=1.8)
         temp_layout.addWidget(self.ui_components['temp_chart'])
         
         temp_group.setLayout(temp_layout)
@@ -303,8 +308,11 @@ class ExtractTabUI:
         
         diam_layout = QVBoxLayout()
         diam_layout.setAlignment(Qt.AlignTop)
+        # 收紧组内边距
+        diam_layout.setContentsMargins(6, 4, 6, 6)
+        diam_layout.setSpacing(4)
         
-        self.ui_components['diam_chart'] = DiameterChart(width=4, height=2.5)
+        self.ui_components['diam_chart'] = DiameterChart(width=4, height=3.0)
         diam_layout.addWidget(self.ui_components['diam_chart'])
         
         diam_group.setLayout(diam_layout)
@@ -317,8 +325,11 @@ class ExtractTabUI:
         
         diam_vel_layout = QVBoxLayout()
         diam_vel_layout.setAlignment(Qt.AlignTop)
+        # 收紧组内边距
+        diam_vel_layout.setContentsMargins(6, 4, 6, 6)
+        diam_vel_layout.setSpacing(4)
         
-        self.ui_components['diam_vel_chart'] = DiameterVelocityChart(width=4, height=2.0)
+        self.ui_components['diam_vel_chart'] = DiameterVelocityChart(width=4, height=3.0)
         diam_vel_layout.addWidget(self.ui_components['diam_vel_chart'])
         
         diam_vel_group.setLayout(diam_vel_layout)
@@ -423,14 +434,14 @@ class ExtractTabUI:
             QGroupBox {
                 font-weight: bold;
                 border: 1px solid #1f2937;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 10px;
+                border-radius: 6px;
+                margin-top: 6px;
+                padding-top: 6px;
                 background-color: #111827;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
+                left: 8px;
                 padding: 0 5px 0 5px;
                 color: #38bdf8;
             }
