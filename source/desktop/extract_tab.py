@@ -4,22 +4,20 @@
 特征提取模块标签页
 """
 
-import numpy as np
 import json
 import os
 import sys
-import subprocess
 import threading
 from typing import Optional
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
 from PySide6.QtCore import Qt, Signal
-from framework import MatplotlibWidget, ImagePreviewWidget
 from segment_utils import build_time_diameter_series, run_segmentation_script
 from sequence_manager import SequenceManager
+from sequence_model import SequenceModel
 from extract_tab_ui import ExtractTabUI
-from info_builder import build_prompt_info_text, build_segmentation_info_text
+from info_builder import build_segmentation_info_text
 from controllers.prompt_controller import PromptController
 from controllers.chart_controller import ChartController
 
@@ -38,16 +36,7 @@ class ExtractTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         # 初始化图像序列相关属性
-        self.image_paths = []  # 图像路径列表（统一使用）
         self.current_image_index = 0  # 当前显示的图像索引
-        self.sequence_data = None  # 序列数据
-        self.explosion_duration = 140  # 爆炸时长（毫秒）
-        # 参数与分析缓存
-        self.parameters = {}
-        
-        # 分割结果相关属性
-        self.segmentation_results = []  # 分割结果列表
-        self.has_segmentation_data = False  # 是否有分割结果数据
         
         # 状态日志缓冲区（用于多行显示）
         self.status_log_buffer = []
@@ -56,6 +45,7 @@ class ExtractTab(QWidget):
         # 初始化火球计算器和序列管理器
         self.fireball_calculator = FireballCalculator()
         self.sequence_manager = SequenceManager()
+        self.sequence_model = SequenceModel(self.sequence_manager)
         
         # 初始化UI构建器并创建界面
         self.ui_builder = ExtractTabUI()
@@ -63,7 +53,7 @@ class ExtractTab(QWidget):
         self.ui_components = self.ui_builder.get_ui_components()
         
         # 初始化控制器
-        self.prompt_controller = PromptController(self, self.ui_builder)
+        self.prompt_controller = PromptController(self, self.ui_builder, self.sequence_model)
         self.chart_controller = ChartController()
         
         self.chart_controller.set_widgets(
@@ -161,16 +151,10 @@ class ExtractTab(QWidget):
         try:
             print("🧹 重置状态：清空旧的序列、特征点与分割结果…")
             # 1) 清空内存数据
-            self.image_paths = []
+            self.sequence_model.reset()
             self.current_image_index = 0
-            self.sequence_data = None
-            self.segmentation_results = []
-            self.has_segmentation_data = False
             # 重置控制器状态
-            self.prompt_controller.reset_state()
-            # 避免误用上一份文件路径
-            if hasattr(self, '_current_sequence_file_path'):
-                delattr(self, '_current_sequence_file_path')
+            self.prompt_controller.reset()
             
             # 2) 重置图像显示
             try:
@@ -215,47 +199,20 @@ class ExtractTab(QWidget):
     def _apply_sequence_data(self, sequence_data: dict, sequence_file_path: Optional[str] = None) -> bool:
         """将已加载的序列数据应用到界面与状态中，返回是否存在分割结果。"""
         try:
-            # 保存序列数据和文件路径
-            self.sequence_data = sequence_data
-            if sequence_file_path:
-                self._current_sequence_file_path = sequence_file_path
-            
-            # 提取图像路径
-            image_paths = self.sequence_manager.get_image_paths_from_sequence(sequence_data)
+            # 刷新模型缓存
+            self.sequence_model.apply_sequence_dict(sequence_data, sequence_file_path)
+
+            image_paths = self.sequence_model.image_paths
             if not image_paths:
                 QMessageBox.warning(self, "警告", "序列文件中没有图像路径！")
                 self.extract_status.setText("无图像数据")
                 return False
-            
-            # 提取参数
-            parameters = self.sequence_manager.get_parameters_from_sequence(sequence_data)
-            self.explosion_duration = int(parameters.get('explosion_duration', 140))
-            self.pixel_length = float(parameters.get('pixel_length', 1.0))
-            self.parameters = parameters or {}
-            
-            # 设置图像路径和索引
-            self.image_paths = image_paths
+
+            # 更新基本参数缓存（供后续方法使用）
             self.current_image_index = 0
-            
-            # 计算分组（平均分组，至少2组；每组最多250张）
-            group_count = 1
-            try:
-                total = len(self.image_paths)
-                if total > 0:
-                    max_groups_by_size = (total + 249) // 250
-                    # 至少分2组；若不足，按2组；否则取不超过max_groups_by_size且不超过total的合理值
-                    group_count = max(2, max_groups_by_size)
-                    group_count = min(group_count, total)
-                else:
-                    group_count = 1
-            except Exception:
-                group_count = 1
-            
-            # 设置控制器的分组数量
-            self.prompt_controller.set_group_count(group_count)
 
             # 设置时间轴范围
-            self.extract_slider.setRange(0, len(self.image_paths) - 1)
+            self.extract_slider.setRange(0, len(image_paths) - 1)
             self.extract_slider.setValue(0)
 
             # 设置图像控件为最大尺寸并显示第一张
@@ -263,44 +220,27 @@ class ExtractTab(QWidget):
             self.display_image_at_index(0)
 
             # 加载温度数据
-            time_data, temp_data = self.sequence_manager.get_temperature_data_from_sequence(sequence_data)
+            time_data, temp_data = self.sequence_model.get_temperature_series()
             if time_data and temp_data:
                 self.update_temperature_chart(time_data, temp_data)
 
             # 分割结果优先
-            has_segmentation_results = self.sequence_manager.has_segmentation_results(sequence_data)
-            if has_segmentation_results:
-                segmentation_results = self.sequence_manager.get_segmentation_results_from_sequence(sequence_data)
-                self.segmentation_results = segmentation_results
-                self.has_segmentation_data = True
-                # 清除prompt数据避免冲突
-                self.prompt_controller.reset_state()
-                # 信息面板与直径图
-                successful_count = sum(1 for r in segmentation_results if r.get('success', False))
-                self.update_segmentation_info_display(successful_count, len(segmentation_results))
+            if self.sequence_model.has_segmentation_data():
+                segmentation_results = self.sequence_model.get_segmentation_results()
+                summary = self.sequence_model.get_segmentation_summary()
+                self.update_segmentation_info_display(summary["success"], summary["total"])
                 self.update_diameter_chart_from_segmentation_results(segmentation_results)
-                # 加载到现有分割结果后，也应允许保存分析结果（若具备）
                 self._update_save_button_state()
-                # 切换按钮
                 self.extract_btn.setVisible(False)
                 self.reextract_btn.setVisible(True)
             else:
-                # 加载prompt数据与起爆点
-                self.has_segmentation_data = False
                 self.extract_btn.setVisible(True)
                 self.reextract_btn.setVisible(False)
-                prompt_data = self.sequence_manager.get_prompt_data_from_sequence(sequence_data)
-                if prompt_data:
-                    self.prompt_controller.load_prompt_data(prompt_data)
-                ignition_point = self.sequence_manager.get_ignition_point_from_sequence(sequence_data)
-                if ignition_point:
-                    self.prompt_controller.set_ignition_point(ignition_point[0], ignition_point[1])
-                self.prompt_controller.update_prompt_info_display()
-                self.prompt_controller.load_points_for_current_image(0)
+                self.prompt_controller.sync_from_model()
 
             # 序列摘要与状态
-            summary = self.sequence_manager.get_sequence_summary(sequence_data)
-            status_msg = f"已加载序列: {summary['image_count']} 个文件，时长: {self.explosion_duration}ms"
+            summary = self.sequence_model.get_sequence_summary()
+            status_msg = f"已加载序列: {summary['image_count']} 个文件，时长: {summary['explosion_duration']}ms"
             if summary['has_temperature_data']:
                 status_msg += f"，温度数据: {summary['temperature_points']} 点"
             if summary['has_prompt_data']:
@@ -308,8 +248,8 @@ class ExtractTab(QWidget):
             if summary['has_ignition_point']:
                 status_msg += f"，起爆点: {summary['ignition_point']}"
             self.extract_status.setText(status_msg)
-            return has_segmentation_results
-            
+            return self.sequence_model.has_segmentation_data()
+
         except Exception as e:
             print(f"❌ 应用序列数据失败: {e}")
             QMessageBox.critical(self, "错误", f"应用序列数据失败:\n{str(e)}")
@@ -317,11 +257,12 @@ class ExtractTab(QWidget):
     
     def on_time_changed(self, value):
         """时间轴变化"""
-        if self.image_paths:
+        image_paths = self.sequence_model.image_paths
+        if image_paths:
             # 计算实际时间（毫秒）
-            total_frames = len(self.image_paths)
+            total_frames = len(image_paths)
             if total_frames > 1:
-                time_ms = (value / (total_frames - 1)) * self.explosion_duration
+                time_ms = (value / (total_frames - 1)) * self.sequence_model.explosion_duration_ms
             else:
                 time_ms = 0
             self.extract_time_label.setText(f"t = {time_ms:.1f} ms (帧 {value + 1}/{total_frames})")
@@ -340,11 +281,12 @@ class ExtractTab(QWidget):
     
     def display_image_at_index(self, index):
         """显示指定索引的图像"""
-        if not self.image_paths or index < 0 or index >= len(self.image_paths):
+        image_paths = self.sequence_model.image_paths
+        if not image_paths or index < 0 or index >= len(image_paths):
             return
         
         try:
-            image_path = self.image_paths[index]
+            image_path = image_paths[index]
             # 使用交互式图像控件的 set_image 方法
             success = self.extract_preview.set_image(image_path)
             if success:
@@ -353,9 +295,11 @@ class ExtractTab(QWidget):
                 self.prompt_controller.set_current_image_index(index)
                 
                 # 优先显示分割结果，如果有的话
-                if self.has_segmentation_data and index < len(self.segmentation_results):
+                segmentation_results = self.sequence_model.get_segmentation_results()
+                if (self.sequence_model.has_segmentation_data()
+                        and index < len(segmentation_results)):
                     # 有分割结果：显示分割结果，不显示特征点
-                    segmentation_data = self.segmentation_results[index]
+                    segmentation_data = segmentation_results[index]
                     self.extract_preview.set_segmentation_result(segmentation_data)
                     self.extract_preview.set_show_segmentation(True)
                     self.extract_preview.clear_points()  # 清除特征点
@@ -440,14 +384,14 @@ class ExtractTab(QWidget):
             self.extract_btn.setEnabled(False)
             
             # 检查是否有序列数据
-            if not self.sequence_data:
+            if not self.sequence_model.sequence_data:
                 QMessageBox.warning(self, "警告", "请先加载火球爆炸序列文件！")
                 self.extract_status.setText("请先加载序列文件")
                 self.extract_btn.setEnabled(True)
                 return
             
             # 检查序列文件路径
-            if not hasattr(self, '_current_sequence_file_path') or not self._current_sequence_file_path:
+            if not self.sequence_model.current_path:
                 QMessageBox.warning(self, "警告", "无法找到序列文件路径！")
                 self.extract_status.setText("序列文件路径丢失")
                 self.extract_btn.setEnabled(True)
@@ -485,7 +429,7 @@ class ExtractTab(QWidget):
             self.extract_status.setText("正在执行分割脚本...")
             
             # 调用异步分割脚本（完成后的处理在 _on_segmentation_finished 中）
-            self.run_segmentation_script(self._current_sequence_file_path)
+            self.run_segmentation_script(self.sequence_model.current_path)
             
         except Exception as e:
             print(f"❌ 特征提取失败: {e}")
@@ -506,14 +450,13 @@ class ExtractTab(QWidget):
         """
         try:
             # 检查是否有分割结果
-            # 注意：使用当前内存中的 self.sequence_data 判断
-            # 在重新提取后已重新加载 self.sequence_data，若仍有结果则认为已分割
-            if self.sequence_manager.has_segmentation_results(self.sequence_data):
+            # 注意：使用当前内存中的模型缓存判断，若仍有结果则认为已分割
+            if self.sequence_model.has_segmentation_data():
                 return 'already_segmented'
             
             # 检查是否有prompt数据
-            prompt_data = self.prompt_controller.get_prompt_data()
-            if not prompt_data or (isinstance(prompt_data, dict) and len(prompt_data.keys()) == 0):
+            prompt_data = self.sequence_model.get_prompt_data()
+            if not prompt_data or len(prompt_data.keys()) == 0:
                 return 'no_prompt_data'
             
             return 'ready_for_segmentation'
@@ -587,21 +530,9 @@ class ExtractTab(QWidget):
     def prepare_for_reextraction(self):
         """准备重新提取：清除分割结果，重置为特征点选择模式"""
         try:
-            # 清除分割结果数据
-            self.segmentation_results = []
-            self.has_segmentation_data = False
-            
-            # 清除JSON文件中的分割结果
-            if hasattr(self, '_current_sequence_file_path') and self._current_sequence_file_path:
-                success, message = self.sequence_manager.clear_segmentation_results_from_sequence(self._current_sequence_file_path)
-                if success:
-                    print(f"✅ {message}")
-                    # 重要：清除文件后，重新加载到内存，避免旧的 self.sequence_data 仍然包含分割结果
-                    reload_ok, new_data, _ = self.sequence_manager.load_sequence_file(self._current_sequence_file_path)
-                    if reload_ok:
-                        self.sequence_data = new_data
-                else:
-                    print(f"❌ {message}")
+            success, message = self.sequence_model.clear_segmentation_results()
+            if message:
+                print(("✅ " if success else "❌ ") + message)
                 
             # 重置显示模式
             self.extract_preview.set_show_segmentation(False)
@@ -612,12 +543,9 @@ class ExtractTab(QWidget):
                 print(f"⚠️ 清空直径图表失败: {e}")
             
             # 重新加载特征点数据
-            prompt_data = self.sequence_manager.get_prompt_data_from_sequence(self.sequence_data)
-            if prompt_data:
-                self.prompt_controller.load_prompt_data(prompt_data)
-                self.prompt_controller.load_points_for_current_image(self.current_image_index)
-                self.prompt_controller.update_prompt_info_display()
-            
+            self.prompt_controller.sync_from_model()
+            self.prompt_controller.load_points_for_current_image(self.current_image_index)
+
             # 更新状态
             self.extract_status.setText("已清除分割结果，请重新选择特征点")
             
@@ -631,7 +559,11 @@ class ExtractTab(QWidget):
         try:
             # 重新加载分割后的序列文件（原文件名 + "_segmented"）
             from pathlib import Path
-            original_path = Path(self._current_sequence_file_path)
+            current_path = self.sequence_model.current_path
+            if not current_path:
+                print("⚠️ 当前无序列文件路径，无法重新加载分割结果")
+                return False
+            original_path = Path(current_path)
             segmented_path = original_path.with_name(f"{original_path.stem}_segmented{original_path.suffix}")
 
             if not segmented_path.exists():
@@ -656,10 +588,11 @@ class ExtractTab(QWidget):
     def update_diameter_chart_from_segmentation_results(self, segmentation_results):
         """根据分割结果更新直径图表（仅绘制成功点，不插值）"""
         try:
+            self.sequence_model.update_segmentation_results(segmentation_results)
             series = build_time_diameter_series(
                 segmentation_results, 
-                float(self.explosion_duration),
-                float(self.pixel_length)
+                float(self.sequence_model.explosion_duration_ms),
+                float(self.sequence_model.pixel_length)
             )
             if not series:
                 # 清空图表
@@ -708,7 +641,7 @@ class ExtractTab(QWidget):
             print("🔄 开始重新提取...")
             
             # 检查是否有序列数据
-            if not self.sequence_data:
+            if not self.sequence_model.sequence_data:
                 QMessageBox.warning(self, "警告", "请先加载火球爆炸序列文件！")
                 return
             
@@ -754,16 +687,6 @@ class ExtractTab(QWidget):
             self.extract_status.setText("已取消当前图像的参考点选择")
         except Exception as e:
             print(f"❌ 取消当前图像点失败: {e}")
-    
-    def update_ignition_point_display(self):
-        """更新起爆点显示"""
-        try:
-            # 更新当前图像的起爆点显示
-            self.prompt_controller.load_points_for_current_image(self.current_image_index)
-                
-        except Exception as e:
-            print(f"❌ 更新起爆点显示失败: {e}")
-    
     
     def save_extraction_sequence(self):
         """保存提取序列（按照example_data.json格式）"""
@@ -812,27 +735,10 @@ class ExtractTab(QWidget):
             from pathlib import Path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
 
-            export_data = {
-                # 各时刻直径
-                "diameter_over_time": [
-                    {"time_ms": float(t), "diameter_m": float(d)}
-                    for (t, d) in (self.chart_controller.get_cached_diameter() or [])
-                ],
-                # 爆炸基本参数
-                "parameters": {
-                    "material_type": self.parameters.get('material_type'),
-                    "equivalent": self.parameters.get('equivalent'),
-                    "al_percent": self.parameters.get('al_percent'),
-                    "explosion_duration": self.parameters.get('explosion_duration'),
-                    "pixel_length": self.parameters.get('pixel_length'),
-                },
-                # 拖曳曲线拟合参数与表达式
-                "drag_fit": (self.chart_controller.get_cached_drag_fit() or {
-                    "success": False,
-                    "K": None, "B": None, "C": None,
-                    "expression": "D(t) = K * (1 - B * exp(-C * t^2))",
-                })
-            }
+            export_data = self.sequence_model.build_export_payload(
+                diameter_series=self.chart_controller.get_cached_diameter() or [],
+                drag_fit_result=self.chart_controller.get_cached_drag_fit(),
+            )
 
             import json
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -848,9 +754,9 @@ class ExtractTab(QWidget):
             # 同步更新 CheckBar（长度不会变，仅在切换图片时无需变更标注集合）
             if getattr(self, 'check_bar', None) is not None:
                 self.check_bar.update(
-                    length=len(self.image_paths),
-                    group_count=self.prompt_controller.group_count,
-                    annotated_indices=sorted(self.prompt_controller.get_annotated_indices())
+                    length=len(self.sequence_model.image_paths),
+                    group_count=self.sequence_model.group_count,
+                    annotated_indices=sorted(self.sequence_model.get_annotated_indices())
                 )
         except Exception as e:
             print(f"❌ 更新图片索引显示失败: {e}")
@@ -858,7 +764,8 @@ class ExtractTab(QWidget):
     def jump_to_image(self):
         """跳转到指定图片"""
         try:
-            if not self.image_paths:
+            image_paths = self.sequence_model.image_paths
+            if not image_paths:
                 QMessageBox.warning(self, "警告", "请先加载图像序列！")
                 return
             
@@ -873,9 +780,9 @@ class ExtractTab(QWidget):
                 image_index = image_number - 1
                 
                 # 检查索引范围
-                if image_index < 0 or image_index >= len(self.image_paths):
+                if image_index < 0 or image_index >= len(image_paths):
                     QMessageBox.warning(self, "警告", 
-                                      f"图片编号超出范围！\n有效范围: 1-{len(self.image_paths)}")
+                                      f"图片编号超出范围！\n有效范围: 1-{len(image_paths)}")
                     return
                 
                 # 跳转到指定图片
