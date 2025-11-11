@@ -9,7 +9,7 @@ import os
 from typing import Any, Dict
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
-                               QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
+                               QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea, QCheckBox)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
 from checkbar import create_checkbar
@@ -102,6 +102,12 @@ class ExtractTabUI:
         self.ui_components['reextract_btn'] = QPushButton("重新提取")
         self.ui_components['reextract_btn'].setStyleSheet("QPushButton { background-color: #f59e0b; color: white; }")
         self.ui_components['reextract_btn'].setVisible(False)  # 初始隐藏
+        
+        # 保存相关组件
+        self.ui_components['export_segmentation_checkbox'] = QCheckBox("同时导出分割图片")
+        self.ui_components['export_segmentation_checkbox'].setChecked(False)
+        self.ui_components['save_button'] = QPushButton("保存结果序列")
+        self.ui_components['save_button'].setEnabled(False)
     
     def _create_left_panel(self) -> QWidget:
         """创建左侧图像预览面板"""
@@ -277,9 +283,10 @@ class ExtractTabUI:
         diam_vel_group = self._create_diameter_velocity_chart_group()
         right_layout.addWidget(diam_vel_group)
         
-        # 控制按钮
-        button_layout = self._create_control_buttons()
-        right_layout.addLayout(button_layout)
+        # 使用stretch factor让三个图表等分空间
+        right_layout.setStretchFactor(temp_group, 1)
+        right_layout.setStretchFactor(diam_group, 1)
+        right_layout.setStretchFactor(diam_vel_group, 1)
         
         right_widget.setLayout(right_layout)
         return right_widget
@@ -295,7 +302,8 @@ class ExtractTabUI:
         temp_layout.setContentsMargins(6, 4, 6, 6)
         temp_layout.setSpacing(4)
         
-        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=1.8)
+        # 使用较大的高度，通过stretch factor等分空间
+        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=3.0)
         temp_layout.addWidget(self.ui_components['temp_chart'])
         
         temp_group.setLayout(temp_layout)
@@ -335,19 +343,6 @@ class ExtractTabUI:
         diam_vel_group.setLayout(diam_vel_layout)
         return diam_vel_group
     
-    def _create_control_buttons(self) -> QHBoxLayout:
-        """创建控制按钮"""
-        button_layout = QHBoxLayout()
-        button_layout.setAlignment(Qt.AlignTop)
-        
-        self.ui_components['save_button'] = QPushButton("保存提取序列")
-        self.ui_components['save_button'].setEnabled(False)
-        button_layout.addWidget(self.ui_components['save_button'])
-        
-        button_layout.addStretch()
-        button_layout.addWidget(QLabel("有参考点后可保存"))
-        
-        return button_layout
     
     def create_sidebar_widget(self) -> QGroupBox:
         """创建侧边栏组件"""
@@ -374,6 +369,10 @@ class ExtractTabUI:
         extract_layout.addWidget(self.ui_components['extract_btn'])
         extract_layout.addWidget(self.ui_components['reextract_btn'])
         layout.addLayout(extract_layout)
+        
+        # 导出分割结果组
+        export_group = self._create_export_group()
+        layout.addWidget(export_group)
         
         # 添加弹性空间
         layout.addStretch()
@@ -427,6 +426,39 @@ class ExtractTabUI:
         
         prompt_group.setLayout(prompt_layout)
         return prompt_group
+    
+    def _create_export_group(self) -> QGroupBox:
+        """创建导出分割结果组"""
+        export_group = QGroupBox("导出分割结果")
+        export_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: #1f2937;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #60a5fa;
+            }
+        """)
+        
+        export_layout = QVBoxLayout()
+        export_layout.setAlignment(Qt.AlignTop)
+        export_layout.setSpacing(8)
+        
+        # 同时导出分割图片复选框
+        export_layout.addWidget(self.ui_components['export_segmentation_checkbox'])
+        
+        # 保存结果序列按钮
+        export_layout.addWidget(self.ui_components['save_button'])
+        
+        export_group.setLayout(export_layout)
+        return export_group
     
     def _get_chart_group_style(self) -> str:
         """获取图表组样式"""

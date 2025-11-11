@@ -94,6 +94,7 @@ class ExtractTab(QWidget):
         self.extract_btn = self.ui_components['extract_btn']
         self.reextract_btn = self.ui_components['reextract_btn']
         self.save_button = self.ui_components['save_button']
+        self.export_segmentation_checkbox = self.ui_components['export_segmentation_checkbox']
         
         # cancel_prompt_btn 已由 PromptController 管理
         
@@ -618,11 +619,19 @@ class ExtractTab(QWidget):
                 # 导出分析结果
                 success = self.export_analysis_results_to_json(file_path)
                 
+                # 如果选中了"同时导出分割图片"，则导出分割图片
+                export_images_success = False
+                if self.export_segmentation_checkbox.isChecked():
+                    export_images_success = self.export_segmentation_images(file_path)
+                
                 if success:
-                    QMessageBox.information(self, "成功", 
-                                          f"分析结果已保存到:\n{file_path}\n\n"
-                                          f"包含 {len(diameter_series)} 个直径数据点与拟合参数")
-                    self.extract_status.setText("分析结果保存成功")
+                    message = f"分析结果已保存到:\n{file_path}\n\n包含 {len(diameter_series)} 个直径数据点与拟合参数"
+                    if export_images_success:
+                        message += "\n\n分割图片已成功导出"
+                    elif self.export_segmentation_checkbox.isChecked():
+                        message += "\n\n⚠️ 分割图片导出失败，请检查控制台输出"
+                    QMessageBox.information(self, "成功", message)
+                    self.extract_status.setText("分析结果保存成功" + ("，分割图片已导出" if export_images_success else ""))
                 else:
                     QMessageBox.critical(self, "错误", "保存失败，请检查文件路径和权限！")
                     self.extract_status.setText("分析结果保存失败")
@@ -649,5 +658,51 @@ class ExtractTab(QWidget):
             return True
         except Exception as e:
             print(f"❌ 导出分析结果失败: {e}")
+            return False
+    
+    def export_segmentation_images(self, json_file_path: str) -> bool:
+        """导出分割图片到指定目录"""
+        try:
+            from pathlib import Path
+            from sequence_image_composer import compose_and_save
+            
+            # 检查是否有分割结果
+            if not self.sequence_model.has_segmentation_data():
+                print("⚠️ 没有分割结果，无法导出分割图片")
+                return False
+            
+            # 获取图像路径和分割结果
+            image_paths = self.sequence_model.image_paths
+            segmentation_results = self.sequence_model.get_segmentation_results()
+            
+            if not image_paths or not segmentation_results:
+                print("⚠️ 图像路径或分割结果为空，无法导出分割图片")
+                return False
+            
+            # 确定输出目录（与JSON文件同目录，使用JSON文件名作为子目录名）
+            json_path = Path(json_file_path)
+            output_dir = json_path.parent / f"{json_path.stem}_segmented_images"
+            
+            # 组合并保存图像
+            success, saved_paths = compose_and_save(
+                image_paths,
+                segmentation_results,
+                str(output_dir),
+                base_name="fireball_segmented",
+                image_format="jpg",
+                start_index=0
+            )
+            
+            if success:
+                print(f"✓ 成功导出 {len(saved_paths)} 张分割图片到 {output_dir}")
+                return True
+            else:
+                print(f"❌ 导出分割图片失败")
+                return False
+                
+        except Exception as e:
+            print(f"❌ 导出分割图片失败: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
