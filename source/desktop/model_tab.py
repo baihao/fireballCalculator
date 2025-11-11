@@ -10,11 +10,8 @@ import os
 import csv
 import json
 from datetime import datetime
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                               QGridLayout, QPushButton, QComboBox, QLineEdit, QGroupBox,
-                               QMessageBox, QFileDialog)
-from PySide6.QtCore import Qt
-from framework import MatplotlibWidget
+from PySide6.QtWidgets import QWidget, QMessageBox, QFileDialog
+from model_tab_ui import ModelTabUI
 
 # 添加路径以导入计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -30,51 +27,72 @@ class ModelTab(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.init_ui()
+        # 初始化UI构建器并创建界面
+        self.ui_builder = ModelTabUI()
+        self.ui_builder.create_main_layout(self)
+        self.ui_components = self.ui_builder.get_ui_components()
+        
+        # 设置UI组件引用（向后兼容）
+        self._setup_ui_component_references()
+        
+        # 初始化图表
+        self.init_empty_charts()
+        
         self.setup_connections()
+    
+    def _setup_ui_component_references(self):
+        """设置UI组件引用（向后兼容）"""
+        # 状态显示控件
+        self.modeling_status = self.ui_components['modeling_status']
         
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setAlignment(Qt.AlignTop)  # 整个布局向上对齐
+        # 图表控件
+        self.diam_chart = self.ui_components['diam_chart']
+        self.temp_chart = self.ui_components['temp_chart']
+        self.heat_flux_chart = self.ui_components['heat_flux_chart']
+        self.heat_radiation_chart = self.ui_components['heat_radiation_chart']
         
-        # 工具栏
-        toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("仿真预测结果"))
-        toolbar.addStretch()
-        self.modeling_status = QLabel("未开始")
-        self.modeling_status.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        toolbar.addWidget(self.modeling_status)
-        layout.addLayout(toolbar)
+        # 按钮控件（可能尚未创建侧边栏，此时这些键不存在，需做兼容判断）
+        if 'predict_btn' in self.ui_components:
+            self.predict_btn = self.ui_components['predict_btn']
+        if 'export_btn' in self.ui_components:
+            self.export_btn = self.ui_components['export_btn']
+        if 'train_series_btn' in self.ui_components:
+            self.train_series_btn = self.ui_components['train_series_btn']
+        if 'train_btn' in self.ui_components:
+            self.train_btn = self.ui_components['train_btn']
         
-        # 四个图表网格
-        charts_widget = QWidget()
-        charts_layout = QGridLayout()
-        charts_layout.setAlignment(Qt.AlignTop)  # 只向上对齐
+        # 参数输入控件
+        if 'p_eq' in self.ui_components:
+            self.p_eq = self.ui_components['p_eq']
+        if 'p_al' in self.ui_components:
+            self.p_al = self.ui_components['p_al']
+        if 'p_step' in self.ui_components:
+            self.p_step = self.ui_components['p_step']
+        if 'p_duration' in self.ui_components:
+            self.p_duration = self.ui_components['p_duration']
+        if 'p_env_temp' in self.ui_components:
+            self.p_env_temp = self.ui_components['p_env_temp']
+        if 'p_env_humidity' in self.ui_components:
+            self.p_env_humidity = self.ui_components['p_env_humidity']
+        if 'p_env_pressure' in self.ui_components:
+            self.p_env_pressure = self.ui_components['p_env_pressure']
         
-        # 火球直径随时间变化
-        self.diam_chart = MatplotlibWidget(width=5, height=3)
+        # 其他控件
+        if 'algo' in self.ui_components:
+            self.algo = self.ui_components['algo']
+        if 'model_list' in self.ui_components:
+            self.model_list = self.ui_components['model_list']
+        if 'lr' in self.ui_components:
+            self.lr = self.ui_components['lr']
+        if 'epochs' in self.ui_components:
+            self.epochs = self.ui_components['epochs']
+    
+    def init_empty_charts(self):
+        """初始化空图表，显示等待状态"""
         self.init_empty_chart(self.diam_chart, "火球直径随时间变化", "时间 (ms)", "直径 (m)")
-        charts_layout.addWidget(self.diam_chart, 0, 0)
-        
-        # 火球温度随时间变化
-        self.temp_chart = MatplotlibWidget(width=5, height=3)
         self.init_empty_chart(self.temp_chart, "火球温度随时间变化", "时间 (ms)", "温度 (K)")
-        charts_layout.addWidget(self.temp_chart, 0, 1)
-        
-        # 热通量随时间变化 (不同距离)
-        self.heat_flux_chart = MatplotlibWidget(width=5, height=3)
         self.init_empty_chart(self.heat_flux_chart, "热通量随时间变化 (不同距离)", "时间 (ms)", "热通量 (W/m²)")
-        charts_layout.addWidget(self.heat_flux_chart, 1, 0)
-        
-        # 累积热辐射量随距离分布
-        self.heat_radiation_chart = MatplotlibWidget(width=5, height=3)
         self.init_empty_chart(self.heat_radiation_chart, "累积热辐射量随距离分布", "距离 (m)", "热辐射量 (J/m²)")
-        charts_layout.addWidget(self.heat_radiation_chart, 1, 1)
-        
-        charts_widget.setLayout(charts_layout)
-        layout.addWidget(charts_widget)
-        
-        self.setLayout(layout)
     
     def init_empty_chart(self, chart_widget, title, xlabel, ylabel):
         """初始化空图表，显示等待状态"""
@@ -113,8 +131,8 @@ class ModelTab(QWidget):
                            edgecolor='#374151',
                            alpha=0.8))
             
-            # 调整布局以确保标题完全显示
-            fig.tight_layout(pad=2.0)
+            # 使用 constrained_layout（已在 framework.py 中启用）
+            # 不再调用 tight_layout，避免与 constrained_layout 冲突
             
             # 刷新画布
             chart_widget.canvas.draw()
@@ -142,14 +160,19 @@ class ModelTab(QWidget):
         # 设置网格
         ax.grid(True, alpha=0.3, color='#374151')
         
-        # 调整布局以确保标题完全显示
-        ax.figure.tight_layout(pad=2.0)
+        # 使用 constrained_layout（已在 framework.py 中启用）
+        # 不再调用 tight_layout，避免与 constrained_layout 冲突
     
     def setup_connections(self):
         """设置信号连接"""
-        # 连接预测按钮
-        if hasattr(self, 'predict_btn'):
-            self.predict_btn.clicked.connect(self.start_prediction)
+        # 连接预测和导出按钮（仅在对应控件已创建时）
+        try:
+            if hasattr(self, 'predict_btn'):
+                self.predict_btn.clicked.connect(self.start_prediction)
+            if hasattr(self, 'export_btn'):
+                self.export_btn.clicked.connect(self.export_results)
+        except Exception:
+            pass
         
     def start_prediction(self):
         """开始预测"""
@@ -522,95 +545,11 @@ class ModelTab(QWidget):
     def get_sidebar_widget(self):
         """获取建模与预测模块的侧边栏组件"""
         if not hasattr(self, '_sidebar_widget'):
-            from PySide6.QtWidgets import QGroupBox, QComboBox, QLineEdit
-            from PySide6.QtCore import Qt
-            
-            self._sidebar_widget = QGroupBox("建模与预测")
-            layout = QVBoxLayout()
-            layout.setAlignment(Qt.AlignTop)  # 只向上对齐
-            
-            # 训练部分
-            layout.addWidget(QLabel("建模 - 训练"))
-            layout.addWidget(QLabel("选择训练时间序列（可多选）"))
-            self.train_series_btn = QPushButton("选择训练文件")
-            layout.addWidget(self.train_series_btn)
-            
-            layout.addWidget(QLabel("算法"))
-            self.algo = QComboBox()
-            self.algo.addItems(["T-Transformer"])
-            layout.addWidget(self.algo)
-            
-            # 学习率和轮次
-            lr_layout = QHBoxLayout()
-            lr_layout.addWidget(QLabel("学习率:"))
-            self.lr = QLineEdit("0.0005")
-            lr_layout.addWidget(self.lr)
-            lr_layout.addWidget(QLabel("轮次:"))
-            self.epochs = QLineEdit("50")
-            lr_layout.addWidget(self.epochs)
-            layout.addLayout(lr_layout)
-            
-            self.train_btn = QPushButton("开始训练")
-            self.train_btn.setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
-            layout.addWidget(self.train_btn)
-            
-            # 预测部分
-            layout.addWidget(QLabel("预测 - 运行"))
-            layout.addWidget(QLabel("选择已训练模型"))
-            self.model_list = QComboBox()
-            self.model_list.addItems(["示例模型 v1"])
-            layout.addWidget(self.model_list)
-            
-            # 预测参数
-            pred_layout = QHBoxLayout()
-            pred_layout.addWidget(QLabel("当量:"))
-            self.p_eq = QLineEdit("10")
-            pred_layout.addWidget(self.p_eq)
-            pred_layout.addWidget(QLabel("含铝量:"))
-            self.p_al = QLineEdit("30")
-            pred_layout.addWidget(self.p_al)
-            layout.addLayout(pred_layout)
-            
-            # 环境参数
-            env_layout = QHBoxLayout()
-            env_layout.addWidget(QLabel("环境温度:"))
-            self.p_env_temp = QLineEdit("24")
-            env_layout.addWidget(self.p_env_temp)
-            env_layout.addWidget(QLabel("相对湿度:"))
-            self.p_env_humidity = QLineEdit("48")
-            env_layout.addWidget(self.p_env_humidity)
-            layout.addLayout(env_layout)
-            
-            pressure_layout = QHBoxLayout()
-            pressure_layout.addWidget(QLabel("水饱和气压:"))
-            self.p_env_pressure = QLineEdit("2987.87")
-            pressure_layout.addWidget(self.p_env_pressure)
-            pressure_layout.addStretch()
-            layout.addLayout(pressure_layout)
-            
-            sim_layout = QHBoxLayout()
-            sim_layout.addWidget(QLabel("仿真步长:"))
-            self.p_step = QLineEdit("1")
-            sim_layout.addWidget(self.p_step)
-            sim_layout.addWidget(QLabel("仿真时长:"))
-            self.p_duration = QLineEdit("140")
-            sim_layout.addWidget(self.p_duration)
-            layout.addLayout(sim_layout)
-            
-            self.predict_btn = QPushButton("开始预测")
-            self.predict_btn.setStyleSheet("QPushButton { background-color: #10b981; color: white; }")
-            layout.addWidget(self.predict_btn)
-            
-            # 导出结果按钮
-            self.export_btn = QPushButton("导出结果")
-            self.export_btn.setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
-            self.export_btn.setEnabled(False)  # 初始状态禁用
-            layout.addWidget(self.export_btn)
-            
-            self._sidebar_widget.setLayout(layout)
-            
-            # 设置信号连接
-            self.predict_btn.clicked.connect(self.start_prediction)
-            self.export_btn.clicked.connect(self.export_results)
+            # 使用UI构建器创建侧边栏
+            self._sidebar_widget = self.ui_builder.create_sidebar_widget()
+            # 侧边栏创建后更新引用并补充信号连接
+            self.ui_components.update(self.ui_builder.get_ui_components())
+            self._setup_ui_component_references()
+            self.setup_connections()
         
         return self._sidebar_widget

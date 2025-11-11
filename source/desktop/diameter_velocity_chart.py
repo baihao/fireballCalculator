@@ -10,6 +10,7 @@
 """
 
 from base_chart import BaseChart, FONT_SIZE_BODY, FONT_FAMILY
+from typing import Optional, Tuple
 import numpy as np
 
 # 线条样式常量
@@ -43,15 +44,105 @@ class DiameterVelocityChart(BaseChart):
         )
         self._raw_color = COLOR_RAW
         self._fit_color = COLOR_FIT
+        self._placeholder_text = "提取完成后显示"
+
+    # --------------------------- 公共API --------------------------- #
+    def _compute_axis_limits(self, time_ms, ddt_raw, ddt_fit):
+        """
+        依据原始/拟合速率计算坐标范围，返回 (xlim, ylim)。
+        """
+        xlim = self._xlim
+        ylim = self._ylim
+        if not time_ms or len(time_ms) == 0:
+            return xlim, ylim
+        try:
+            time_arr = np.array(time_ms, dtype=float)
+            valid_mask = np.isfinite(time_arr)
+            if not np.any(valid_mask):
+                return xlim, ylim
+            time_valid = time_arr[valid_mask]
+            x_min, x_max = np.min(time_valid), np.max(time_valid)
+
+            all_y_values = []
+            if ddt_raw is not None:
+                valid_raw = ddt_raw[np.isfinite(ddt_raw)]
+                if len(valid_raw) > 0:
+                    all_y_values.extend(valid_raw)
+            if ddt_fit is not None:
+                valid_fit = ddt_fit[np.isfinite(ddt_fit)]
+                if len(valid_fit) > 0:
+                    all_y_values.extend(valid_fit)
+
+            if len(all_y_values) > 0:
+                y_min, y_max = float(np.min(all_y_values)), float(np.max(all_y_values))
+                x_range = x_max - x_min
+                y_range = y_max - y_min
+                x_padding = x_range * AXIS_PADDING_RATIO if x_range > 0 else X_PADDING_DEFAULT
+                y_padding = y_range * AXIS_PADDING_RATIO if y_range > 0 else Y_PADDING_DEFAULT
+                xlim = (x_min - x_padding, x_max + x_padding)
+                ylim = (y_min - y_padding, y_max + y_padding)
+                if ylim[0] < 0 and y_min >= 0:
+                    ylim = (0, ylim[1])
+        except Exception:
+            pass
+        return xlim, ylim
+
+    def set_placeholder(self, text: str, xy: Optional[Tuple[float, float]] = None) -> None:
+        """设置占位符文本与位置，并刷新占位图。"""
+        self._placeholder_text = text
+        if xy is not None:
+            self._placeholder_xy = xy
+        self.reset()
+
+    def draw_raw_velocity(self, ax, time_ms, diameter_m) -> Optional[np.ndarray]:
+        """绘制原始数据速率，返回 ddt_raw（若可计算）。"""
+        if not (time_ms and diameter_m):
+            return None
+        try:
+            t = np.array(time_ms, dtype=float)
+            d = np.array(diameter_m, dtype=float)
+            if len(t) >= 2 and len(d) == len(t):
+                ddt_raw = np.gradient(d, t)
+                ax.plot(time_ms, ddt_raw, color=self._raw_color, linewidth=LINE_WIDTH, label='原始速率')
+                return ddt_raw
+        except Exception:
+            return None
+        return None
+
+    def draw_fit_velocity(self, ax, time_ms, K: float, B: float, C: float) -> Optional[np.ndarray]:
+        """绘制拟合速率，返回 ddt_fit（若可计算）。"""
+        if not (time_ms and len(time_ms) > 0 and K is not None and B is not None and C is not None):
+            return None
+        try:
+            t_min = float(np.min(time_ms))
+            t_max = float(np.max(time_ms))
+            t_smooth = np.linspace(t_min, t_max, SMOOTH_POINTS)
+            ddt_fit = 2.0 * float(K) * float(B) * float(C) * t_smooth * np.exp(-float(C) * (t_smooth ** 2))
+            ax.plot(t_smooth, ddt_fit, '-', color=self._fit_color, linewidth=LINE_WIDTH, label='拟合速率')
+            return ddt_fit
+        except Exception:
+            return None
+
+    def draw_cutoff(self, ax, xlim, cutoff_ms: Optional[float]) -> None:
+        if cutoff_ms is None:
+            return
+        try:
+            cutoff_val = float(cutoff_ms)
+            if xlim and cutoff_val >= xlim[0] and cutoff_val <= xlim[1]:
+                ax.axvline(x=cutoff_val, color=COLOR_CUTOFF, linestyle='--', linewidth=LINE_WIDTH,
+                           label=f'数据截断点 ({cutoff_val:.1f}ms)')
+        except Exception:
+            pass
 
     def update_data(self, time_ms, diameter_m, K: float = None, B: float = None, C: float = None,
                     cutoff_ms: float = None) -> None:
         """
         更新速率数据并可选绘制拟合速率与截断线。
+        允许 diameter_m 为空，此时需要提供 K,B,C 绘制拟合速率。
 
         Args:
             time_ms: 时间序列（毫秒）
-            diameter_m: 直径序列（米）
+            diameter_m: 直径序列（米，可为空）
             K, B, C: 拖曳函数参数（可选）
             cutoff_ms: 有效数据截断时间（毫秒，可选）
         """
@@ -66,16 +157,16 @@ class DiameterVelocityChart(BaseChart):
         ddt_raw = None
         ddt_fit = None
         
-        # 计算原始数据的速率
-        if time_ms and diameter_m:
+        # 原始速率（可选）
+        ddt_raw = None
+        if diameter_m is not None:
             try:
                 t = np.array(time_ms, dtype=float)
                 d = np.array(diameter_m, dtype=float)
                 if len(t) >= 2 and len(d) == len(t):
-                    # numpy.gradient 支持传入坐标，单位：m/ms
                     ddt_raw = np.gradient(d, t)
             except Exception:
-                pass
+                ddt_raw = None
         
         # 计算拟合曲线的速率
         if K is not None and B is not None and C is not None and time_ms and len(time_ms) > 0:
@@ -88,42 +179,7 @@ class DiameterVelocityChart(BaseChart):
                 pass
         
         # 根据所有数据计算范围
-        if time_ms and len(time_ms) > 0:
-            try:
-                time_arr = np.array(time_ms, dtype=float)
-                valid_mask = np.isfinite(time_arr)
-                if np.any(valid_mask):
-                    time_valid = time_arr[valid_mask]
-                    x_min, x_max = np.min(time_valid), np.max(time_valid)
-                    
-                    # 收集所有 y 值
-                    all_y_values = []
-                    if ddt_raw is not None:
-                        valid_raw = ddt_raw[np.isfinite(ddt_raw)]
-                        if len(valid_raw) > 0:
-                            all_y_values.extend(valid_raw)
-                    if ddt_fit is not None:
-                        valid_fit = ddt_fit[np.isfinite(ddt_fit)]
-                        if len(valid_fit) > 0:
-                            all_y_values.extend(valid_fit)
-                    
-                    if len(all_y_values) > 0:
-                        y_min, y_max = np.min(all_y_values), np.max(all_y_values)
-                        
-                        # 添加边距
-                        x_range = x_max - x_min
-                        y_range = y_max - y_min
-                        x_padding = x_range * AXIS_PADDING_RATIO if x_range > 0 else X_PADDING_DEFAULT
-                        y_padding = y_range * AXIS_PADDING_RATIO if y_range > 0 else Y_PADDING_DEFAULT
-                        
-                        xlim = (x_min - x_padding, x_max + x_padding)
-                        ylim = (y_min - y_padding, y_max + y_padding)
-                        
-                        # 确保 y 轴最小值不为负（速率可以为负，但通常显示从0开始更合理）
-                        if ylim[0] < 0 and y_min >= 0:
-                            ylim = (0, ylim[1])
-            except Exception:
-                pass
+        xlim, ylim = self._compute_axis_limits(time_ms, ddt_raw, ddt_fit)
         
         # 应用统一的暗色主题样式
         from base_chart import apply_dark_chart_style
@@ -136,11 +192,14 @@ class DiameterVelocityChart(BaseChart):
             ylim=ylim,
         )
         
-        # 绘制原始数据的速率
-        if ddt_raw is not None and time_ms:
+        # 如果原始数据为空且无拟合参数，则显示占位符并返回
+        if (diameter_m is None or len(diameter_m) == 0) and ddt_fit is None:
+            self.set_placeholder(self._placeholder_text or "无可绘制数据", self._placeholder_xy)
+            return
+        
+        # 分别绘制
+        if ddt_raw is not None:
             ax.plot(time_ms, ddt_raw, color=self._raw_color, linewidth=LINE_WIDTH, label='原始速率')
-
-        # 绘制拟合曲线的速率
         if ddt_fit is not None:
             try:
                 t_min = float(np.min(time_ms))
@@ -151,14 +210,7 @@ class DiameterVelocityChart(BaseChart):
                 pass
 
         # 截断线（可选）
-        if cutoff_ms is not None:
-            try:
-                cutoff_val = float(cutoff_ms)
-                if xlim and cutoff_val >= xlim[0] and cutoff_val <= xlim[1]:
-                    ax.axvline(x=cutoff_val, color=COLOR_CUTOFF, linestyle='--', linewidth=LINE_WIDTH,
-                               label=f'数据截断点 ({cutoff_val:.1f}ms)')
-            except Exception:
-                pass
+        self.draw_cutoff(ax, xlim, cutoff_ms)
 
         # 刷新图例与画布（使用常量）
         try:
