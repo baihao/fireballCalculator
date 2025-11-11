@@ -9,70 +9,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
-
-
-def draw_segmentation_on_image(image: np.ndarray, segmentation_result: Dict[str, Any]) -> np.ndarray:
-    """
-    在图像上绘制分割结果（按照 interactive_image_widget.py 的规则）
-    
-    Args:
-        image: 原始图像数组（RGB格式）
-        segmentation_result: 分割结果字典，包含 contours、centroid、max_radius 等信息
-        
-    Returns:
-        np.ndarray: 绘制后的图像数组（RGB格式）
-    """
-    try:
-        # 创建图像副本，避免修改原始图像
-        display_image = image.copy()
-        
-        # 检查分割结果是否有效
-        if segmentation_result is None or not segmentation_result.get('success', False):
-            return display_image
-        
-        # 1. 绘制蓝色轮廓
-        contours = segmentation_result.get('contours', [])
-        if contours:
-            for contour_points in contours:
-                if len(contour_points) > 2:
-                    # 转换为numpy数组格式
-                    contour_array = np.array(contour_points, dtype=np.int32).reshape((-1, 1, 2))
-                    # 绘制蓝色轮廓，线宽3（RGB格式，蓝色 (0, 0, 255)）
-                    cv2.drawContours(display_image, [contour_array], -1, (0, 0, 255), 3)
-        
-        # 2. 绘制绿色质心到最大半径的箭头
-        centroid_data = segmentation_result.get('centroid', {})
-        max_radius_data = segmentation_result.get('max_radius', {})
-        
-        if centroid_data and max_radius_data:
-            # 获取质心坐标
-            cx = int(centroid_data.get('x', 0))
-            cy = int(centroid_data.get('y', 0))
-            
-            # 获取最大半径端点坐标
-            endpoint_data = max_radius_data.get('endpoint', {})
-            ex = int(endpoint_data.get('x', 0))
-            ey = int(endpoint_data.get('y', 0))
-            
-            # 确保坐标在图像范围内
-            h, w = display_image.shape[:2]
-            if (0 <= cx < w and 0 <= cy < h and 
-                0 <= ex < w and 0 <= ey < h):
-                
-                # 绘制绿色箭头，从质心指向最大半径端点（RGB格式，绿色 (0, 255, 0)）
-                cv2.arrowedLine(display_image, (cx, cy), (ex, ey), (0, 255, 0), 3, tipLength=0.1)
-                
-                # 在质心绘制紫色圆点（RGB格式，紫色 (128, 0, 128)）
-                cv2.circle(display_image, (cx, cy), 5, (128, 0, 128), -1)  # 填充的紫色圆点
-                
-                # 在最大半径端点绘制小圆圈（RGB格式，绿色 (0, 255, 0)）
-                cv2.circle(display_image, (ex, ey), 3, (0, 255, 0), 2)  # 绿色圆圈
-        
-        return display_image
-        
-    except Exception as e:
-        print(f"❌ 绘制分割结果失败: {e}")
-        return image  # 出错时返回原始图像
+from draw_utils import draw_segmentation_on_image
 
 
 def compose_sequence_images(
