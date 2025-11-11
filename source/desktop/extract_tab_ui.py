@@ -75,7 +75,7 @@ class ExtractTabUI:
         self.ui_components['point_type_group'].addButton(self.ui_components['negative_radio'])
         self.ui_components['point_type_group'].addButton(self.ui_components['ignition_radio'])
         
-        self.ui_components['cancel_extract_btn'] = QPushButton("清除当前图片上参考点")
+        self.ui_components['cancel_prompt_btn'] = QPushButton("清除当前图片上参考点")
         
         # Prompt信息显示
         self.ui_components['prompt_info_text'] = QTextEdit()
@@ -419,7 +419,7 @@ class ExtractTabUI:
         prompt_layout.addLayout(point_type_layout)
         
         # 清除按钮
-        prompt_layout.addWidget(self.ui_components['cancel_extract_btn'])
+        prompt_layout.addWidget(self.ui_components['cancel_prompt_btn'])
         
         # 参考点信息显示区域
         prompt_layout.addWidget(QLabel("已选择的参考点信息"))

@@ -93,8 +93,9 @@ class ExtractTab(QWidget):
         self.sequence_btn = self.ui_components['sequence_btn']
         self.extract_btn = self.ui_components['extract_btn']
         self.reextract_btn = self.ui_components['reextract_btn']
-        self.cancel_extract_btn = self.ui_components['cancel_extract_btn']
         self.save_button = self.ui_components['save_button']
+        
+        # cancel_prompt_btn 已由 PromptController 管理
         
         # 信息显示控件（仍在使用）
         self.prompt_info_text = self.ui_components['prompt_info_text']
@@ -113,7 +114,7 @@ class ExtractTab(QWidget):
         self.sequence_btn.clicked.connect(self.select_sequence_folder)
         self.extract_btn.clicked.connect(self.start_feature_extraction)
         self.reextract_btn.clicked.connect(self.start_reextraction)
-        self.cancel_extract_btn.clicked.connect(self._cancel_current_image_points)
+        # cancel_prompt_btn 的信号连接已由 PromptController 处理
         
         # 图像导航（由 SequencyDisplayController 内部处理）
         
@@ -153,6 +154,8 @@ class ExtractTab(QWidget):
                 self.extract_btn.setVisible(True)
                 if hasattr(self, 'reextract_btn'):
                     self.reextract_btn.setVisible(False)
+                # 重置时启用 prompt 控件（新导入序列，没有分割结果）
+                self.prompt_controller.set_prompt_controls_enabled(True)
             except Exception as e:
                 print(f"⚠️ 重置状态控件时出错: {e}")
             
@@ -189,11 +192,15 @@ class ExtractTab(QWidget):
                 self._update_save_button_state()
                 self.extract_btn.setVisible(False)
                 self.reextract_btn.setVisible(True)
+                # 禁用 prompt 相关控件（已有分割结果，不应再修改参考点）
+                self.prompt_controller.set_prompt_controls_enabled(False)
                 # 同步显示控制器以刷新显示模式
                 self.display_controller.sync_to_model()
             else:
                 self.extract_btn.setVisible(True)
                 self.reextract_btn.setVisible(False)
+                # 启用 prompt 相关控件（没有分割结果，可以修改参考点）
+                self.prompt_controller.set_prompt_controls_enabled(True)
                 self.prompt_controller.sync_from_model()
                 # 同步显示控制器以刷新显示模式
                 self.display_controller.sync_to_model()
@@ -367,9 +374,12 @@ class ExtractTab(QWidget):
         """异步运行分割脚本：后台线程读日志，通过信号更新UI，不阻塞主线程。"""
         # 1) 禁用交互控件
         try:
+            # 禁用 prompt 相关控件（由 PromptController 管理）
+            self.prompt_controller.set_prompt_controls_enabled(False)
+            
+            # 禁用其他控件
             for w in [
-                self.sequence_btn, self.ui_components['prompt_btn'], self.extract_btn, self.reextract_btn,
-                self.cancel_extract_btn, self.save_button
+                self.sequence_btn, self.extract_btn, self.reextract_btn, self.save_button
             ]:
                 if hasattr(w, 'setEnabled'):
                     w.setEnabled(False)
@@ -406,9 +416,12 @@ class ExtractTab(QWidget):
     def _on_segmentation_finished(self, ok: bool):
         # 恢复控件
         try:
+            # 启用 prompt 相关控件（由 PromptController 管理）
+            self.prompt_controller.set_prompt_controls_enabled(True)
+            
+            # 启用其他控件
             for w in [
-                self.sequence_btn, self.ui_components['prompt_btn'], self.extract_btn, self.reextract_btn,
-                self.cancel_extract_btn, self.save_button
+                self.sequence_btn, self.extract_btn, self.reextract_btn, self.save_button
             ]:
                 if hasattr(w, 'setEnabled'):
                     w.setEnabled(True)
@@ -432,14 +445,16 @@ class ExtractTab(QWidget):
             if message:
                 print(("✅ " if success else "❌ ") + message)
                 
-            # 清空直径图表（用户反馈：未被清空）
+            # 清空直径图表和直径速率图表
             try:
-                self.ui_builder.init_diameter_chart()
+                self.chart_controller.clear_diameter()
             except Exception as e:
                 print(f"⚠️ 清空直径图表失败: {e}")
             
             # 重新加载特征点数据
             self.prompt_controller.sync_from_model()
+            # 重新启用 prompt 相关控件（清除分割结果后，可以重新选择参考点）
+            self.prompt_controller.set_prompt_controls_enabled(True)
             
             # 刷新显示控制器以切换到 prompt 模式
             self.display_controller.handle_segmentation_update()
@@ -575,15 +590,6 @@ class ExtractTab(QWidget):
         except Exception as e:
             print(f"❌ 更新分割结果信息显示失败: {e}")
             self.prompt_info_text.setPlainText(f"显示错误: {str(e)}")
-    
-    def _cancel_current_image_points(self):
-        """取消当前图像上的所有点"""
-        try:
-            current_index = self.display_controller.get_current_index()
-            self.prompt_controller.cancel_current_image_points(current_index)
-            self.extract_status.setText("已取消当前图像的参考点选择")
-        except Exception as e:
-            print(f"❌ 取消当前图像点失败: {e}")
     
     def save_extraction_sequence(self):
         """保存提取序列（按照example_data.json格式）"""

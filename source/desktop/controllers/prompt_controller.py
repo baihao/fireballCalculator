@@ -28,6 +28,7 @@ class PromptController:
         
         # UI 组件引用（在 setup_ui_components 中设置）
         self.prompt_btn = None
+        self.cancel_prompt_btn = None
         self.extract_status = None
         self.extract_preview = None
         self.positive_radio = None
@@ -51,6 +52,7 @@ class PromptController:
             ui_components: UI 组件字典
         """
         self.prompt_btn = ui_components.get('prompt_btn')
+        self.cancel_prompt_btn = ui_components.get('cancel_prompt_btn')
         self.extract_status = ui_components.get('extract_status')
         self.extract_preview = ui_components.get('extract_preview')
         self.positive_radio = ui_components.get('positive_radio')
@@ -68,6 +70,8 @@ class PromptController:
             # 连接按钮点击事件
             if self.prompt_btn:
                 self.prompt_btn.clicked.connect(self.toggle_prompt_selection)
+            if self.cancel_prompt_btn:
+                self.cancel_prompt_btn.clicked.connect(self._on_cancel_prompt_clicked)
             
             # 连接单选按钮状态变化
             if self.positive_radio:
@@ -274,6 +278,15 @@ class PromptController:
         print("🗑️ 已清空所有参考点数据")
         self._refresh_checkbar()
     
+    def _on_cancel_prompt_clicked(self):
+        """处理取消按钮点击事件"""
+        try:
+            self.cancel_current_image_points(self.current_image_index)
+            if self.extract_status:
+                self.extract_status.setText("已取消当前图像的参考点选择")
+        except Exception as e:
+            print(f"❌ 处理取消按钮点击失败: {e}")
+    
     def cancel_current_image_points(self, image_index: int):
         """
         取消指定图像上的所有点
@@ -425,3 +438,45 @@ class PromptController:
                 
         except Exception as e:
             print(f"❌ 自动保存参考点数据异常: {e}")
+    
+    def set_prompt_controls_enabled(self, enabled: bool):
+        """
+        启用或禁用所有 prompt 相关的控件
+        
+        Args:
+            enabled: True 表示启用，False 表示禁用
+        """
+        try:
+            # 按钮控件
+            if self.prompt_btn:
+                self.prompt_btn.setEnabled(enabled)
+            if self.cancel_prompt_btn:
+                self.cancel_prompt_btn.setEnabled(enabled)
+            
+            # 单选按钮控件
+            if self.positive_radio:
+                self.positive_radio.setEnabled(enabled)
+            if self.negative_radio:
+                self.negative_radio.setEnabled(enabled)
+            if self.ignition_radio:
+                self.ignition_radio.setEnabled(enabled)
+            
+            # 图像预览控件的交互（点击事件）
+            if self.extract_preview:
+                # 只有在启用时才允许交互，禁用时关闭交互
+                # 注意：这里不改变交互模式，只控制是否允许交互
+                if enabled:
+                    # 如果当前在选择模式，恢复交互
+                    if self.is_prompt_selection_mode:
+                        current_type = self.get_current_point_type()
+                        self.extract_preview.set_interaction_mode(current_type)
+                        self.extract_preview.set_interactive_enabled(True)
+                    else:
+                        # 不在选择模式，保持禁用状态
+                        self.extract_preview.set_interactive_enabled(False)
+                else:
+                    # 禁用交互
+                    self.extract_preview.set_interactive_enabled(False)
+                    
+        except Exception as e:
+            print(f"❌ 设置 prompt 控件启用状态失败: {e}")
