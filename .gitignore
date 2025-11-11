@@ -43,6 +43,11 @@ source/image_segment/contour_visualization/**
 !papers/**
 !document/
 !document/**
+!source/image_segment/example/
+!source/image_segment/example/**
+!source/diameter_process/example/
+!source/diameter_process/example/**
+
 
 # Processing logs and summaries
 source/image_segment/processing_log.txt

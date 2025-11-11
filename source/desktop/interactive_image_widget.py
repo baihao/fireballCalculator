@@ -295,100 +295,25 @@ class InteractiveImageWidget(QLabel):
     def _draw_points_on_image(self, image: np.ndarray):
         """在图像上绘制点标记"""
         try:
-            # 绘制正点（红色十字）
-            for x, y in self.positive_points:
-                self._draw_cross(image, x, y, (255, 0, 0), size=12, thickness=3)
-            
-            # 绘制负点（蓝色十字）
-            for x, y in self.negative_points:
-                self._draw_cross(image, x, y, (0, 0, 255), size=12, thickness=3)
-            
-            # 绘制起爆点（紫色十字）
-            if self.ignition_point is not None:
-                x, y = self.ignition_point
-                self._draw_cross(image, x, y, (128, 0, 128), size=15, thickness=4)  # 稍大一些突出显示
-                
+            from draw_utils import draw_prompt_points_on_image
+            draw_prompt_points_on_image(
+                image,
+                self.positive_points,
+                self.negative_points,
+                self.ignition_point,
+            )
         except Exception as e:
             print(f"❌ 绘制点标记失败: {e}")
     
-    def _draw_cross(self, image: np.ndarray, x: int, y: int, color: Tuple[int, int, int], 
-                   size: int = 12, thickness: int = 3):
-        """
-        在图像上绘制十字标记
-        
-        Args:
-            image: 图像数组
-            x, y: 十字中心坐标
-            color: RGB颜色
-            size: 十字大小
-            thickness: 线条粗细
-        """
-        try:
-            # 确保坐标在图像范围内
-            h, w = image.shape[:2]
-            if 0 <= x < w and 0 <= y < h:
-                # 绘制水平线
-                start_x = max(0, x - size // 2)
-                end_x = min(w - 1, x + size // 2)
-                cv2.line(image, (start_x, y), (end_x, y), color, thickness)
-                
-                # 绘制垂直线
-                start_y = max(0, y - size // 2)
-                end_y = min(h - 1, y + size // 2)
-                cv2.line(image, (x, start_y), (x, end_y), color, thickness)
-                
-        except Exception as e:
-            print(f"❌ 绘制十字失败: {e}")
     
     def _draw_segmentation_on_image(self, image: np.ndarray):
         """
-        在图像上绘制分割结果
-        
-        Args:
-            image: 图像数组
+        在图像上绘制分割结果（调用共享工具函数，就地绘制）
         """
         try:
-            if self.segmentation_result is None or not self.segmentation_result.get('success', False):
-                return
-            
-            # 1. 绘制蓝色轮廓
-            contours = self.segmentation_result.get('contours', [])
-            if contours:
-                for contour_points in contours:
-                    if len(contour_points) > 2:
-                        # 转换为numpy数组格式
-                        contour_array = np.array(contour_points, dtype=np.int32).reshape((-1, 1, 2))
-                        # 绘制蓝色轮廓，线宽3
-                        cv2.drawContours(image, [contour_array], -1, (0, 0, 255), 3)  # RGB格式，蓝色
-            
-            # 2. 绘制绿色质心到最大半径的箭头
-            centroid_data = self.segmentation_result.get('centroid', {})
-            max_radius_data = self.segmentation_result.get('max_radius', {})
-            
-            if centroid_data and max_radius_data:
-                # 获取质心坐标
-                cx = int(centroid_data.get('x', 0))
-                cy = int(centroid_data.get('y', 0))
-                
-                # 获取最大半径端点坐标
-                endpoint_data = max_radius_data.get('endpoint', {})
-                ex = int(endpoint_data.get('x', 0))
-                ey = int(endpoint_data.get('y', 0))
-                
-                # 确保坐标在图像范围内
-                h, w = image.shape[:2]
-                if (0 <= cx < w and 0 <= cy < h and 
-                    0 <= ex < w and 0 <= ey < h):
-                    
-                    # 绘制绿色箭头，从质心指向最大半径端点
-                    cv2.arrowedLine(image, (cx, cy), (ex, ey), (0, 255, 0), 3, tipLength=0.1)  # RGB格式，绿色
-                    
-                    # 在质心绘制紫色圆点
-                    cv2.circle(image, (cx, cy), 5, (128, 0, 128), -1)  # 填充的紫色圆点
-                    
-                    # 在最大半径端点绘制小圆圈
-                    cv2.circle(image, (ex, ey), 3, (0, 255, 0), 2)  # 绿色圆圈
-                    
+            from draw_utils import draw_segmentation_on_image
+            # 就地绘制到传入的 image 上
+            draw_segmentation_on_image(image, self.segmentation_result, inplace=True)
         except Exception as e:
             print(f"❌ 绘制分割结果失败: {e}")
     

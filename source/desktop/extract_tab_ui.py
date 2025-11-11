@@ -6,14 +6,16 @@
 """
 
 import os
+from typing import Any, Dict
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
-                               QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
+                               QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea, QCheckBox)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
 from checkbar import create_checkbar
 from temperature_chart import TemperatureChart
 from diameter_chart import DiameterChart
+from diameter_velocity_chart import DiameterVelocityChart
 from interactive_image_widget import create_interactive_image_widget
 
 
@@ -73,7 +75,7 @@ class ExtractTabUI:
         self.ui_components['point_type_group'].addButton(self.ui_components['negative_radio'])
         self.ui_components['point_type_group'].addButton(self.ui_components['ignition_radio'])
         
-        self.ui_components['cancel_extract_btn'] = QPushButton("清除当前图片上参考点")
+        self.ui_components['cancel_prompt_btn'] = QPushButton("清除当前图片上参考点")
         
         # Prompt信息显示
         self.ui_components['prompt_info_text'] = QTextEdit()
@@ -100,6 +102,12 @@ class ExtractTabUI:
         self.ui_components['reextract_btn'] = QPushButton("重新提取")
         self.ui_components['reextract_btn'].setStyleSheet("QPushButton { background-color: #f59e0b; color: white; }")
         self.ui_components['reextract_btn'].setVisible(False)  # 初始隐藏
+        
+        # 保存相关组件
+        self.ui_components['export_segmentation_checkbox'] = QCheckBox("同时导出分割图片")
+        self.ui_components['export_segmentation_checkbox'].setChecked(False)
+        self.ui_components['save_button'] = QPushButton("保存结果序列")
+        self.ui_components['save_button'].setEnabled(False)
     
     def _create_left_panel(self) -> QWidget:
         """创建左侧图像预览面板"""
@@ -259,7 +267,9 @@ class ExtractTabUI:
         right_widget = QWidget()
         right_layout = QVBoxLayout()
         right_layout.setAlignment(Qt.AlignTop)
-        right_layout.setSpacing(10)
+        # 收紧右侧整体留白
+        right_layout.setSpacing(6)
+        right_layout.setContentsMargins(6, 6, 6, 6)
         
         # 温度图表组
         temp_group = self._create_temperature_chart_group()
@@ -269,9 +279,14 @@ class ExtractTabUI:
         diam_group = self._create_diameter_chart_group()
         right_layout.addWidget(diam_group)
         
-        # 控制按钮
-        button_layout = self._create_control_buttons()
-        right_layout.addLayout(button_layout)
+        # 直径变化速率图表组（显示在直径图表下方）
+        diam_vel_group = self._create_diameter_velocity_chart_group()
+        right_layout.addWidget(diam_vel_group)
+        
+        # 使用stretch factor让三个图表等分空间
+        right_layout.setStretchFactor(temp_group, 1)
+        right_layout.setStretchFactor(diam_group, 1)
+        right_layout.setStretchFactor(diam_vel_group, 1)
         
         right_widget.setLayout(right_layout)
         return right_widget
@@ -283,8 +298,12 @@ class ExtractTabUI:
         
         temp_layout = QVBoxLayout()
         temp_layout.setAlignment(Qt.AlignTop)
+        # 收紧组内边距
+        temp_layout.setContentsMargins(6, 4, 6, 6)
+        temp_layout.setSpacing(4)
         
-        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=2.5)
+        # 使用较大的高度，通过stretch factor等分空间
+        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=3.0)
         temp_layout.addWidget(self.ui_components['temp_chart'])
         
         temp_group.setLayout(temp_layout)
@@ -297,26 +316,33 @@ class ExtractTabUI:
         
         diam_layout = QVBoxLayout()
         diam_layout.setAlignment(Qt.AlignTop)
+        # 收紧组内边距
+        diam_layout.setContentsMargins(6, 4, 6, 6)
+        diam_layout.setSpacing(4)
         
-        self.ui_components['diam_chart'] = DiameterChart(width=4, height=2.5)
+        self.ui_components['diam_chart'] = DiameterChart(width=4, height=3.0)
         diam_layout.addWidget(self.ui_components['diam_chart'])
         
         diam_group.setLayout(diam_layout)
         return diam_group
     
-    def _create_control_buttons(self) -> QHBoxLayout:
-        """创建控制按钮"""
-        button_layout = QHBoxLayout()
-        button_layout.setAlignment(Qt.AlignTop)
+    def _create_diameter_velocity_chart_group(self) -> QGroupBox:
+        """创建直径变化速率图表组"""
+        diam_vel_group = QGroupBox("火球直径变化速率随时间变化")
+        diam_vel_group.setStyleSheet(self._get_chart_group_style())
         
-        self.ui_components['save_button'] = QPushButton("保存提取序列")
-        self.ui_components['save_button'].setEnabled(False)
-        button_layout.addWidget(self.ui_components['save_button'])
+        diam_vel_layout = QVBoxLayout()
+        diam_vel_layout.setAlignment(Qt.AlignTop)
+        # 收紧组内边距
+        diam_vel_layout.setContentsMargins(6, 4, 6, 6)
+        diam_vel_layout.setSpacing(4)
         
-        button_layout.addStretch()
-        button_layout.addWidget(QLabel("有参考点后可保存"))
+        self.ui_components['diam_vel_chart'] = DiameterVelocityChart(width=4, height=3.0)
+        diam_vel_layout.addWidget(self.ui_components['diam_vel_chart'])
         
-        return button_layout
+        diam_vel_group.setLayout(diam_vel_layout)
+        return diam_vel_group
+    
     
     def create_sidebar_widget(self) -> QGroupBox:
         """创建侧边栏组件"""
@@ -343,6 +369,10 @@ class ExtractTabUI:
         extract_layout.addWidget(self.ui_components['extract_btn'])
         extract_layout.addWidget(self.ui_components['reextract_btn'])
         layout.addLayout(extract_layout)
+        
+        # 导出分割结果组
+        export_group = self._create_export_group()
+        layout.addWidget(export_group)
         
         # 添加弹性空间
         layout.addStretch()
@@ -388,7 +418,7 @@ class ExtractTabUI:
         prompt_layout.addLayout(point_type_layout)
         
         # 清除按钮
-        prompt_layout.addWidget(self.ui_components['cancel_extract_btn'])
+        prompt_layout.addWidget(self.ui_components['cancel_prompt_btn'])
         
         # 参考点信息显示区域
         prompt_layout.addWidget(QLabel("已选择的参考点信息"))
@@ -397,20 +427,53 @@ class ExtractTabUI:
         prompt_group.setLayout(prompt_layout)
         return prompt_group
     
+    def _create_export_group(self) -> QGroupBox:
+        """创建导出分割结果组"""
+        export_group = QGroupBox("导出分割结果")
+        export_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: #1f2937;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #60a5fa;
+            }
+        """)
+        
+        export_layout = QVBoxLayout()
+        export_layout.setAlignment(Qt.AlignTop)
+        export_layout.setSpacing(8)
+        
+        # 同时导出分割图片复选框
+        export_layout.addWidget(self.ui_components['export_segmentation_checkbox'])
+        
+        # 保存结果序列按钮
+        export_layout.addWidget(self.ui_components['save_button'])
+        
+        export_group.setLayout(export_layout)
+        return export_group
+    
     def _get_chart_group_style(self) -> str:
         """获取图表组样式"""
         return """
             QGroupBox {
                 font-weight: bold;
                 border: 1px solid #1f2937;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 10px;
+                border-radius: 6px;
+                margin-top: 6px;
+                padding-top: 6px;
                 background-color: #111827;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
+                left: 8px;
                 padding: 0 5px 0 5px;
                 color: #38bdf8;
             }
@@ -433,6 +496,14 @@ class ExtractTabUI:
             
         except Exception as e:
             print(f"初始化直径图表失败: {e}")
+    
+    def init_diameter_velocity_chart(self):
+        """初始化直径变化速率图表"""
+        try:
+            diam_vel_chart: DiameterVelocityChart = self.ui_components['diam_vel_chart']
+            diam_vel_chart.reset()
+        except Exception as e:
+            print(f"初始化直径变化速率图表失败: {e}")
     
     def get_ui_components(self) -> dict:
         """

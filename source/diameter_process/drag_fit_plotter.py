@@ -109,9 +109,7 @@ class DragFitPlotter:
             
             # 添加参数信息
             param_text = f'K = {K:.3f} m\nB = {B:.3f}\nC = {C_display:.3e} {C_unit}'
-            quality_text = f'R² = {fit_result.get("r_squared", 0):.4f}\nRMSE = {fit_result.get("rmse", 0):.4f} m'
-            if 'weighted_rmse' in fit_result:
-                quality_text += f'\n加权RMSE = {fit_result["weighted_rmse"]:.4f} m'
+            quality_text = f'R² = {fit_result.get("r_squared", 0):.4f}\nRMSE = {fit_result.get("rmse", 0):.4f} m\nMAE = {fit_result.get("mae", 0):.4f} m'
             
             # 添加数据过滤信息
             filtering_text = ""

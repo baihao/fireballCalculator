@@ -8,7 +8,41 @@
 """
 
 from typing import Optional, Tuple, Iterable
+import matplotlib
 from framework import MatplotlibWidget
+
+# 设置全局字体配置，确保中文正确显示
+# 优先使用系统支持中文的字体
+matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'Microsoft YaHei', 'DejaVu Sans', 'sans-serif']
+matplotlib.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+
+# 字体大小常量
+FONT_SIZE_BODY = 6.5  # 正文字体大小（用于轴标签、刻度标签、占位文本等）
+FONT_SIZE_TITLE = 7   # 标题字体大小
+
+# 字体族常量
+FONT_FAMILY = 'sans-serif'  # 字体族
+
+# 颜色常量
+COLOR_BACKGROUND = '#111827'      # 背景色
+COLOR_BORDER = '#374151'           # 边框/网格颜色
+COLOR_TEXT = 'white'               # 正文文本颜色
+COLOR_TITLE = '#38bdf8'            # 标题颜色
+COLOR_PLACEHOLDER = '#9ca3af'      # 占位文本颜色
+COLOR_PLACEHOLDER_BG = '#1f2937'   # 占位文本背景色
+
+# 透明度常量
+ALPHA_GRID = 0.3                   # 网格透明度
+ALPHA_PLACEHOLDER_BG = 0.8         # 占位文本背景透明度
+
+# 布局常量
+LAYOUT_PAD = 0.8                   # 仅兜底使用；默认采用 constrained_layout
+SUBPLOT_LEFT = 0.12
+SUBPLOT_RIGHT = 0.98
+SUBPLOT_TOP = 0.88
+SUBPLOT_BOTTOM = 0.18
+PLACEHOLDER_BBOX_PAD = 0.3         # 占位文本边框内边距
+PLACEHOLDER_BBOX_STYLE = 'round'    # 占位文本边框样式
 
 
 def apply_dark_chart_style(ax, x_label: str, y_label: str, title: str,
@@ -31,18 +65,18 @@ def apply_dark_chart_style(ax, x_label: str, y_label: str, title: str,
     """
     # 画布与坐标轴底色
     fig = ax.figure
-    fig.patch.set_facecolor('#111827')
-    ax.set_facecolor('#111827')
+    fig.patch.set_facecolor(COLOR_BACKGROUND)
+    ax.set_facecolor(COLOR_BACKGROUND)
 
-    # 坐标轴与刻度样式
-    ax.tick_params(colors='#9ca3af', labelsize=9)
+    # 坐标轴与刻度样式（使用常量）
+    ax.tick_params(colors=COLOR_TEXT, labelsize=FONT_SIZE_BODY)
     for spine in ['bottom', 'top', 'left', 'right']:
-        ax.spines[spine].set_color('#374151')
+        ax.spines[spine].set_color(COLOR_BORDER)
 
-    # 轴标签与标题
-    ax.set_xlabel(x_label, color='#e5e7eb', fontsize=10)
-    ax.set_ylabel(y_label, color='#e5e7eb', fontsize=10)
-    ax.set_title(title, color='#38bdf8', fontsize=11, fontweight='bold')
+    # 轴标签与标题（使用常量）
+    ax.set_xlabel(x_label, color=COLOR_TEXT, fontsize=FONT_SIZE_BODY, fontfamily=FONT_FAMILY)
+    ax.set_ylabel(y_label, color=COLOR_TEXT, fontsize=FONT_SIZE_BODY, fontfamily=FONT_FAMILY)
+    ax.set_title(title, color=COLOR_TITLE, fontsize=FONT_SIZE_TITLE, fontweight='bold', fontfamily=FONT_FAMILY)
 
     # 轴范围
     if xlim is not None:
@@ -50,15 +84,16 @@ def apply_dark_chart_style(ax, x_label: str, y_label: str, title: str,
     if ylim is not None:
         ax.set_ylim(*ylim)
 
-    # 网格
-    ax.grid(True, alpha=0.3, color='#374151')
+    # 网格（使用常量）
+    ax.grid(True, alpha=ALPHA_GRID, color=COLOR_BORDER)
 
-    # 占位文本
+    # 占位文本（使用常量）
     if placeholder_text and placeholder_xy:
         ax.text(placeholder_xy[0], placeholder_xy[1], placeholder_text,
                 ha='center', va='center',
-                color='#9ca3af', fontsize=10,
-                bbox=dict(boxstyle="round,pad=0.3", facecolor='#1f2937', alpha=0.8))
+                color=COLOR_PLACEHOLDER, fontsize=FONT_SIZE_BODY, fontfamily=FONT_FAMILY,
+                bbox=dict(boxstyle=f"{PLACEHOLDER_BBOX_STYLE},pad={PLACEHOLDER_BBOX_PAD}",
+                         facecolor=COLOR_PLACEHOLDER_BG, alpha=ALPHA_PLACEHOLDER_BG))
 
 
 class BaseChart(MatplotlibWidget):
@@ -87,6 +122,11 @@ class BaseChart(MatplotlibWidget):
 
     def reset(self) -> None:
         self.clear()
+        # 采用 constrained_layout，确保标题/坐标轴/图例不被裁切
+        try:
+            self.figure.set_constrained_layout(True)
+        except Exception:
+            pass
         ax = self.figure.add_subplot(111)
         apply_dark_chart_style(
             ax,
@@ -98,7 +138,9 @@ class BaseChart(MatplotlibWidget):
             placeholder_text=self._placeholder_text,
             placeholder_xy=self._placeholder_xy,
         )
-        self.figure.tight_layout(pad=1.0)
+        # 如遇个别环境仍有裁切，可启用下面的兜底边距
+        # self.figure.subplots_adjust(left=SUBPLOT_LEFT, right=SUBPLOT_RIGHT,
+        #                             top=SUBPLOT_TOP, bottom=SUBPLOT_BOTTOM)
         self.canvas.draw()
 
     # 子类实现
