@@ -8,22 +8,27 @@
 from typing import Dict, List, Set, Tuple, Optional, Any
 from PySide6.QtWidgets import QMessageBox
 from info_builder import build_prompt_info_text
+from extract_tab_ui import ExtractTabUI
+from sequence_model import SequenceModel
 
 
 class PromptController:
     """参考点选择控制器"""
     
-    def __init__(self, parent_tab):
+    def __init__(self, parent_tab, ui_builder: ExtractTabUI, sequence_model: SequenceModel):
         """
         初始化控制器
         
         Args:
             parent_tab: 父标签页实例，用于访问序列管理器等共享资源
+            ui_builder: UI 构建器，用于获取控件引用
         """
         self.parent = parent_tab
+        self.sequence_model = sequence_model
         
         # UI 组件引用（在 setup_ui_components 中设置）
         self.prompt_btn = None
+        self.cancel_prompt_btn = None
         self.extract_status = None
         self.extract_preview = None
         self.positive_radio = None
@@ -34,18 +39,12 @@ class PromptController:
         
         # 参考点选择相关属性
         self.is_prompt_selection_mode = False
-        self.prompt_data: Dict[int, Dict[str, List]] = {}
-        self.current_prompt_points: List = []
-        self.ignition_point: Optional[Tuple[int, int]] = None
-        
-        # 当前图像索引（由控制器自己维护）
         self.current_image_index: int = 0
-        
-        # CheckBar 分组与标注跟踪
-        self.group_count = 1
-        self.annotated_indices: Set[int] = set()
+
+        # 初始化 UI 组件引用
+        self._setup_ui_components(ui_builder.get_ui_components())
     
-    def setup_ui_components(self, ui_components: Dict[str, Any]):
+    def _setup_ui_components(self, ui_components: Dict[str, Any]):
         """
         设置 UI 组件引用并连接信号
         
@@ -53,6 +52,7 @@ class PromptController:
             ui_components: UI 组件字典
         """
         self.prompt_btn = ui_components.get('prompt_btn')
+        self.cancel_prompt_btn = ui_components.get('cancel_prompt_btn')
         self.extract_status = ui_components.get('extract_status')
         self.extract_preview = ui_components.get('extract_preview')
         self.positive_radio = ui_components.get('positive_radio')
@@ -70,6 +70,8 @@ class PromptController:
             # 连接按钮点击事件
             if self.prompt_btn:
                 self.prompt_btn.clicked.connect(self.toggle_prompt_selection)
+            if self.cancel_prompt_btn:
+                self.cancel_prompt_btn.clicked.connect(self._on_cancel_prompt_clicked)
             
             # 连接单选按钮状态变化
             if self.positive_radio:
@@ -109,20 +111,29 @@ class PromptController:
         """
         self.current_image_index = index
     
-    def set_group_count(self, group_count: int):
-        """设置分组数量"""
-        self.group_count = group_count
-    
-    def reset_state(self):
-        """重置控制器状态"""
-        self.is_prompt_selection_mode = False
-        self.prompt_data = {}
-        self.current_prompt_points = []
-        self.ignition_point = None
+    def reset(self):
+        """重置控制器数据与交互状态。"""
+        self.sequence_model.clear_prompt_data()
+        self.sequence_model.set_ignition_point(None)
         self.current_image_index = 0
-        self.annotated_indices = set()
-        self.group_count = 1
-    
+        self.reset_interaction_state()
+        self._refresh_checkbar()
+        self.update_prompt_info_display()
+        try:
+            if self.extract_preview:
+                self.extract_preview.clear_points()
+        except Exception:
+            pass
+
+    def reset_interaction_state(self):
+        """仅重置交互模式和相关 UI。"""
+        self.is_prompt_selection_mode = False
+        if self.prompt_btn:
+            self.prompt_btn.setText("开始选择参考点")
+        if self.extract_preview:
+            self.extract_preview.set_interaction_mode('none')
+            self.extract_preview.set_interactive_enabled(False)
+
     def load_prompt_data(self, prompt_data: Dict[int, Dict[str, List]]):
         """
         加载已存在的参考点数据
@@ -130,31 +141,29 @@ class PromptController:
         Args:
             prompt_data: 参考点数据字典
         """
-        self.prompt_data = prompt_data or {}
-        
-        # 从已存在的 prompt_data 还原已标注索引集合
-        try:
-            self.annotated_indices = {
-                idx for idx, d in self.prompt_data.items()
-                if isinstance(d, dict) and len(d.get("points", [])) > 0
-            }
-        except Exception:
-            self.annotated_indices = set()
-        
+        self.sequence_model.set_prompt_data(prompt_data or {})
         self._refresh_checkbar()
         self.update_prompt_info_display()
+        self.load_points_for_current_image(self.current_image_index)
+
+    def sync_from_model(self):
+        """当模型数据更新后，刷新 UI 展示。"""
+        self.reset_interaction_state()
+        self._refresh_checkbar()
+        self.update_prompt_info_display()
+        self.load_points_for_current_image(self.current_image_index)
     
     def get_prompt_data(self) -> Dict[int, Dict[str, List]]:
         """获取参考点数据"""
-        return self.prompt_data
+        return self.sequence_model.get_prompt_data()
     
     def get_ignition_point(self) -> Optional[Tuple[int, int]]:
         """获取起爆点"""
-        return self.ignition_point
+        return self.sequence_model.get_ignition_point()
     
     def get_annotated_indices(self) -> Set[int]:
         """获取已标注的图片索引集合"""
-        return self.annotated_indices.copy()
+        return self.sequence_model.get_annotated_indices()
     
     def toggle_prompt_selection(self):
         """切换参考点选择模式"""
@@ -173,8 +182,7 @@ class PromptController:
                 print(f"🎯 开始参考点选择模式: {current_type}")
             else:
                 # 完成选择参考点
-                self.is_prompt_selection_mode = False
-                self.prompt_btn.setText("开始选择参考点")
+                self.reset_interaction_state()
                 # 交由独立函数处理校验与后续动作
                 if not self._finalize_prompt_selection():
                     return
@@ -241,27 +249,11 @@ class PromptController:
             is_positive: 是否为正点
         """
         try:
-            # 确保数据结构存在
-            if image_index not in self.prompt_data:
-                self.prompt_data[image_index] = {
-                    "points": [],
-                    "labels": []
-                }
-            
-            # 添加点坐标和标签
-            self.prompt_data[image_index]["points"].append([x, y])
-            self.prompt_data[image_index]["labels"].append(1 if is_positive else 0)
-            
+            self.sequence_model.add_prompt_point(image_index, (x, y), is_positive)
             print(f"添加参考点: 图像{image_index}, 坐标({x}, {y}), 类型: {'正点' if is_positive else '负点'}")
             
             # 更新显示
             self.update_prompt_info_display()
-
-            # 标记该图片索引为已标注，并刷新 CheckBar
-            try:
-                self.annotated_indices.add(image_index)
-            except Exception:
-                pass
             self._refresh_checkbar()
             
         except Exception as e:
@@ -274,22 +266,26 @@ class PromptController:
         Args:
             x, y: 起爆点坐标
         """
-        self.ignition_point = (x, y)
+        self.sequence_model.set_ignition_point((x, y))
         print(f"设置起爆点: 坐标({x}, {y})")
         self.update_prompt_info_display()
     
     def clear_prompt_data(self):
         """清空所有prompt数据"""
-        self.prompt_data = {}
-        self.ignition_point = None
+        self.sequence_model.clear_prompt_data()
+        self.sequence_model.set_ignition_point(None)
         self.update_prompt_info_display()
         print("🗑️ 已清空所有参考点数据")
-        # 清空标注并刷新 CheckBar
-        try:
-            self.annotated_indices.clear()
-        except Exception:
-            pass
         self._refresh_checkbar()
+    
+    def _on_cancel_prompt_clicked(self):
+        """处理取消按钮点击事件"""
+        try:
+            self.cancel_current_image_points(self.current_image_index)
+            if self.extract_status:
+                self.extract_status.setText("已取消当前图像的参考点选择")
+        except Exception as e:
+            print(f"❌ 处理取消按钮点击失败: {e}")
     
     def cancel_current_image_points(self, image_index: int):
         """
@@ -299,23 +295,12 @@ class PromptController:
             image_index: 图像索引
         """
         try:
-            if image_index in self.prompt_data:
-                # 移除数据结构中的点
-                del self.prompt_data[image_index]
-                
-                # 更新信息显示
-                self.update_prompt_info_display()
-                
-                print(f"🗑️ 已取消图像{image_index}上的所有参考点")
-
-                # 若该图片无点后，从已标注集合移除，并刷新 CheckBar
-                try:
-                    if image_index in self.annotated_indices:
-                        self.annotated_indices.remove(image_index)
-                except Exception:
-                    pass
-                self._refresh_checkbar()
-                
+            self.sequence_model.remove_prompt_points(image_index)
+            self.update_prompt_info_display()
+            print(f"🗑️ 已取消图像{image_index}上的所有参考点")
+            self._refresh_checkbar()
+            # 刷新当前图像的显示（清除图像控件上的点标记）
+            self.load_points_for_current_image(image_index)
         except Exception as e:
             print(f"❌ 取消当前图像点失败: {e}")
     
@@ -330,21 +315,27 @@ class PromptController:
             positive_points = []
             negative_points = []
             
-            if image_index in self.prompt_data:
-                points = self.prompt_data[image_index]["points"]
-                labels = self.prompt_data[image_index]["labels"]
+            prompt_entry = self.sequence_model.get_prompt_points(image_index)
                 
-                # 分离正负点
-                for point, label in zip(points, labels):
-                    if label == 1:
-                        positive_points.append(tuple(point))
-                    else:
-                        negative_points.append(tuple(point))
+            points = prompt_entry.get("points", [])
+            labels = prompt_entry.get("labels", [])
+            for point, label in zip(points, labels):
+                if label == 1:
+                    positive_points.append(tuple(point))
+                else:
+                    negative_points.append(tuple(point))
             
             # 设置到图像控件（包括起爆点）
-            self.extract_preview.set_points(positive_points, negative_points, self.ignition_point)
+            self.extract_preview.set_points(
+                positive_points,
+                negative_points,
+                self.sequence_model.get_ignition_point(),
+            )
             
-            print(f"为图像{image_index}加载了{len(positive_points)}个正点, {len(negative_points)}个负点, 起爆点: {self.ignition_point}")
+            print(
+                f"为图像{image_index}加载了{len(positive_points)}个正点, "
+                f"{len(negative_points)}个负点, 起爆点: {self.sequence_model.get_ignition_point()}"
+            )
                 
         except Exception as e:
             print(f"❌ 加载当前图像点失败: {e}")
@@ -392,7 +383,10 @@ class PromptController:
     def update_prompt_info_display(self):
         """更新参考点信息显示"""
         try:
-            text = build_prompt_info_text(self.prompt_data, self.ignition_point)
+            text = build_prompt_info_text(
+                self.sequence_model.get_prompt_data(),
+                self.sequence_model.get_ignition_point(),
+            )
             self.prompt_info_text.setPlainText(text)
         except Exception as e:
             print(f"❌ 更新参考点信息显示失败: {e}")
@@ -412,9 +406,9 @@ class PromptController:
         try:
             if self.check_bar is not None:
                 self.check_bar.update(
-                    length=len(self.parent.image_paths),
-                    group_count=self.group_count,
-                    annotated_indices=sorted(self.annotated_indices)
+                    length=len(self.sequence_model.image_paths),
+                    group_count=self.sequence_model.group_count,
+                    annotated_indices=sorted(self.sequence_model.get_annotated_indices())
                 )
         except Exception:
             pass
@@ -423,49 +417,66 @@ class PromptController:
         """自动保存prompt数据和起爆点到当前序列文件"""
         try:
             # 检查是否有序列数据
-            if not hasattr(self.parent, 'sequence_data') or not self.parent.sequence_data:
+            if not self.sequence_model.sequence_data:
                 print("没有序列数据，无法自动保存prompt数据")
                 return
             
             # 检查是否有数据需要保存
-            if not self.prompt_data and not self.ignition_point:
+            if (not self.sequence_model.get_prompt_data()
+                    and self.sequence_model.get_ignition_point() is None):
                 print("没有prompt数据或起爆点，无需保存")
                 return
             
-            # 检查是否有原始文件路径（从序列加载时保存）
-            if not hasattr(self.parent, '_current_sequence_file_path'):
-                print("没有当前序列文件路径，无法自动保存")
-                return
-            
-            # 使用序列管理器保存prompt数据和起爆点
-            success, message = self.parent.sequence_manager.save_prompt_and_ignition_data_to_sequence(
-                self.parent._current_sequence_file_path, self.prompt_data, self.ignition_point
-            )
+            success, message = self.sequence_model.save_prompt_artifacts()
             
             if success:
                 print(f"✅ 自动保存prompt数据和起爆点成功: {message}")
                 self.extract_status.setText("参考点数据已自动保存")
-                # 同步更新内存中的 sequence_data，避免后续再次读取文件
-                try:
-                    if isinstance(self.parent.sequence_data, dict):
-                        # 确保 image_sequence 节点存在
-                        if 'image_sequence' not in self.parent.sequence_data or not isinstance(self.parent.sequence_data['image_sequence'], dict):
-                            self.parent.sequence_data['image_sequence'] = {}
-                        image_seq = self.parent.sequence_data['image_sequence']
-                        # 写入 prompt_data（键使用字符串以保持与文件一致）
-                        image_seq['prompt_data'] = {str(k): v for k, v in self.prompt_data.items()}
-                        # 写入起爆点
-                        if self.ignition_point is not None:
-                            image_seq['target_center'] = list(self.ignition_point)
-                        else:
-                            # 若起爆点被清除
-                            if 'target_center' in image_seq:
-                                del image_seq['target_center']
-                except Exception as _:
-                    pass
             else:
                 print(f"❌ 自动保存参考点数据失败: {message}")
                 self.extract_status.setText("参考点数据保存失败")
                 
         except Exception as e:
             print(f"❌ 自动保存参考点数据异常: {e}")
+    
+    def set_prompt_controls_enabled(self, enabled: bool):
+        """
+        启用或禁用所有 prompt 相关的控件
+        
+        Args:
+            enabled: True 表示启用，False 表示禁用
+        """
+        try:
+            # 按钮控件
+            if self.prompt_btn:
+                self.prompt_btn.setEnabled(enabled)
+            if self.cancel_prompt_btn:
+                self.cancel_prompt_btn.setEnabled(enabled)
+            
+            # 单选按钮控件
+            if self.positive_radio:
+                self.positive_radio.setEnabled(enabled)
+            if self.negative_radio:
+                self.negative_radio.setEnabled(enabled)
+            if self.ignition_radio:
+                self.ignition_radio.setEnabled(enabled)
+            
+            # 图像预览控件的交互（点击事件）
+            if self.extract_preview:
+                # 只有在启用时才允许交互，禁用时关闭交互
+                # 注意：这里不改变交互模式，只控制是否允许交互
+                if enabled:
+                    # 如果当前在选择模式，恢复交互
+                    if self.is_prompt_selection_mode:
+                        current_type = self.get_current_point_type()
+                        self.extract_preview.set_interaction_mode(current_type)
+                        self.extract_preview.set_interactive_enabled(True)
+                    else:
+                        # 不在选择模式，保持禁用状态
+                        self.extract_preview.set_interactive_enabled(False)
+                else:
+                    # 禁用交互
+                    self.extract_preview.set_interactive_enabled(False)
+                    
+        except Exception as e:
+            print(f"❌ 设置 prompt 控件启用状态失败: {e}")

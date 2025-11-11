@@ -6,6 +6,7 @@
 """
 
 import os
+from typing import Any, Dict
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
@@ -14,6 +15,7 @@ from framework import MatplotlibWidget, ImagePreviewWidget
 from checkbar import create_checkbar
 from temperature_chart import TemperatureChart
 from diameter_chart import DiameterChart
+from diameter_velocity_chart import DiameterVelocityChart
 from interactive_image_widget import create_interactive_image_widget
 
 
@@ -73,7 +75,7 @@ class ExtractTabUI:
         self.ui_components['point_type_group'].addButton(self.ui_components['negative_radio'])
         self.ui_components['point_type_group'].addButton(self.ui_components['ignition_radio'])
         
-        self.ui_components['cancel_extract_btn'] = QPushButton("清除当前图片上参考点")
+        self.ui_components['cancel_prompt_btn'] = QPushButton("清除当前图片上参考点")
         
         # Prompt信息显示
         self.ui_components['prompt_info_text'] = QTextEdit()
@@ -259,7 +261,9 @@ class ExtractTabUI:
         right_widget = QWidget()
         right_layout = QVBoxLayout()
         right_layout.setAlignment(Qt.AlignTop)
-        right_layout.setSpacing(10)
+        # 收紧右侧整体留白
+        right_layout.setSpacing(6)
+        right_layout.setContentsMargins(6, 6, 6, 6)
         
         # 温度图表组
         temp_group = self._create_temperature_chart_group()
@@ -268,6 +272,10 @@ class ExtractTabUI:
         # 直径图表组
         diam_group = self._create_diameter_chart_group()
         right_layout.addWidget(diam_group)
+        
+        # 直径变化速率图表组（显示在直径图表下方）
+        diam_vel_group = self._create_diameter_velocity_chart_group()
+        right_layout.addWidget(diam_vel_group)
         
         # 控制按钮
         button_layout = self._create_control_buttons()
@@ -283,8 +291,11 @@ class ExtractTabUI:
         
         temp_layout = QVBoxLayout()
         temp_layout.setAlignment(Qt.AlignTop)
+        # 收紧组内边距
+        temp_layout.setContentsMargins(6, 4, 6, 6)
+        temp_layout.setSpacing(4)
         
-        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=2.5)
+        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=1.8)
         temp_layout.addWidget(self.ui_components['temp_chart'])
         
         temp_group.setLayout(temp_layout)
@@ -297,12 +308,32 @@ class ExtractTabUI:
         
         diam_layout = QVBoxLayout()
         diam_layout.setAlignment(Qt.AlignTop)
+        # 收紧组内边距
+        diam_layout.setContentsMargins(6, 4, 6, 6)
+        diam_layout.setSpacing(4)
         
-        self.ui_components['diam_chart'] = DiameterChart(width=4, height=2.5)
+        self.ui_components['diam_chart'] = DiameterChart(width=4, height=3.0)
         diam_layout.addWidget(self.ui_components['diam_chart'])
         
         diam_group.setLayout(diam_layout)
         return diam_group
+    
+    def _create_diameter_velocity_chart_group(self) -> QGroupBox:
+        """创建直径变化速率图表组"""
+        diam_vel_group = QGroupBox("火球直径变化速率随时间变化")
+        diam_vel_group.setStyleSheet(self._get_chart_group_style())
+        
+        diam_vel_layout = QVBoxLayout()
+        diam_vel_layout.setAlignment(Qt.AlignTop)
+        # 收紧组内边距
+        diam_vel_layout.setContentsMargins(6, 4, 6, 6)
+        diam_vel_layout.setSpacing(4)
+        
+        self.ui_components['diam_vel_chart'] = DiameterVelocityChart(width=4, height=3.0)
+        diam_vel_layout.addWidget(self.ui_components['diam_vel_chart'])
+        
+        diam_vel_group.setLayout(diam_vel_layout)
+        return diam_vel_group
     
     def _create_control_buttons(self) -> QHBoxLayout:
         """创建控制按钮"""
@@ -388,7 +419,7 @@ class ExtractTabUI:
         prompt_layout.addLayout(point_type_layout)
         
         # 清除按钮
-        prompt_layout.addWidget(self.ui_components['cancel_extract_btn'])
+        prompt_layout.addWidget(self.ui_components['cancel_prompt_btn'])
         
         # 参考点信息显示区域
         prompt_layout.addWidget(QLabel("已选择的参考点信息"))
@@ -403,14 +434,14 @@ class ExtractTabUI:
             QGroupBox {
                 font-weight: bold;
                 border: 1px solid #1f2937;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 10px;
+                border-radius: 6px;
+                margin-top: 6px;
+                padding-top: 6px;
                 background-color: #111827;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
+                left: 8px;
                 padding: 0 5px 0 5px;
                 color: #38bdf8;
             }
@@ -433,6 +464,14 @@ class ExtractTabUI:
             
         except Exception as e:
             print(f"初始化直径图表失败: {e}")
+    
+    def init_diameter_velocity_chart(self):
+        """初始化直径变化速率图表"""
+        try:
+            diam_vel_chart: DiameterVelocityChart = self.ui_components['diam_vel_chart']
+            diam_vel_chart.reset()
+        except Exception as e:
+            print(f"初始化直径变化速率图表失败: {e}")
     
     def get_ui_components(self) -> dict:
         """
