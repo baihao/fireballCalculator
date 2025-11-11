@@ -37,7 +37,7 @@ class MatplotlibWidget(QWidget):
     
     def __init__(self, parent=None, width=5, height=4, dpi=100):
         super().__init__(parent)
-        self.figure = Figure(figsize=(width, height), dpi=dpi)
+        self.figure = Figure(figsize=(width, height), dpi=dpi, constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         
         layout = QVBoxLayout()

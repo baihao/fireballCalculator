@@ -6,7 +6,7 @@
 基于 BaseChart，提供温度曲线的渲染与数据更新接口。
 """
 
-from base_chart import BaseChart, LAYOUT_PAD
+from base_chart import BaseChart
 import numpy as np
 
 # 线条样式常量
@@ -93,7 +93,7 @@ class TemperatureChart(BaseChart):
         # 绘制温度曲线
         if time_ms and temperature_k:
             ax.plot(time_ms, temperature_k, color=self._line_color, linewidth=LINE_WIDTH)
-        self.figure.tight_layout(pad=LAYOUT_PAD)
+        # 使用 constrained_layout，无需 tight_layout
         self.canvas.draw()
 
 

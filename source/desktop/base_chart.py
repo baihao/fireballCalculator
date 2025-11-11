@@ -36,7 +36,11 @@ ALPHA_GRID = 0.3                   # 网格透明度
 ALPHA_PLACEHOLDER_BG = 0.8         # 占位文本背景透明度
 
 # 布局常量
-LAYOUT_PAD = 0.3                   # tight_layout 边距
+LAYOUT_PAD = 0.8                   # 仅兜底使用；默认采用 constrained_layout
+SUBPLOT_LEFT = 0.12
+SUBPLOT_RIGHT = 0.98
+SUBPLOT_TOP = 0.88
+SUBPLOT_BOTTOM = 0.18
 PLACEHOLDER_BBOX_PAD = 0.3         # 占位文本边框内边距
 PLACEHOLDER_BBOX_STYLE = 'round'    # 占位文本边框样式
 
@@ -118,6 +122,11 @@ class BaseChart(MatplotlibWidget):
 
     def reset(self) -> None:
         self.clear()
+        # 采用 constrained_layout，确保标题/坐标轴/图例不被裁切
+        try:
+            self.figure.set_constrained_layout(True)
+        except Exception:
+            pass
         ax = self.figure.add_subplot(111)
         apply_dark_chart_style(
             ax,
@@ -129,7 +138,9 @@ class BaseChart(MatplotlibWidget):
             placeholder_text=self._placeholder_text,
             placeholder_xy=self._placeholder_xy,
         )
-        self.figure.tight_layout(pad=LAYOUT_PAD)
+        # 如遇个别环境仍有裁切，可启用下面的兜底边距
+        # self.figure.subplots_adjust(left=SUBPLOT_LEFT, right=SUBPLOT_RIGHT,
+        #                             top=SUBPLOT_TOP, bottom=SUBPLOT_BOTTOM)
         self.canvas.draw()
 
     # 子类实现
