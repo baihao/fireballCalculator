@@ -9,7 +9,7 @@
 3) 数据截断点
 """
 
-from base_chart import BaseChart, FONT_SIZE_BODY, FONT_FAMILY
+from .base_chart import BaseChart, FONT_SIZE_BODY, FONT_FAMILY
 from typing import Optional, Tuple
 import numpy as np
 
@@ -182,7 +182,7 @@ class DiameterVelocityChart(BaseChart):
         xlim, ylim = self._compute_axis_limits(time_ms, ddt_raw, ddt_fit)
         
         # 应用统一的暗色主题样式
-        from base_chart import apply_dark_chart_style
+        from .base_chart import apply_dark_chart_style
         apply_dark_chart_style(
             ax,
             x_label=self._x_label,

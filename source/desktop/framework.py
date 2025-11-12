@@ -242,8 +242,8 @@ class FireballAnalysisApp(QMainWindow):
         
         # 导入各个标签页
         from input_tab import InputTab
-        from extract_tab import ExtractTab
-        from model_tab import ModelTab
+        from extract_tab.extract_tab import ExtractTab
+        from model_tab.model_tab import ModelTab
         
         # 创建各个标签页
         self.input_tab = InputTab()

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from sequence_manager import SequenceManager
+from .utils.sequence_manager import SequenceManager
 
 
 class SequenceModel:

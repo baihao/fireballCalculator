@@ -6,7 +6,7 @@
 基于 BaseChart，提供直径曲线的渲染与数据更新接口。
 """
 
-from base_chart import BaseChart, FONT_SIZE_BODY, FONT_FAMILY
+from .base_chart import BaseChart, FONT_SIZE_BODY, FONT_FAMILY
 from typing import Optional, Tuple
 import numpy as np
 
@@ -134,7 +134,7 @@ class DiameterChart(BaseChart):
         xlim, ylim = self._compute_axis_limits(time_ms, diameter_m, K, B, C)
 
         # 应用统一的暗色主题样式
-        from base_chart import apply_dark_chart_style
+        from .base_chart import apply_dark_chart_style
         apply_dark_chart_style(
             ax,
             x_label=self._x_label,

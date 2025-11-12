@@ -295,7 +295,7 @@ class InteractiveImageWidget(QLabel):
     def _draw_points_on_image(self, image: np.ndarray):
         """在图像上绘制点标记"""
         try:
-            from draw_utils import draw_prompt_points_on_image
+            from ..utils.draw_utils import draw_prompt_points_on_image
             draw_prompt_points_on_image(
                 image,
                 self.positive_points,
@@ -311,7 +311,7 @@ class InteractiveImageWidget(QLabel):
         在图像上绘制分割结果（调用共享工具函数，就地绘制）
         """
         try:
-            from draw_utils import draw_segmentation_on_image
+            from ..utils.draw_utils import draw_segmentation_on_image
             # 就地绘制到传入的 image 上
             draw_segmentation_on_image(image, self.segmentation_result, inplace=True)
         except Exception as e:

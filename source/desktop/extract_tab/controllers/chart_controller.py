@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Sequence, Tuple, Dict, Any
 
-from temperature_chart import TemperatureChart
-from diameter_chart import DiameterChart
-from diameter_velocity_chart import DiameterVelocityChart
+from chart_widgets.temperature_chart import TemperatureChart
+from chart_widgets.diameter_chart import DiameterChart
+from chart_widgets.diameter_velocity_chart import DiameterVelocityChart
 
 
 class ChartController:

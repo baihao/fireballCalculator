@@ -6,10 +6,10 @@
 """
 
 from PySide6.QtWidgets import QSlider, QLabel, QPushButton, QLineEdit
-from extract_tab_ui import ExtractTabUI
-from sequence_model import SequenceModel
-from controllers.prompt_controller import PromptController
-from interactive_image_widget import InteractiveImageWidget
+from ..ui_widgets.extract_tab_ui import ExtractTabUI
+from ..sequence_model import SequenceModel
+from .prompt_controller import PromptController
+from ..ui_widgets.interactive_image_widget import InteractiveImageWidget
 
 
 class SequencyDisplayController:

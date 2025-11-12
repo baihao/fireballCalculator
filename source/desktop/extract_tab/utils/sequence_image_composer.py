@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
-from draw_utils import draw_segmentation_on_image
+from .draw_utils import draw_segmentation_on_image
 
 
 def compose_sequence_images(

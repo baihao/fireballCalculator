@@ -6,7 +6,7 @@
 基于 BaseChart，提供温度曲线的渲染与数据更新接口。
 """
 
-from base_chart import BaseChart
+from .base_chart import BaseChart
 import numpy as np
 
 # 线条样式常量
@@ -80,7 +80,7 @@ class TemperatureChart(BaseChart):
             ylim = self._ylim
         
         # 应用统一的暗色主题样式
-        from base_chart import apply_dark_chart_style
+        from .base_chart import apply_dark_chart_style
         apply_dark_chart_style(
             ax,
             x_label=self._x_label,

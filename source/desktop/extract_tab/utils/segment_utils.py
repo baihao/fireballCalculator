@@ -12,6 +12,9 @@ import os
 import sys
 import subprocess
 
+# 项目根目录常量（从当前文件位置向上4级：utils -> extract_tab -> desktop -> source -> 项目根）
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+
 
 def _extract_radius_value(max_radius: Any) -> Optional[float]:
     """
@@ -97,7 +100,8 @@ def run_segmentation_script(
         bool: 脚本是否成功退出（returncode==0）
     """
     try:
-        script_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'image_segment'))
+        # 使用项目根目录常量计算脚本路径
+        script_dir = os.path.join(PROJECT_ROOT, 'source', 'image_segment')
         script_path = os.path.join(script_dir, 'test_complete_propagation.py')
         if not os.path.exists(script_path):
             if on_output_line:
@@ -105,9 +109,8 @@ def run_segmentation_script(
             return False
 
         # 环境变量
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
         env = os.environ.copy()
-        env['PYTHONPATH'] = os.path.abspath(os.path.join(project_root, 'source'))
+        env['PYTHONPATH'] = os.path.join(PROJECT_ROOT, 'source')
 
         # 启动子进程，合并stderr到stdout以避免读阻塞
         # 设置环境变量强制Python输出无缓冲
