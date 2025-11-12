@@ -13,17 +13,17 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
 from PySide6.QtCore import Qt, Signal
-from segment_utils import build_time_diameter_series, run_segmentation_script
-from sequence_manager import SequenceManager
-from sequence_model import SequenceModel
-from extract_tab_ui import ExtractTabUI
-from info_builder import build_segmentation_info_text
-from controllers.prompt_controller import PromptController
-from controllers.chart_controller import ChartController
-from controllers.sequence_display_controller import SequencyDisplayController
+from .utils.segment_utils import build_time_diameter_series, run_segmentation_script
+from .utils.sequence_manager import SequenceManager
+from .sequence_model import SequenceModel
+from .ui_widgets.extract_tab_ui import ExtractTabUI
+from .utils.info_builder import build_segmentation_info_text
+from .controllers.prompt_controller import PromptController
+from .controllers.chart_controller import ChartController
+from .controllers.sequence_display_controller import SequencyDisplayController
 
 # 添加路径以导入火球计算器
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from fireball_radius_calculator import FireballCalculator
 from diameter_process.diameter_drag_fitting import DiameterDragFitter
 
@@ -664,7 +664,7 @@ class ExtractTab(QWidget):
         """导出分割图片到指定目录"""
         try:
             from pathlib import Path
-            from sequence_image_composer import compose_and_save
+            from .utils.sequence_image_composer import compose_and_save
             
             # 检查是否有分割结果
             if not self.sequence_model.has_segmentation_data():

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
 from fireball_temperature_calculator import FireballTemperatureCalculator
-from sequence_manager import SequenceManager
+from extract_tab.utils.sequence_manager import SequenceManager
 
 
 class InputTab(QWidget):

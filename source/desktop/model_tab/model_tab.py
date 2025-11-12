@@ -11,10 +11,10 @@ import csv
 import json
 from datetime import datetime
 from PySide6.QtWidgets import QWidget, QMessageBox, QFileDialog
-from model_tab_ui import ModelTabUI
+from .ui_widgets.model_tab_ui import ModelTabUI
 
 # 添加路径以导入计算器
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from fireball_radius_calculator import FireballCalculator
 from fireball_temperature_calculator import FireballTemperatureCalculator
 from transmissivity_calculator import TransmissivityParams

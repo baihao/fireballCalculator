@@ -7,9 +7,9 @@
 
 from typing import Dict, List, Set, Tuple, Optional, Any
 from PySide6.QtWidgets import QMessageBox
-from info_builder import build_prompt_info_text
-from extract_tab_ui import ExtractTabUI
-from sequence_model import SequenceModel
+from ..utils.info_builder import build_prompt_info_text
+from ..ui_widgets.extract_tab_ui import ExtractTabUI
+from ..sequence_model import SequenceModel
 
 
 class PromptController:

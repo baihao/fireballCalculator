@@ -12,11 +12,11 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea, QCheckBox)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
-from checkbar import create_checkbar
-from temperature_chart import TemperatureChart
-from diameter_chart import DiameterChart
-from diameter_velocity_chart import DiameterVelocityChart
-from interactive_image_widget import create_interactive_image_widget
+from .checkbar import create_checkbar
+from chart_widgets.temperature_chart import TemperatureChart
+from chart_widgets.diameter_chart import DiameterChart
+from chart_widgets.diameter_velocity_chart import DiameterVelocityChart
+from .interactive_image_widget import create_interactive_image_widget
 
 
 class ExtractTabUI:
