@@ -50,7 +50,7 @@ class DiameterChart(BaseChart):
         """
         xlim = self._xlim
         ylim = self._ylim
-        if not time_ms or len(time_ms) == 0:
+        if time_ms is None or len(time_ms) == 0:
             return xlim, ylim
         try:
             time_arr = np.array(time_ms, dtype=float)
@@ -91,11 +91,14 @@ class DiameterChart(BaseChart):
         self.reset()
 
     def draw_raw_diameter(self, ax, time_ms, diameter_m) -> None:
-        if time_ms and diameter_m:
-            ax.plot(time_ms, diameter_m, color=self._line_color, linewidth=LINE_WIDTH, label='原始直径')
+        if time_ms is None or diameter_m is None:
+            return
+        if len(time_ms) == 0 or len(diameter_m) == 0:
+            return
+        ax.plot(time_ms, diameter_m, color=self._line_color, linewidth=LINE_WIDTH, label='原始直径')
 
     def draw_fit(self, ax, time_ms, K: float, B: float, C: float) -> None:
-        if time_ms and len(time_ms) > 0 and K is not None and B is not None and C is not None:
+        if time_ms is not None and len(time_ms) > 0 and K is not None and B is not None and C is not None:
             try:
                 t_min = float(np.min(time_ms))
                 t_max = float(np.max(time_ms))
@@ -122,7 +125,7 @@ class DiameterChart(BaseChart):
         更新直径图。允许 diameter_m 为空，此时需要提供 K,B,C 绘制拟合曲线。
         """
         # 基础有效性
-        if not time_ms or len(time_ms) == 0:
+        if time_ms is None or len(time_ms) == 0:
             self.reset()
             return
 

@@ -6,10 +6,15 @@
 """
 
 from typing import Dict
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QGridLayout, QPushButton, QComboBox, QLineEdit, QGroupBox)
 from PySide6.QtCore import Qt
-from framework import MatplotlibWidget
+from chart_widgets import (
+    DiameterChart,
+    TemperatureChart,
+    HeatFluxChart,
+    RadiationChart,
+)
 
 
 class ModelTabUI:
@@ -48,19 +53,19 @@ class ModelTabUI:
         charts_layout.setAlignment(Qt.AlignTop)
         
         # 火球直径随时间变化
-        self.ui_components['diam_chart'] = MatplotlibWidget(width=5, height=3)
+        self.ui_components['diam_chart'] = DiameterChart(width=5, height=3)
         charts_layout.addWidget(self.ui_components['diam_chart'], 0, 0)
         
         # 火球温度随时间变化
-        self.ui_components['temp_chart'] = MatplotlibWidget(width=5, height=3)
+        self.ui_components['temp_chart'] = TemperatureChart(width=5, height=3)
         charts_layout.addWidget(self.ui_components['temp_chart'], 0, 1)
         
         # 热通量随时间变化 (不同距离)
-        self.ui_components['heat_flux_chart'] = MatplotlibWidget(width=5, height=3)
+        self.ui_components['heat_flux_chart'] = HeatFluxChart(width=5, height=3)
         charts_layout.addWidget(self.ui_components['heat_flux_chart'], 1, 0)
         
         # 累积热辐射量随距离分布
-        self.ui_components['heat_radiation_chart'] = MatplotlibWidget(width=5, height=3)
+        self.ui_components['heat_radiation_chart'] = RadiationChart(width=5, height=3)
         charts_layout.addWidget(self.ui_components['heat_radiation_chart'], 1, 1)
         
         charts_widget.setLayout(charts_layout)

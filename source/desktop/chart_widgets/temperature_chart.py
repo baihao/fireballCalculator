@@ -43,7 +43,7 @@ class TemperatureChart(BaseChart):
         ax = self.figure.add_subplot(111)
         
         # 计算数据范围
-        if time_ms and temperature_k and len(time_ms) > 0 and len(temperature_k) > 0:
+        if time_ms is not None and temperature_k is not None and len(time_ms) > 0 and len(temperature_k) > 0:
             try:
                 time_arr = np.array(time_ms, dtype=float)
                 temp_arr = np.array(temperature_k, dtype=float)
@@ -91,7 +91,7 @@ class TemperatureChart(BaseChart):
         )
         
         # 绘制温度曲线
-        if time_ms and temperature_k:
+        if time_ms is not None and temperature_k is not None:
             ax.plot(time_ms, temperature_k, color=self._line_color, linewidth=LINE_WIDTH)
         # 使用 constrained_layout，无需 tight_layout
         self.canvas.draw()
