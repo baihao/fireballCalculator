@@ -70,62 +70,109 @@ class FireballCalculator:
             }
         }
     
-    def calculate_radius(self, t, material_name):
+    def calculate_radius(self, t, material_name, m=1.0):
         """
         计算指定材料在时间t的火球半径
         
         参数:
         t: 时间 (s)
         material_name: 材料名称
+        m: 当量比值（当前当量/标准当量），默认为1.0（标准当量）
         
         返回:
         R: 火球半径 (m)
+        
+        当量缩放说明:
+        当量比值为M时，参数变换为:
+        - K_new = √M * K_std  (直径按√M缩放)
+        - B_new = B_std       (无量纲，保持不变)
+        - C_new = C_std / M   (时间按√M缩放，C与t²成反比)
         """
         if material_name not in self.materials:
             raise ValueError(f"未知的材料名称: {material_name}")
         
+        if m <= 0:
+            raise ValueError(f"当量比值必须大于0，当前值: {m}")
+        
         params = self.materials[material_name]
-        K = params['K2']  # 使用K2参数
-        B = params['B']
-        C = params['C'] * 1e6  # 将C从ms单位转换为s单位: C_s = C_ms * (1000)^2 = C_ms * 1e6
+        K_std = params['K2']  # 标准K2参数
+        B_std = params['B']   # 标准B参数
+        C_std = params['C'] * 1e6  # 将C从ms单位转换为s单位: C_s = C_ms * (1000)^2 = C_ms * 1e6
+        
+        # 根据当量比值M进行参数变换
+        if m != 1.0:
+            K = np.sqrt(m) * K_std  # K按√M缩放
+            B = B_std               # B保持不变
+            C = C_std / m           # C除以M
+        else:
+            K = K_std
+            B = B_std
+            C = C_std
         
         # 计算半径: R(t) = K * (1 - B*exp(-C*t^2))，其中t单位为s
         R = K * (1 - B * np.exp(-C * t**2))
         return R
     
-    def calculate_diameter(self, t, material_name):
+    def calculate_diameter(self, t, material_name, m=1.0):
         """
         计算指定材料在时间t的火球直径
         
         参数:
         t: 时间 (s)
         material_name: 材料名称
+        m: 当量比值（当前当量/标准当量），默认为1.0（标准当量）
         
         返回:
         D: 火球直径 (m)
+        
+        当量缩放说明:
+        当量比值为M时，参数变换为:
+        - K_new = √M * K_std  (直径按√M缩放)
+        - B_new = B_std       (无量纲，保持不变)
+        - C_new = C_std / M   (时间按√M缩放，C与t²成反比)
         """
-        R = self.calculate_radius(t, material_name)
+        R = self.calculate_radius(t, material_name, m)
         D = 2 * R
         return D
     
-    def calculate_expansion_velocity(self, t, material_name):
+    def calculate_expansion_velocity(self, t, material_name, m=1.0):
         """
         计算指定材料在时间t的火球膨胀速率（半径对时间的导数）
         
         参数:
         t: 时间 (s)
         material_name: 材料名称
+        m: 当量比值（当前当量/标准当量），默认为1.0（标准当量）
         
         返回:
         V: 火球膨胀速率 (m/s)
+        
+        当量缩放说明:
+        当量比值为M时，参数变换为:
+        - K_new = √M * K_std  (直径按√M缩放)
+        - B_new = B_std       (无量纲，保持不变)
+        - C_new = C_std / M   (时间按√M缩放，C与t²成反比)
         """
         if material_name not in self.materials:
             raise ValueError(f"未知的材料名称: {material_name}")
         
+        if m <= 0:
+            raise ValueError(f"当量比值必须大于0，当前值: {m}")
+        
         params = self.materials[material_name]
-        K = params['K2']
-        B = params['B']
-        C = params['C'] * 1e6  # 将C从ms单位转换为s单位
+        K_std = params['K2']
+        B_std = params['B']
+        C_std = params['C'] * 1e6  # 将C从ms单位转换为s单位
+        
+        # 根据当量比值M进行参数变换
+        if m != 1.0:
+            K = np.sqrt(m) * K_std  # K按√M缩放
+            B = B_std               # B保持不变
+            C = C_std / m           # C除以M
+        else:
+            K = K_std
+            B = B_std
+            C = C_std
         
         # 计算膨胀速率: dR/dt = K * B * C * 2t * exp(-C*t^2)，其中t单位为s
         V = K * B * C * 2 * t * np.exp(-C * t**2)
@@ -208,20 +255,21 @@ class FireballCalculator:
             print(f"  拟合精度 = {params['precision_one_fitting']:.2f}%")
             print(f"  二次拟合精度 = {params['quadratic_fitting']:.2f}%")
     
-    def calculate_at_specific_time(self, t, material_name):
+    def calculate_at_specific_time(self, t, material_name, m=1.0):
         """
         计算指定材料在特定时间的火球参数
         
         参数:
         t: 时间 (s)
         material_name: 材料名称
+        m: 当量比值（当前当量/标准当量），默认为1.0（标准当量）
         
         返回:
         dict: 包含半径、直径和膨胀速度的字典
         """
-        R = self.calculate_radius(t, material_name)
-        D = self.calculate_diameter(t, material_name)
-        V = self.calculate_expansion_velocity(t, material_name)
+        R = self.calculate_radius(t, material_name, m)
+        D = self.calculate_diameter(t, material_name, m)
+        V = self.calculate_expansion_velocity(t, material_name, m)
         
         return {
             'time': t,

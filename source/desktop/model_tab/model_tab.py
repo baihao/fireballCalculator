@@ -128,8 +128,8 @@ class ModelTab(QWidget):
             material_name = self.get_material_by_al_content(al_content)
             print(f"选择材料: {material_name}")
             
-            # 生成预测曲线
-            self.generate_prediction_curves(material_name, duration, env_temp, env_humidity, env_pressure)
+            # 生成预测曲线（传入当量值）
+            self.generate_prediction_curves(material_name, duration, equivalent, env_temp, env_humidity, env_pressure)
             
             # 更新状态
             self.modeling_status.setText("预测完成")
@@ -159,10 +159,26 @@ class ModelTab(QWidget):
         else:
             return '40%Al/Rubber'  # 默认
     
-    def generate_prediction_curves(self, material_name, duration, env_temp=24.0, env_humidity=48.0, env_pressure=2987.87):
-        """生成预测曲线"""
+    def generate_prediction_curves(self, material_name, duration, equivalent=10.0, env_temp=24.0, env_humidity=48.0, env_pressure=2987.87):
+        """
+        生成预测曲线
+        
+        参数:
+        material_name: 材料名称
+        duration: 仿真时长 (ms)
+        equivalent: 爆炸当量 (kg TNT)，默认10.0 kg TNT（标准当量）
+        env_temp: 环境温度 (°C)
+        env_humidity: 相对湿度 (%)
+        env_pressure: 水饱和气压 (Pa)
+        """
         try:
             print(f"生成 {material_name} 材料的预测曲线...")
+            
+            # 计算当量比值 M（当前当量/标准当量）
+            # 标准当量设为 10.0 kg TNT（与默认值一致）
+            STANDARD_EQUIVALENT = 10.0  # kg TNT
+            m = equivalent / STANDARD_EQUIVALENT
+            print(f"当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT / 标准当量={STANDARD_EQUIVALENT} kg TNT)")
             
             # 生成时间序列
             time_points = int(duration / 1.0) + 1  # 1ms步长
@@ -175,6 +191,8 @@ class ModelTab(QWidget):
                 'time_s': t_s,
                 'material_name': material_name,
                 'duration': duration,
+                'equivalent': equivalent,
+                'equivalent_ratio': m,
                 'env_temp': env_temp,
                 'env_humidity': env_humidity,
                 'env_pressure': env_pressure,
@@ -184,12 +202,12 @@ class ModelTab(QWidget):
                 'heat_radiation_data': {}
             }
             
-            # 1. 火球直径随时间变化
+            # 1. 火球直径随时间变化（应用当量缩放）
             print("计算火球直径...")
             radius_calc = FireballCalculator()
             D_m = []
             for t in t_s:
-                diameter = radius_calc.calculate_diameter(t, material_name)
+                diameter = radius_calc.calculate_diameter(t, material_name, m)
                 D_m.append(diameter)
             D_m = np.array(D_m)
             self.prediction_data['diameter_data'] = D_m
