@@ -12,6 +12,7 @@ import json
 from datetime import datetime
 from PySide6.QtWidgets import QWidget, QMessageBox, QFileDialog
 from .ui_widgets.model_tab_ui import ModelTabUI
+from .controllers import ModelTabChartController
 
 # 添加路径以导入计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -32,6 +33,9 @@ class ModelTab(QWidget):
         self.ui_builder.create_main_layout(self)
         self.ui_components = self.ui_builder.get_ui_components()
         
+        # 初始化图表控制器
+        self.chart_controller = ModelTabChartController(self.ui_builder)
+        
         # 设置UI组件引用（向后兼容）
         self._setup_ui_component_references()
         
@@ -44,12 +48,6 @@ class ModelTab(QWidget):
         """设置UI组件引用（向后兼容）"""
         # 状态显示控件
         self.modeling_status = self.ui_components['modeling_status']
-        
-        # 图表控件
-        self.diam_chart = self.ui_components['diam_chart']
-        self.temp_chart = self.ui_components['temp_chart']
-        self.heat_flux_chart = self.ui_components['heat_flux_chart']
-        self.heat_radiation_chart = self.ui_components['heat_radiation_chart']
         
         # 按钮控件（可能尚未创建侧边栏，此时这些键不存在，需做兼容判断）
         if 'predict_btn' in self.ui_components:
@@ -88,80 +86,11 @@ class ModelTab(QWidget):
             self.epochs = self.ui_components['epochs']
     
     def init_empty_charts(self):
-        """初始化空图表，显示等待状态"""
-        self.init_empty_chart(self.diam_chart, "火球直径随时间变化", "时间 (ms)", "直径 (m)")
-        self.init_empty_chart(self.temp_chart, "火球温度随时间变化", "时间 (ms)", "温度 (K)")
-        self.init_empty_chart(self.heat_flux_chart, "热通量随时间变化 (不同距离)", "时间 (ms)", "热通量 (W/m²)")
-        self.init_empty_chart(self.heat_radiation_chart, "累积热辐射量随距离分布", "距离 (m)", "热辐射量 (J/m²)")
-    
-    def init_empty_chart(self, chart_widget, title, xlabel, ylabel):
-        """初始化空图表，显示等待状态"""
+        """初始化空图表，显示默认占位内容"""
         try:
-            # 设置图表样式
-            fig = chart_widget.figure
-            fig.patch.set_facecolor('#0b1220')  # 深色背景
-            
-            ax = fig.add_subplot(111)
-            ax.set_facecolor('#0b1220')  # 深色背景
-            
-            # 设置标题和轴标签 - 保持固定样式
-            ax.set_title(title, color='#cbd5e1', fontsize=12, pad=30)
-            ax.set_xlabel(xlabel, color='#cbd5e1', fontsize=10)
-            ax.set_ylabel(ylabel, color='#cbd5e1', fontsize=10)
-            
-            # 设置坐标轴颜色 - 保持固定样式
-            ax.tick_params(colors='#9ca3af', labelsize=9)
-            ax.spines['bottom'].set_color('#374151')
-            ax.spines['top'].set_color('#374151')
-            ax.spines['right'].set_color('#374151')
-            ax.spines['left'].set_color('#374151')
-            
-            # 设置网格 - 保持固定样式
-            ax.grid(True, alpha=0.3, color='#374151')
-            
-            # 显示等待消息
-            ax.text(0.5, 0.5, '等待预测...', 
-                   horizontalalignment='center', 
-                   verticalalignment='center',
-                   transform=ax.transAxes,
-                   fontsize=14,
-                   color='#9ca3af',
-                   bbox=dict(boxstyle='round,pad=0.5', 
-                           facecolor='#1f2937', 
-                           edgecolor='#374151',
-                           alpha=0.8))
-            
-            # 使用 constrained_layout（已在 framework.py 中启用）
-            # 不再调用 tight_layout，避免与 constrained_layout 冲突
-            
-            # 刷新画布
-            chart_widget.canvas.draw()
-            
+            self.chart_controller.reset()
         except Exception as e:
             print(f"初始化空图表失败: {e}")
-    
-    def apply_chart_style(self, ax, title, xlabel, ylabel):
-        """应用统一的图表样式"""
-        # 设置背景色
-        ax.set_facecolor('#0b1220')
-        
-        # 设置标题和轴标签 - 调整pad参数确保标题完全显示
-        ax.set_title(title, color='#cbd5e1', fontsize=12, pad=30)
-        ax.set_xlabel(xlabel, color='#cbd5e1', fontsize=10)
-        ax.set_ylabel(ylabel, color='#cbd5e1', fontsize=10)
-        
-        # 设置坐标轴颜色
-        ax.tick_params(colors='#9ca3af', labelsize=9)
-        ax.spines['bottom'].set_color('#374151')
-        ax.spines['top'].set_color('#374151')
-        ax.spines['right'].set_color('#374151')
-        ax.spines['left'].set_color('#374151')
-        
-        # 设置网格
-        ax.grid(True, alpha=0.3, color='#374151')
-        
-        # 使用 constrained_layout（已在 framework.py 中启用）
-        # 不再调用 tight_layout，避免与 constrained_layout 冲突
     
     def setup_connections(self):
         """设置信号连接"""
@@ -265,16 +194,8 @@ class ModelTab(QWidget):
             D_m = np.array(D_m)
             self.prediction_data['diameter_data'] = D_m
             
-            # 清除之前的等待状态并绘制新数据
-            self.diam_chart.clear()
-            # 重新应用样式
-            fig = self.diam_chart.figure
-            fig.patch.set_facecolor('#0b1220')
-            ax = fig.add_subplot(111)
-            self.apply_chart_style(ax, "火球直径随时间变化", "时间 (ms)", "直径 (m)")
-            # 绘制数据线
-            ax.plot(t_ms, D_m, color='#22d3ee', linewidth=2)
-            self.diam_chart.canvas.draw()
+            # 更新直径图表
+            self.chart_controller.update_diameter(t_ms, D_m)
             
             # 2. 火球温度随时间变化
             print("计算火球温度...")
@@ -282,21 +203,13 @@ class ModelTab(QWidget):
             T_K = temp_calc.temperature_modified(t_ms)
             self.prediction_data['temperature_data'] = T_K
             
-            # 清除之前的等待状态并绘制新数据
-            self.temp_chart.clear()
-            # 重新应用样式
-            fig = self.temp_chart.figure
-            fig.patch.set_facecolor('#0b1220')
-            ax = fig.add_subplot(111)
-            self.apply_chart_style(ax, "火球温度随时间变化", "时间 (ms)", "温度 (K)")
-            # 绘制数据线
-            ax.plot(t_ms, T_K, color='#38bdf8', linewidth=2)
-            self.temp_chart.canvas.draw()
+            # 更新温度图表
+            self.chart_controller.update_temperature(t_ms, T_K)
             
             # 3. 热通量随时间变化 (不同距离)
             print("计算热通量...")
             distances = [4.0, 4.5, 5.0, 5.5, 6.0]
-            heat_flux_data = {}
+            heat_flux_series = []
             
             # 创建传输率参数对象
             transmissivity_params = TransmissivityParams(
@@ -307,22 +220,11 @@ class ModelTab(QWidget):
             
             for dist in distances:
                 q_t = compute_heat_flux_over_time(dist, t_ms, T_K, D_m, transmissivity_params)
-                heat_flux_data[f'x = {dist:.1f} m'] = (t_ms, q_t)
+                heat_flux_series.append([dist, q_t])
                 self.prediction_data['heat_flux_data'][f'{dist:.1f}'] = q_t
             
-            # 清除之前的等待状态并绘制新数据
-            self.heat_flux_chart.clear()
-            # 重新应用样式
-            fig = self.heat_flux_chart.figure
-            fig.patch.set_facecolor('#0b1220')
-            ax = fig.add_subplot(111)
-            self.apply_chart_style(ax, "热通量随时间变化 (不同距离)", "时间 (ms)", "热通量 (W/m²)")
-            # 绘制多条数据线
-            colors = ['#22d3ee', '#38bdf8', '#10b981', '#f59e0b', '#ef4444']
-            for i, (label, (x_data, y_data)) in enumerate(heat_flux_data.items()):
-                ax.plot(x_data, y_data, color=colors[i % len(colors)], linewidth=2, label=label)
-            ax.legend(loc='upper right', fontsize=8, facecolor='#1f2937', edgecolor='#374151', labelcolor='#cbd5e1')
-            self.heat_flux_chart.canvas.draw()
+            # 更新热通量图表
+            self.chart_controller.update_heat_flux(t_ms, heat_flux_series)
             
             # 4. 累积热辐射量随距离分布
             print("计算累积热辐射...")
@@ -339,16 +241,8 @@ class ModelTab(QWidget):
                 'heat_radiation': H_values
             }
             
-            # 清除之前的等待状态并绘制新数据
-            self.heat_radiation_chart.clear()
-            # 重新应用样式
-            fig = self.heat_radiation_chart.figure
-            fig.patch.set_facecolor('#0b1220')
-            ax = fig.add_subplot(111)
-            self.apply_chart_style(ax, "累积热辐射量随距离分布", "距离 (m)", "热辐射量 (J/m²)")
-            # 绘制数据线
-            ax.plot(x_values, H_values, color='#10b981', linewidth=2)
-            self.heat_radiation_chart.canvas.draw()
+            # 更新累积热辐射图表
+            self.chart_controller.update_heat_radiation(x_values, H_values)
             
             print("✅ 所有预测曲线生成完成！")
             
@@ -476,72 +370,6 @@ class ModelTab(QWidget):
             traceback.print_exc()
             QMessageBox.critical(self, "导出失败", f"导出失败:\n{str(e)}")
         
-    def update_prediction_charts(self):
-        """更新预测图表"""
-        try:
-            # 火球直径随时间变化
-            t_ms = np.linspace(0, 140, 800)
-            radius_calc = FireballCalculator()
-            t_s = t_ms / 1000.0
-            D_m = radius_calc.calculate_diameter(t_s, '40%Al/Rubber')
-            
-            self.diam_chart.plot_line(
-                t_ms, D_m,
-                title="火球直径随时间变化",
-                xlabel="时间 (ms)",
-                ylabel="直径 (m)",
-                color='#22d3ee'
-            )
-            
-            # 火球温度随时间变化
-            temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
-            T_K = temp_calc.temperature_modified(t_ms)
-            
-            self.temp_chart.plot_line(
-                t_ms, T_K,
-                title="火球温度随时间变化",
-                xlabel="时间 (ms)",
-                ylabel="温度 (K)",
-                color='#38bdf8'
-            )
-            
-            # 热通量随时间变化 (不同距离)
-            distances = [4.0, 4.5, 5.0, 5.5, 6.0]
-            heat_flux_data = {}
-            
-            for dist in distances:
-                q_t = compute_heat_flux_over_time(dist, t_ms, T_K, D_m, TransmissivityParams())
-                heat_flux_data[f'x = {dist:.1f} m'] = (t_ms, q_t)
-            
-            self.heat_flux_chart.plot_multiple_lines(
-                heat_flux_data,
-                title="热通量随时间变化 (不同距离)",
-                xlabel="时间 (ms)",
-                ylabel="热通量 (W/m²)"
-            )
-            
-            # 累积热辐射量随距离分布
-            x_values = np.linspace(4.0, 6.0, 50)
-            H_values = []
-            
-            for x in x_values:
-                q_t = compute_heat_flux_over_time(x, t_ms, T_K, D_m, TransmissivityParams())
-                H = integrate_heat_radiation(q_t, t_ms)
-                H_values.append(H)
-            
-            self.heat_radiation_chart.plot_line(
-                x_values, H_values,
-                title="累积热辐射量随距离分布",
-                xlabel="距离 (m)",
-                ylabel="热辐射量 (J/m²)",
-                color='#10b981'
-            )
-            
-            self.modeling_status.setText("已生成示例预测曲线")
-            
-        except Exception as e:
-            print(f"更新预测图表失败: {e}")
-    
     def get_sidebar_widget(self):
         """获取建模与预测模块的侧边栏组件"""
         if not hasattr(self, '_sidebar_widget'):

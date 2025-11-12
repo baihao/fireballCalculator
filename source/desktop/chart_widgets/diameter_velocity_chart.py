@@ -53,7 +53,7 @@ class DiameterVelocityChart(BaseChart):
         """
         xlim = self._xlim
         ylim = self._ylim
-        if not time_ms or len(time_ms) == 0:
+        if time_ms is None or len(time_ms) == 0:
             return xlim, ylim
         try:
             time_arr = np.array(time_ms, dtype=float)
@@ -96,7 +96,7 @@ class DiameterVelocityChart(BaseChart):
 
     def draw_raw_velocity(self, ax, time_ms, diameter_m) -> Optional[np.ndarray]:
         """绘制原始数据速率，返回 ddt_raw（若可计算）。"""
-        if not (time_ms and diameter_m):
+        if time_ms is None or diameter_m is None:
             return None
         try:
             t = np.array(time_ms, dtype=float)
@@ -111,7 +111,7 @@ class DiameterVelocityChart(BaseChart):
 
     def draw_fit_velocity(self, ax, time_ms, K: float, B: float, C: float) -> Optional[np.ndarray]:
         """绘制拟合速率，返回 ddt_fit（若可计算）。"""
-        if not (time_ms and len(time_ms) > 0 and K is not None and B is not None and C is not None):
+        if time_ms is None or len(time_ms) == 0 or K is None or B is None or C is None:
             return None
         try:
             t_min = float(np.min(time_ms))
@@ -146,6 +146,10 @@ class DiameterVelocityChart(BaseChart):
             K, B, C: 拖曳函数参数（可选）
             cutoff_ms: 有效数据截断时间（毫秒，可选）
         """
+        if time_ms is None or len(time_ms) == 0:
+            self.reset()
+            return
+
         # 清空并重新绘制
         self.clear()
         ax = self.figure.add_subplot(111)
@@ -169,7 +173,7 @@ class DiameterVelocityChart(BaseChart):
                 ddt_raw = None
         
         # 计算拟合曲线的速率
-        if K is not None and B is not None and C is not None and time_ms and len(time_ms) > 0:
+        if K is not None and B is not None and C is not None and time_ms is not None and len(time_ms) > 0:
             try:
                 t_min = float(np.min(time_ms))
                 t_max = float(np.max(time_ms))
