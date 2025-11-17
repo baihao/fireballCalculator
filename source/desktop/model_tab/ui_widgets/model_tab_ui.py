@@ -6,8 +6,21 @@
 """
 
 from typing import Dict
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                               QGridLayout, QPushButton, QComboBox, QLineEdit, QGroupBox)
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QGridLayout,
+    QPushButton,
+    QLineEdit,
+    QGroupBox,
+    QListWidget,
+    QAbstractItemView,
+    QScrollArea,
+    QFormLayout,
+    QComboBox,
+)
 from PySide6.QtCore import Qt
 from chart_widgets import (
     DiameterChart,
@@ -79,87 +92,96 @@ class ModelTabUI:
         sidebar_widget = QGroupBox("建模与预测")
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignTop)
+        layout.setSpacing(16)
         
-        # 训练部分
-        layout.addWidget(QLabel("建模 - 训练"))
-        layout.addWidget(QLabel("选择训练时间序列（可多选）"))
+        # 模型训练区域
+        training_group = QGroupBox("模型训练")
+        training_layout = QVBoxLayout()
+        training_layout.setAlignment(Qt.AlignTop)
+        training_layout.addWidget(QLabel("选择训练时间序列（可多选）"))
         
         self.ui_components['train_series_btn'] = QPushButton("选择训练文件")
-        layout.addWidget(self.ui_components['train_series_btn'])
+        training_layout.addWidget(self.ui_components['train_series_btn'])
         
-        layout.addWidget(QLabel("算法"))
-        self.ui_components['algo'] = QComboBox()
-        self.ui_components['algo'].addItems(["T-Transformer"])
-        layout.addWidget(self.ui_components['algo'])
+        self.ui_components['train_file_list'] = QListWidget()
+        self.ui_components['train_file_list'].setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.ui_components['train_file_list'].setVisible(False)
+        self.ui_components['train_file_list'].setMaximumHeight(120)
+        training_layout.addWidget(self.ui_components['train_file_list'])
         
-        # 学习率和轮次
-        lr_layout = QHBoxLayout()
-        lr_layout.addWidget(QLabel("学习率:"))
-        self.ui_components['lr'] = QLineEdit("0.0005")
-        lr_layout.addWidget(self.ui_components['lr'])
-        lr_layout.addWidget(QLabel("轮次:"))
-        self.ui_components['epochs'] = QLineEdit("50")
-        lr_layout.addWidget(self.ui_components['epochs'])
-        layout.addLayout(lr_layout)
+        self.ui_components['train_params_btn'] = QPushButton("训练参数")
+        training_layout.addWidget(self.ui_components['train_params_btn'])
         
         self.ui_components['train_btn'] = QPushButton("开始训练")
-        self.ui_components['train_btn'].setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
-        layout.addWidget(self.ui_components['train_btn'])
+        self.ui_components['train_btn'].setStyleSheet(
+            "QPushButton { background-color: #0ea5e9; color: white; }"
+        )
+        training_layout.addWidget(self.ui_components['train_btn'])
+        training_group.setLayout(training_layout)
+        layout.addWidget(training_group)
         
-        # 预测部分
-        layout.addWidget(QLabel("预测 - 运行"))
-        layout.addWidget(QLabel("选择已训练模型"))
+        # 仿真预测区域
+        simulate_group = QGroupBox("仿真预测")
+        simulate_layout = QVBoxLayout()
+        simulate_layout.setAlignment(Qt.AlignTop)
         
+        simulate_layout.addWidget(QLabel("模型选择"))
         self.ui_components['model_list'] = QComboBox()
         self.ui_components['model_list'].addItems(["示例模型 v1"])
-        layout.addWidget(self.ui_components['model_list'])
+        simulate_layout.addWidget(self.ui_components['model_list'])
         
-        # 预测参数
-        pred_layout = QHBoxLayout()
-        pred_layout.addWidget(QLabel("当量:"))
+        simulate_layout.addWidget(QLabel("仿真参数"))
+        params_container = QWidget()
+        params_form = QFormLayout()
+        params_form.setLabelAlignment(Qt.AlignLeft)
+        params_form.setFormAlignment(Qt.AlignTop)
+        
         self.ui_components['p_eq'] = QLineEdit("10")
-        pred_layout.addWidget(self.ui_components['p_eq'])
-        pred_layout.addWidget(QLabel("含铝量:"))
+        params_form.addRow("当量 (kg TNT)", self.ui_components['p_eq'])
+        
         self.ui_components['p_al'] = QLineEdit("30")
-        pred_layout.addWidget(self.ui_components['p_al'])
-        layout.addLayout(pred_layout)
+        params_form.addRow("含铝量 (%)", self.ui_components['p_al'])
         
-        # 环境参数
-        env_layout = QHBoxLayout()
-        env_layout.addWidget(QLabel("环境温度:"))
         self.ui_components['p_env_temp'] = QLineEdit("24")
-        env_layout.addWidget(self.ui_components['p_env_temp'])
-        env_layout.addWidget(QLabel("相对湿度:"))
+        params_form.addRow("环境温度 (°C)", self.ui_components['p_env_temp'])
+        
         self.ui_components['p_env_humidity'] = QLineEdit("48")
-        env_layout.addWidget(self.ui_components['p_env_humidity'])
-        layout.addLayout(env_layout)
+        params_form.addRow("相对湿度 (%)", self.ui_components['p_env_humidity'])
         
-        pressure_layout = QHBoxLayout()
-        pressure_layout.addWidget(QLabel("水饱和气压:"))
         self.ui_components['p_env_pressure'] = QLineEdit("2987.87")
-        pressure_layout.addWidget(self.ui_components['p_env_pressure'])
-        pressure_layout.addStretch()
-        layout.addLayout(pressure_layout)
+        params_form.addRow("水饱和气压 (Pa)", self.ui_components['p_env_pressure'])
         
-        sim_layout = QHBoxLayout()
-        sim_layout.addWidget(QLabel("仿真步长:"))
         self.ui_components['p_step'] = QLineEdit("1")
-        sim_layout.addWidget(self.ui_components['p_step'])
-        sim_layout.addWidget(QLabel("仿真时长:"))
+        params_form.addRow("仿真步长 (ms)", self.ui_components['p_step'])
+        
         self.ui_components['p_duration'] = QLineEdit("140")
-        sim_layout.addWidget(self.ui_components['p_duration'])
-        layout.addLayout(sim_layout)
+        params_form.addRow("仿真时长 (ms)", self.ui_components['p_duration'])
         
-        self.ui_components['predict_btn'] = QPushButton("开始预测")
-        self.ui_components['predict_btn'].setStyleSheet("QPushButton { background-color: #10b981; color: white; }")
-        layout.addWidget(self.ui_components['predict_btn'])
+        params_container.setLayout(params_form)
         
-        # 导出结果按钮
+        params_scroll = QScrollArea()
+        params_scroll.setWidgetResizable(True)
+        params_scroll.setWidget(params_container)
+        self.ui_components['params_scroll_area'] = params_scroll
+        simulate_layout.addWidget(params_scroll)
+        
+        self.ui_components['predict_btn'] = QPushButton("开始仿真")
+        self.ui_components['predict_btn'].setStyleSheet(
+            "QPushButton { background-color: #10b981; color: white; }"
+        )
+        simulate_layout.addWidget(self.ui_components['predict_btn'])
+        
         self.ui_components['export_btn'] = QPushButton("导出结果")
-        self.ui_components['export_btn'].setStyleSheet("QPushButton { background-color: #0ea5e9; color: white; }")
-        self.ui_components['export_btn'].setEnabled(False)  # 初始状态禁用
-        layout.addWidget(self.ui_components['export_btn'])
+        self.ui_components['export_btn'].setStyleSheet(
+            "QPushButton { background-color: #0ea5e9; color: white; }"
+        )
+        self.ui_components['export_btn'].setEnabled(False)
+        simulate_layout.addWidget(self.ui_components['export_btn'])
         
+        simulate_group.setLayout(simulate_layout)
+        layout.addWidget(simulate_group)
+        
+        layout.addStretch()
         sidebar_widget.setLayout(layout)
         return sidebar_widget
     

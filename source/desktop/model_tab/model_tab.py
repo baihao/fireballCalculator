@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 from PySide6.QtWidgets import QWidget, QMessageBox, QFileDialog
 from .ui_widgets.model_tab_ui import ModelTabUI
-from .controllers import ModelTabChartController
+from .controllers import ModelTabChartController, TrainConfigController
 
 # 添加路径以导入计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -33,8 +33,10 @@ class ModelTab(QWidget):
         self.ui_builder.create_main_layout(self)
         self.ui_components = self.ui_builder.get_ui_components()
         
-        # 初始化图表控制器
+        # 初始化控制器
         self.chart_controller = ModelTabChartController(self.ui_builder)
+        self.train_config_controller = TrainConfigController(self)
+        self.training_files = []
         
         # 设置UI组件引用（向后兼容）
         self._setup_ui_component_references()
@@ -58,6 +60,11 @@ class ModelTab(QWidget):
             self.train_series_btn = self.ui_components['train_series_btn']
         if 'train_btn' in self.ui_components:
             self.train_btn = self.ui_components['train_btn']
+        if 'train_file_list' in self.ui_components:
+            self.train_file_list = self.ui_components['train_file_list']
+            self.train_file_list_max_height = self.train_file_list.maximumHeight() or 120
+        if 'train_params_btn' in self.ui_components:
+            self.train_params_btn = self.ui_components['train_params_btn']
         
         # 参数输入控件
         if 'p_eq' in self.ui_components:
@@ -84,6 +91,8 @@ class ModelTab(QWidget):
             self.lr = self.ui_components['lr']
         if 'epochs' in self.ui_components:
             self.epochs = self.ui_components['epochs']
+        if 'params_scroll_area' in self.ui_components:
+            self.params_scroll_area = self.ui_components['params_scroll_area']
     
     def init_empty_charts(self):
         """初始化空图表，显示默认占位内容"""
@@ -94,12 +103,18 @@ class ModelTab(QWidget):
     
     def setup_connections(self):
         """设置信号连接"""
-        # 连接预测和导出按钮（仅在对应控件已创建时）
+        # 连接预测、导出与训练按钮（仅在对应控件已创建时）
         try:
             if hasattr(self, 'predict_btn'):
                 self.predict_btn.clicked.connect(self.start_prediction)
             if hasattr(self, 'export_btn'):
                 self.export_btn.clicked.connect(self.export_results)
+            if hasattr(self, 'train_series_btn'):
+                self.train_series_btn.clicked.connect(self.select_training_files)
+            if hasattr(self, 'train_params_btn'):
+                self.train_params_btn.clicked.connect(self.open_train_config_dialog)
+            if hasattr(self, 'train_btn'):
+                self.train_btn.clicked.connect(self.start_training)
         except Exception:
             pass
         
@@ -270,6 +285,47 @@ class ModelTab(QWidget):
             traceback.print_exc()
             raise e
     
+    def select_training_files(self):
+        """选择训练文件并显示"""
+        try:
+            files, _ = QFileDialog.getOpenFileNames(
+                self,
+                "选择训练文件",
+                "",
+                "火球序列/CSV (*.json *.csv);;所有文件 (*.*)"
+            )
+            if not files:
+                self.training_files = []
+                self._update_train_file_list_state()
+                return
+            self.training_files = files
+            if hasattr(self, 'train_file_list'):
+                self.train_file_list.clear()
+                for path in files:
+                    self.train_file_list.addItem(os.path.basename(path))
+                self._update_train_file_list_state()
+            print(f"📁 已选择训练文件 {len(files)} 个")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"选择训练文件失败:\n{str(e)}")
+    
+    def open_train_config_dialog(self):
+        """打开训练参数配置"""
+        config = self.train_config_controller.open_dialog()
+        if config:
+            print(f"⚙️ 训练参数已更新: {config}")
+    
+    def start_training(self):
+        """开始训练（占位逻辑）"""
+        if not self.training_files:
+            QMessageBox.warning(self, "提示", "请先选择训练文件。")
+            return
+        config = self.train_config_controller.get_config()
+        QMessageBox.information(
+            self,
+            "开始训练",
+            f"训练文件数: {len(self.training_files)}\n算法: {config['algorithm']}\n学习率: {config['learning_rate']}\n轮次: {config['epochs']}"
+        )
+    
     def export_results(self):
         """导出预测结果到CSV文件"""
         try:
@@ -399,3 +455,20 @@ class ModelTab(QWidget):
             self.setup_connections()
         
         return self._sidebar_widget
+
+    def _update_train_file_list_state(self):
+        """根据文件数量更新训练文件列表显示状态"""
+        if not hasattr(self, 'train_file_list'):
+            return
+        if not self.training_files:
+            self.train_file_list.clear()
+            self.train_file_list.setVisible(False)
+            self.train_file_list.setFixedHeight(0)
+            return
+        self.train_file_list.setVisible(True)
+        row_height = self.train_file_list.sizeHintForRow(0) if self.train_file_list.count() else 28
+        target_height = min(
+            getattr(self, 'train_file_list_max_height', 120),
+            row_height * self.train_file_list.count() + 6
+        )
+        self.train_file_list.setFixedHeight(int(target_height))
