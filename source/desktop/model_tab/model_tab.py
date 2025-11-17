@@ -9,6 +9,7 @@ import sys
 import os
 import csv
 import json
+import re
 from datetime import datetime
 from PySide6.QtWidgets import QWidget, QMessageBox, QFileDialog
 from .ui_widgets.model_tab_ui import ModelTabUI
@@ -36,6 +37,7 @@ class ModelTab(QWidget):
         # 初始化控制器
         self.chart_controller = ModelTabChartController(self.ui_builder)
         self.train_config_controller = TrainConfigController(self)
+        self.fireball_calculator = FireballCalculator()
         self.training_files = []
         
         # 设置UI组件引用（向后兼容）
@@ -189,11 +191,13 @@ class ModelTab(QWidget):
         try:
             print(f"生成 {material_name} 材料的预测曲线...")
             
+            radius_calc = self.fireball_calculator
             # 计算当量比值 M（当前当量/标准当量）
-            # 标准当量设为 10.0 kg TNT（与默认值一致）
-            STANDARD_EQUIVALENT = 10.0  # kg TNT
-            m = equivalent / STANDARD_EQUIVALENT
-            print(f"当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT / 标准当量={STANDARD_EQUIVALENT} kg TNT)")
+            standard_equivalent = radius_calc.get_standard_equivalent(material_name)
+            m = radius_calc.calculate_equivalent_ratio(material_name, equivalent)
+            print(
+                f"当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT / 标准当量={standard_equivalent} kg TNT)"
+            )
             
             # 生成时间序列
             time_points = int(duration / 1.0) + 1  # 1ms步长
@@ -219,7 +223,6 @@ class ModelTab(QWidget):
             
             # 1. 火球直径随时间变化（应用当量缩放）
             print("计算火球直径...")
-            radius_calc = FireballCalculator()
             D_m = []
             for t in t_s:
                 diameter = radius_calc.calculate_diameter(t, material_name, m)
@@ -304,6 +307,7 @@ class ModelTab(QWidget):
                 for path in files:
                     self.train_file_list.addItem(os.path.basename(path))
                 self._update_train_file_list_state()
+            self._apply_training_parameters_from_files(files)
             print(f"📁 已选择训练文件 {len(files)} 个")
         except Exception as e:
             QMessageBox.critical(self, "错误", f"选择训练文件失败:\n{str(e)}")
@@ -472,3 +476,94 @@ class ModelTab(QWidget):
             row_height * self.train_file_list.count() + 6
         )
         self.train_file_list.setFixedHeight(int(target_height))
+
+    def _apply_training_parameters_from_files(self, files):
+        """从训练文件中读取参数并更新火球计算器"""
+        if not files:
+            return
+        applied = 0
+        first_params = None
+        for path in files:
+            params = self._apply_training_parameters_from_file(path)
+            if params:
+                applied += 1
+                if first_params is None:
+                    first_params = params
+        if applied:
+            print(f"🔧 已从 {applied} 个训练文件更新标准当量与 K/B/C 参数")
+        if first_params:
+            self._apply_simulation_inputs_from_params(first_params)
+
+    def _apply_training_parameters_from_file(self, file_path):
+        """单个文件解析逻辑"""
+        if not file_path.lower().endswith('.json'):
+            return None
+        try:
+            with open(file_path, 'r', encoding='utf-8') as fp:
+                data = json.load(fp)
+        except Exception as e:
+            print(f"⚠️ 无法读取训练文件 {file_path}: {e}")
+            return None
+        
+        params = data.get('parameters') or {}
+        drag_fit = data.get('drag_fit') or {}
+        
+        equivalent = self._safe_float(params.get('equivalent'))
+        al_percent = self._safe_float(params.get('al_percent'))
+        duration = self._safe_float(params.get('explosion_duration'))
+        k_value = self._safe_float(drag_fit.get('K'))
+        b_value = self._safe_float(drag_fit.get('B'))
+        c_value = self._safe_float(drag_fit.get('C'))
+        
+        if equivalent is None or al_percent is None:
+            return None
+        
+        material_name = self.get_material_by_al_content(al_percent)
+        kwargs = {'standard_equivalent': equivalent}
+        if k_value is not None:
+            kwargs['K'] = k_value
+        if b_value is not None:
+            kwargs['B'] = b_value
+        if c_value is not None:
+            kwargs['C'] = c_value
+        
+        try:
+            self.fireball_calculator.set_standard_parameters(material_name, **kwargs)
+            return {
+                'equivalent': equivalent,
+                'al_percent': al_percent,
+                'duration': duration,
+            }
+        except Exception as exc:
+            print(f"⚠️ 更新材料 {material_name} 参数失败: {exc}")
+            return None
+
+    def _apply_simulation_inputs_from_params(self, params):
+        """根据训练文件中的参数更新仿真默认值"""
+        if hasattr(self, 'p_eq') and params.get('equivalent') is not None:
+            self.p_eq.setText(f"{params['equivalent']:.6g}")
+        if hasattr(self, 'p_al') and params.get('al_percent') is not None:
+            self.p_al.setText(f"{params['al_percent']:.6g}")
+        if hasattr(self, 'p_duration') and params.get('duration') is not None:
+            self.p_duration.setText(f"{params['duration']:.6g}")
+
+    @staticmethod
+    def _safe_float(value):
+        """将各种字符串/数字转换为 float"""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned:
+                return None
+            cleaned = cleaned.replace('%', '')
+            cleaned = re.sub(r'[^\d\.\-eE+]', '', cleaned)
+            if not cleaned:
+                return None
+            try:
+                return float(cleaned)
+            except ValueError:
+                return None
+        return None
