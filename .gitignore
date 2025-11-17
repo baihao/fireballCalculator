@@ -39,6 +39,8 @@ source/image_segment/contour_visualization/**
 !images/**
 !source/desktop/icon/
 !source/desktop/icon/**
+!source/desktop/resources/
+!source/desktop/resources/**
 !papers/
 !papers/**
 !document/
@@ -62,6 +64,7 @@ source/image_segment/*_summary.png
 !example_data.json
 !fireball_sequence.json
 !source/desktop/fireball_sequence.json
+!source/desktop/resources/**
 
 # Test data directory
 test_data/
