@@ -136,22 +136,25 @@ def load_data_from_json(json_path: str) -> Tuple[List[str], Dict[int, Dict[str, 
 
 
 def test_complete_propagation(generate_visualization: bool = True,
-                              output_dir: str = "test_output"):
+                              output_dir: str = "test_output",
+                              fast_mode: bool = True):
     """测试完整的掩码传播流程
 
     Args:
         generate_visualization: 是否生成可视化结果
         output_dir: 输出目录
+        fast_mode: 是否启用快速模式（限制正负点数量，默认启用）
     """
     print("=" * 60)
     print("测试完整的基于RGB相似性的掩码传播")
     print("=" * 60)
     
     try:
-        # 创建分割器（默认启用后处理）
+        # 创建分割器（默认启用后处理和fast模式）
         print("1. 创建分割器...")
-        segmenter = create_iterative_segmenter(enable_postprocessing=True)
-        print("   ✓ 分割器创建成功（后处理已启用）")
+        segmenter = create_iterative_segmenter(enable_postprocessing=True, fast_mode=fast_mode)
+        mode_status = "已启用" if fast_mode else "已禁用"
+        print(f"   ✓ 分割器创建成功（后处理已启用，快速模式{mode_status}）")
         
         # 创建测试图片
         print("\n2. 创建测试图片...")
@@ -250,13 +253,15 @@ def test_complete_propagation(generate_visualization: bool = True,
 
 def test_from_json(json_path: str,
                    generate_visualization: bool = True,
-                   output_dir: str = "json_test_output"):
+                   output_dir: str = "json_test_output",
+                   fast_mode: bool = True):
     """从JSON文件测试掩码传播流程
 
     Args:
         json_path: JSON文件路径
         generate_visualization: 是否生成可视化结果
         output_dir: 输出目录
+        fast_mode: 是否启用快速模式（限制正负点数量，默认启用）
     """
     print("=" * 60)
     print("从JSON文件测试迭代掩码传播")
@@ -287,10 +292,11 @@ def test_from_json(json_path: str,
         
         image_paths = valid_paths
         
-        # 创建分割器（默认启用后处理）
+        # 创建分割器（默认启用后处理和fast模式）
         print("\n3. 创建分割器...")
-        segmenter = create_iterative_segmenter(enable_postprocessing=True)
-        print("   ✓ 分割器创建成功（后处理已启用）")
+        segmenter = create_iterative_segmenter(enable_postprocessing=True, fast_mode=fast_mode)
+        mode_status = "已启用" if fast_mode else "已禁用"
+        print(f"   ✓ 分割器创建成功（后处理已启用，快速模式{mode_status}）")
         
         # 执行分割
         print("\n4. 执行迭代掩码传播分割...", flush=True)
@@ -363,11 +369,12 @@ def main():
     """主测试函数"""
     print("基于RGB相似性的掩码传播完整测试")
     
-    # 命令行参数：json_path [--no-viz] [--out=DIR]
+    # 命令行参数：json_path [--no-viz] [--out=DIR] [--no-fast]
     args = sys.argv[1:]
     generate_visualization = True
     output_dir = "json_test_output"
     json_path = None
+    fast_mode = True  # 默认启用fast模式
 
     if args:
         # 第一个非选项参数作为 json_path
@@ -378,6 +385,8 @@ def main():
         for arg in args:
             if arg == "--no-viz":
                 generate_visualization = False
+            elif arg == "--no-fast":
+                fast_mode = False
             elif arg.startswith("--out="):
                 output_dir = arg.split("=", 1)[1].strip() or output_dir
 
@@ -385,7 +394,7 @@ def main():
         print(f"使用JSON文件: {json_path}")
         
         # 从JSON文件测试
-        test_passed = test_from_json(json_path, generate_visualization=generate_visualization, output_dir=output_dir)
+        test_passed = test_from_json(json_path, generate_visualization=generate_visualization, output_dir=output_dir, fast_mode=fast_mode)
         
         print(f"\n{'='*60}")
         print(f"测试总结:")
@@ -402,7 +411,7 @@ def main():
             print("⚠️ JSON测试失败，请检查输入数据和代码。")
     else:
         # 默认测试模式
-        test_passed = test_complete_propagation(generate_visualization=generate_visualization, output_dir="test_output")
+        test_passed = test_complete_propagation(generate_visualization=generate_visualization, output_dir="test_output", fast_mode=fast_mode)
         
         print(f"\n{'='*60}")
         print(f"测试总结:")
@@ -415,7 +424,11 @@ def main():
             print("⚠️ 测试失败，请检查代码。")
         
         print("\n💡 提示: 也可以使用JSON文件测试:")
-        print("   python test_complete_propagation.py data.json [--no-viz] [--out=DIR]")
+        print("   python test_complete_propagation.py data.json [--no-viz] [--no-fast] [--out=DIR]")
+        print("   选项说明:")
+        print("     --no-viz: 不生成可视化结果")
+        print("     --no-fast: 禁用快速模式（使用所有正负点）")
+        print("     --out=DIR: 指定输出目录")
 
 if __name__ == "__main__":
     main()

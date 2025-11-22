@@ -42,7 +42,8 @@ class IterativeMaskPropagationSegmenter:
     def __init__(self, model_type: str = "vit_b", 
                  checkpoint_path: Optional[str] = None,
                  device: str = "auto",
-                 enable_postprocessing: bool = True):
+                 enable_postprocessing: bool = True,
+                 fast_mode: bool = True):
         """
         初始化分割器
         
@@ -51,6 +52,7 @@ class IterativeMaskPropagationSegmenter:
             checkpoint_path: 模型检查点路径
             device: 设备类型
             enable_postprocessing: 是否启用掩码后处理（轮廓过滤）
+            fast_mode: 是否启用快速模式（限制正负点数量，默认启用）
         """
         if not check_sam_availability():
             raise ImportError("Segment Anything未安装，请先运行 setup.sh 安装SAM")
@@ -58,6 +60,7 @@ class IterativeMaskPropagationSegmenter:
         # 创建SAM管理器
         self.sam_manager = create_sam_manager(model_type, checkpoint_path, device)
         self.enable_postprocessing = enable_postprocessing
+        self.fast_mode = fast_mode
         
         # 保持向后兼容的属性
         self.model_type = self.sam_manager.model_type
@@ -491,6 +494,8 @@ class IterativeMaskPropagationSegmenter:
             point_coords = np.array(points) if points else None
             point_labels = np.array(labels) if labels else None
             
+            # 注意：用户选择的prompt点不进行drop，保持原样
+            
             # 转换矩形prompt
             input_boxes = None
             if boxes:
@@ -564,6 +569,10 @@ class IterativeMaskPropagationSegmenter:
             point_coords = np.array(target_points)
             point_labels = np.array(target_labels)
             
+            # Fast模式：随机drop点，使得正点和负点个数都分别不超过3个
+            if self.fast_mode:
+                point_coords, point_labels = self._apply_fast_mode_drop(point_coords, point_labels)
+            
             # 进行预测
             masks, scores, logits = self.predictor.predict(
                 point_coords=point_coords,
@@ -597,6 +606,61 @@ class IterativeMaskPropagationSegmenter:
             import traceback
             traceback.print_exc()
             return None
+    
+    def _apply_fast_mode_drop(self, point_coords: np.ndarray, point_labels: np.ndarray, 
+                              max_points_per_label: int = 3) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Fast模式：随机drop点，使得正点和负点个数都分别不超过指定数量
+        
+        Args:
+            point_coords: 点坐标数组
+            point_labels: 点标签数组 (1=正点, 0=负点)
+            max_points_per_label: 每个标签的最大点数（默认3）
+            
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: 筛选后的点坐标和标签
+        """
+        if len(point_coords) == 0:
+            return point_coords, point_labels
+        
+        # 分离正点和负点
+        positive_indices = np.where(point_labels == 1)[0]
+        negative_indices = np.where(point_labels == 0)[0]
+        
+        # 随机选择不超过max_points_per_label个点
+        selected_indices = []
+        
+        # 处理正点
+        if len(positive_indices) > max_points_per_label:
+            np.random.shuffle(positive_indices)
+            selected_indices.extend(positive_indices[:max_points_per_label])
+        else:
+            selected_indices.extend(positive_indices)
+        
+        # 处理负点
+        if len(negative_indices) > max_points_per_label:
+            np.random.shuffle(negative_indices)
+            selected_indices.extend(negative_indices[:max_points_per_label])
+        else:
+            selected_indices.extend(negative_indices)
+        
+        # 按照原始顺序排序（保持相对顺序）
+        selected_indices = sorted(selected_indices)
+        
+        # 提取筛选后的点和标签
+        filtered_coords = point_coords[selected_indices]
+        filtered_labels = point_labels[selected_indices]
+        
+        # 打印筛选信息
+        original_positive = len(positive_indices)
+        original_negative = len(negative_indices)
+        filtered_positive = np.sum(filtered_labels == 1)
+        filtered_negative = np.sum(filtered_labels == 0)
+        
+        if original_positive > max_points_per_label or original_negative > max_points_per_label:
+            print(f"    ⚡ Fast模式: 从 {original_positive}正/{original_negative}负 筛选到 {filtered_positive}正/{filtered_negative}负 个点")
+        
+        return filtered_coords, filtered_labels
     
     def _apply_mask_postprocessing(self, best_mask: np.ndarray, original_area: int, 
                                   sam_quality: float, target_idx: int) -> np.ndarray:
@@ -673,7 +737,8 @@ class IterativeMaskPropagationSegmenter:
 def create_iterative_segmenter(model_type: str = "vit_b", 
                                checkpoint_path: Optional[str] = None,
                                device: str = "auto",
-                               enable_postprocessing: bool = True) -> IterativeMaskPropagationSegmenter:
+                               enable_postprocessing: bool = True,
+                               fast_mode: bool = True) -> IterativeMaskPropagationSegmenter:
     """
     创建迭代掩码传播分割器的便捷函数
     
@@ -682,11 +747,12 @@ def create_iterative_segmenter(model_type: str = "vit_b",
         checkpoint_path: 模型检查点路径
         device: 设备类型
         enable_postprocessing: 是否启用掩码后处理（轮廓过滤）
+        fast_mode: 是否启用快速模式（限制正负点数量，默认启用）
         
     Returns:
         IterativeMaskPropagationSegmenter: 分割器实例
     """
-    return IterativeMaskPropagationSegmenter(model_type, checkpoint_path, device, enable_postprocessing)
+    return IterativeMaskPropagationSegmenter(model_type, checkpoint_path, device, enable_postprocessing, fast_mode)
 
 
 if __name__ == "__main__":
