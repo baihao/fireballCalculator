@@ -22,6 +22,7 @@ class FireballCalculator:
     def __init__(self):
         """初始化不同材料的参数 (基于Table 3)"""
         # 材料参数表 (Table 3: Explosion cloud expansion radius fitting coefficients)
+        default_equivalent = 10.0  # kg TNT
         self.materials = {
             'Polyurethane': {
                 'K1': 2.87,
@@ -30,7 +31,8 @@ class FireballCalculator:
                 'C': 0.05,
                 'precision_one_fitting': 94.99,
                 'quadratic_fitting': 95.90,
-                'description': '聚氨酯'
+                'description': '聚氨酯',
+                'standard_equivalent': default_equivalent,
             },
             '30%Al/Rubber': {
                 'K1': 3.03,
@@ -39,7 +41,8 @@ class FireballCalculator:
                 'C': 0.05,
                 'precision_one_fitting': 96.44,
                 'quadratic_fitting': 96.76,
-                'description': '30%铝粉/橡胶'
+                'description': '30%铝粉/橡胶',
+                'standard_equivalent': default_equivalent,
             },
             '40%Al/Rubber': {
                 'K1': 3.13,
@@ -48,7 +51,8 @@ class FireballCalculator:
                 'C': 0.05,
                 'precision_one_fitting': 96.70,
                 'quadratic_fitting': 96.90,
-                'description': '40%铝粉/橡胶'
+                'description': '40%铝粉/橡胶',
+                'standard_equivalent': default_equivalent,
             },
             '50%Al/Rubber': {
                 'K1': 3.07,
@@ -57,7 +61,8 @@ class FireballCalculator:
                 'C': 0.05,
                 'precision_one_fitting': 97.95,
                 'quadratic_fitting': 97.90,
-                'description': '50%铝粉/橡胶'
+                'description': '50%铝粉/橡胶',
+                'standard_equivalent': default_equivalent,
             },
             '60%Al/Rubber': {
                 'K1': 2.92,
@@ -66,9 +71,76 @@ class FireballCalculator:
                 'C': 0.05,
                 'precision_one_fitting': 91.77,
                 'quadratic_fitting': 93.34,
-                'description': '60%铝粉/橡胶'
+                'description': '60%铝粉/橡胶',
+                'standard_equivalent': default_equivalent,
             }
         }
+    
+    # ------------------------------------------------------------------
+    # 标准参数设置与查询
+    # ------------------------------------------------------------------
+    def set_standard_parameters(self, material_name, *, standard_equivalent=None, K=None, B=None, C=None):
+        """
+        设置指定材料的标准当量及其对应的 K、B、C 参数
+        
+        参数:
+            material_name: 材料名称
+            standard_equivalent: 标准当量 (kg TNT)
+            K: 拟合常数 K2
+            B: 参数 B
+            C: 参数 C（默认单位：ms^-2）
+        """
+        if material_name not in self.materials:
+            raise ValueError(f"未知的材料名称: {material_name}")
+        
+        params = self.materials[material_name]
+        
+        if standard_equivalent is not None:
+            if standard_equivalent <= 0:
+                raise ValueError("标准当量必须大于0")
+            params['standard_equivalent'] = float(standard_equivalent)
+        
+        if K is not None:
+            if K <= 0:
+                raise ValueError("K 必须大于0")
+            params['K2'] = float(K)
+        
+        if B is not None:
+            params['B'] = float(B)
+        
+        if C is not None:
+            params['C'] = float(C)
+    
+    def get_standard_parameters(self, material_name):
+        """获取指定材料当前生效的标准参数"""
+        if material_name not in self.materials:
+            raise ValueError(f"未知的材料名称: {material_name}")
+        params = self.materials[material_name]
+        return {
+            'standard_equivalent': params.get('standard_equivalent', 10.0),
+            'K': params['K2'],
+            'B': params['B'],
+            'C': params['C'],
+        }
+    
+    def get_standard_equivalent(self, material_name):
+        """获取指定材料的标准当量 (kg TNT)"""
+        return self.get_standard_parameters(material_name)['standard_equivalent']
+    
+    def calculate_equivalent_ratio(self, material_name, equivalent):
+        """
+        根据指定材料的标准当量计算当量比值
+        
+        参数:
+            material_name: 材料名称
+            equivalent: 当前当量 (kg TNT)
+        """
+        if equivalent <= 0:
+            raise ValueError("当前当量必须大于0")
+        standard = self.get_standard_equivalent(material_name)
+        if standard <= 0:
+            raise ValueError("标准当量必须大于0")
+        return float(equivalent) / float(standard)
     
     def calculate_radius(self, t, material_name, m=1.0):
         """
@@ -77,7 +149,7 @@ class FireballCalculator:
         参数:
         t: 时间 (s)
         material_name: 材料名称
-        m: 当量比值（当前当量/标准当量），默认为1.0（标准当量）
+        m: 当量比值（当前当量/标准当量），默认为1.0（使用材料的标准当量）
         
         返回:
         R: 火球半径 (m)
@@ -120,7 +192,7 @@ class FireballCalculator:
         参数:
         t: 时间 (s)
         material_name: 材料名称
-        m: 当量比值（当前当量/标准当量），默认为1.0（标准当量）
+        m: 当量比值（当前当量/标准当量），默认为1.0（使用材料的标准当量）
         
         返回:
         D: 火球直径 (m)
@@ -142,7 +214,7 @@ class FireballCalculator:
         参数:
         t: 时间 (s)
         material_name: 材料名称
-        m: 当量比值（当前当量/标准当量），默认为1.0（标准当量）
+        m: 当量比值（当前当量/标准当量），默认为1.0（使用材料的标准当量）
         
         返回:
         V: 火球膨胀速率 (m/s)
@@ -262,7 +334,7 @@ class FireballCalculator:
         参数:
         t: 时间 (s)
         material_name: 材料名称
-        m: 当量比值（当前当量/标准当量），默认为1.0（标准当量）
+        m: 当量比值（当前当量/标准当量），默认为1.0（使用材料的标准当量）
         
         返回:
         dict: 包含半径、直径和膨胀速度的字典

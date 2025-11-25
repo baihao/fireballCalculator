@@ -7,6 +7,7 @@ model_tab.controllers package
 """
 
 from .chart_controller import ModelTabChartController
+from .train_config_controller import TrainConfigController
 
-__all__ = ["ModelTabChartController"]
+__all__ = ["ModelTabChartController", "TrainConfigController"]
 
