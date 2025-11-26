@@ -87,20 +87,28 @@ PYINSTALLER_ARGS=(
   --hidden-import matplotlib.backends.backend_qt5agg
   --hidden-import cv2
   --hidden-import unittest
+  --hidden-import torch
+  --hidden-import torch.nn
+  --hidden-import torch.nn.functional
+  --hidden-import torch.backends
+  --hidden-import torch.backends.mps
+  --hidden-import segment_anything
+  --hidden-import segment_anything.sam_model_registry
+  --hidden-import segment_anything.predictor
+  --collect-all torch
+  --collect-all segment_anything
   --exclude-module tkinter
   --exclude-module pandas
   --exclude-module IPython
   --exclude-module jupyter
   --exclude-module notebook
   --exclude-module pytest
-  --exclude-module torch
-  --exclude-module torchvision
   --exclude-module tensorflow
   --name "${APP_NAME}"
 )
 
-# 注意：不使用 --collect-all，避免重复打包导致的符号链接冲突
-# PyInstaller 会自动检测并包含必要的依赖
+# 注意：使用 --collect-all torch 和 --collect-all segment_anything
+# 以确保包含所有必要的依赖，因为桌面应用直接调用分割模块
 
 # 添加图标（如果存在）
 if [ -n "$ICON_PATH" ]; then
@@ -120,9 +128,65 @@ if [ -d "source/desktop/icon" ]; then
   echo "[macOS 桌面应用] 包含图标目录: source/desktop/icon"
 fi
 
+# 添加 SAM 第三方库（如果需要）
+if [ -d "source/third_party/segment-anything" ]; then
+  # 创建临时目录，只复制必要的 SAM 文件
+  TEMP_SAM_DIR="$PROJECT_ROOT/temp_sam_desktop"
+  rm -rf "$TEMP_SAM_DIR"
+  mkdir -p "$TEMP_SAM_DIR/segment-anything/segment_anything"
+  mkdir -p "$TEMP_SAM_DIR/segment-anything/checkpoints"
+  
+  echo "[macOS 桌面应用] 准备最小化的 SAM 文件..."
+  
+  # 只复制 SAM Python 代码（不包括 demo/notebooks/assets）
+  cp -r source/third_party/segment-anything/segment_anything/* "$TEMP_SAM_DIR/segment-anything/segment_anything/" 2>/dev/null || true
+  
+  # 只复制需要的模型检查点（默认 vit_b，约 375MB）
+  # 如果需要其他模型，取消注释相应行
+  CHECKPOINT_COUNT=0
+  if ls source/third_party/segment-anything/checkpoints/sam_vit_b*.pth 1> /dev/null 2>&1; then
+    cp source/third_party/segment-anything/checkpoints/sam_vit_b*.pth "$TEMP_SAM_DIR/segment-anything/checkpoints/" 2>/dev/null || true
+    CHECKPOINT_COUNT=$((CHECKPOINT_COUNT + 1))
+    echo "[macOS 桌面应用] ✓ 已包含 vit_b 模型检查点"
+  fi
+  
+  # 可选：如果需要 vit_l 模型，取消下面的注释
+  # if ls source/third_party/segment-anything/checkpoints/sam_vit_l*.pth 1> /dev/null 2>&1; then
+  #   cp source/third_party/segment-anything/checkpoints/sam_vit_l*.pth "$TEMP_SAM_DIR/segment-anything/checkpoints/" 2>/dev/null || true
+  #   CHECKPOINT_COUNT=$((CHECKPOINT_COUNT + 1))
+  #   echo "[macOS 桌面应用] ✓ 已包含 vit_l 模型检查点"
+  # fi
+  
+  # 可选：如果需要 vit_h 模型，取消下面的注释（注意：文件很大，约 2.4GB）
+  # if ls source/third_party/segment-anything/checkpoints/sam_vit_h*.pth 1> /dev/null 2>&1; then
+  #   cp source/third_party/segment-anything/checkpoints/sam_vit_h*.pth "$TEMP_SAM_DIR/segment-anything/checkpoints/" 2>/dev/null || true
+  #   CHECKPOINT_COUNT=$((CHECKPOINT_COUNT + 1))
+  #   echo "[macOS 桌面应用] ✓ 已包含 vit_h 模型检查点"
+  # fi
+  
+  if [ $CHECKPOINT_COUNT -eq 0 ]; then
+    echo "[macOS 桌面应用] 警告: 未找到任何 SAM 模型检查点文件"
+    echo "[macOS 桌面应用] 分割功能可能无法正常工作"
+  else
+    # 显示检查点文件大小
+    CHECKPOINT_SIZE=$(du -sh "$TEMP_SAM_DIR/segment-anything/checkpoints" 2>/dev/null | cut -f1 || echo "未知")
+    echo "[macOS 桌面应用] 检查点文件大小: $CHECKPOINT_SIZE (包含 $CHECKPOINT_COUNT 个模型)"
+  fi
+  
+  # 添加临时 SAM 目录到打包参数
+  PYINSTALLER_ARGS+=(--add-data "$TEMP_SAM_DIR/segment-anything:third_party/segment-anything")
+  echo "[macOS 桌面应用] 包含 SAM 第三方库: source/third_party/segment-anything"
+fi
+
 # 执行打包
 echo "[macOS 桌面应用] 开始执行 PyInstaller 打包..."
 pyinstaller "${PYINSTALLER_ARGS[@]}" "$ENTRY_SCRIPT"
+
+# 清理临时 SAM 目录
+if [ -d "$TEMP_SAM_DIR" ]; then
+  echo "[macOS 桌面应用] 清理临时 SAM 目录..."
+  rm -rf "$TEMP_SAM_DIR"
+fi
 
 # 清理打包目录中的不必要文件
 echo "[macOS 桌面应用] 清理不必要的文件..."
@@ -135,11 +199,12 @@ if [ -d "dist/${APP_NAME}/_internal" ]; then
   find "dist/${APP_NAME}/_internal" -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
   find "dist/${APP_NAME}/_internal" -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
   
-  # 删除 PyTorch 相关目录（如果被打包进来了）
-  echo "[macOS 桌面应用] 清理 PyTorch 相关目录..."
-  rm -rf "dist/${APP_NAME}/_internal/torch" 2>/dev/null || true
-  rm -rf "dist/${APP_NAME}/_internal/torchvision" 2>/dev/null || true
+  # 删除 TensorFlow 相关目录（不需要）
+  echo "[macOS 桌面应用] 清理 TensorFlow 相关目录..."
   rm -rf "dist/${APP_NAME}/_internal/tensorflow" 2>/dev/null || true
+  
+  # 注意：不再删除 PyTorch 相关目录，因为桌面应用直接调用分割模块需要 PyTorch
+  echo "[macOS 桌面应用] 保留 PyTorch 和 SAM 相关依赖（分割模块需要）"
 fi
 
 # 创建 macOS .app 包（可选，如果需要标准的 .app 格式）

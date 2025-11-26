@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
 from PySide6.QtCore import Qt, Signal
-from .utils.segment_utils import build_time_diameter_series, run_segmentation_script
+from .utils.segment_utils import build_time_diameter_series, run_segmentation_direct
 from .utils.sequence_manager import SequenceManager
 from .sequence_model import SequenceModel
 from .ui_widgets.extract_tab_ui import ExtractTabUI
@@ -394,7 +394,7 @@ class ExtractTab(QWidget):
         def worker():
             def on_line(line: str):
                 self.log_received.emit(line)
-            ok = run_segmentation_script(sequence_file_path, on_output_line=on_line)
+            ok = run_segmentation_direct(sequence_file_path, on_output_line=on_line)
             self.seg_finished.emit(ok)
 
         threading.Thread(target=worker, daemon=True).start()
