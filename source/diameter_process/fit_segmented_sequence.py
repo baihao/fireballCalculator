@@ -10,6 +10,7 @@
 
 import sys
 import os
+import csv
 import numpy as np
 from typing import List, Tuple, Dict, Any, Optional
 
@@ -18,10 +19,9 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 source_path = os.path.join(project_root, 'source')
 sys.path.insert(0, source_path)
 
-from desktop.sequence_manager import SequenceManager
-from desktop.segment_utils import build_time_diameter_series
 from diameter_drag_fitting import DiameterDragFitter
 from drag_fit_plotter import DragFitPlotter
+from csv_data_loader import load_csv_data
 
 
 def load_segmented_sequence(file_path: str) -> Tuple[bool, Dict[str, Any], str]:
@@ -34,6 +34,9 @@ def load_segmented_sequence(file_path: str) -> Tuple[bool, Dict[str, Any], str]:
     Returns:
         Tuple[bool, Dict[str, Any], str]: (是否成功, 序列数据, 错误信息)
     """
+    # 延迟导入，只在需要时导入
+    from desktop.extract_tab.utils.sequence_manager import SequenceManager
+    
     try:
         manager = SequenceManager()
         success, sequence_data, message = manager.load_sequence_file(file_path)
@@ -61,6 +64,10 @@ def extract_diameter_data(sequence_data: Dict[str, Any]) -> Tuple[List[float], L
     Returns:
         Tuple[List[float], List[float], str]: (时间数据, 直径数据, 错误信息)
     """
+    # 延迟导入，只在需要时导入
+    from desktop.extract_tab.utils.sequence_manager import SequenceManager
+    from desktop.extract_tab.utils.segment_utils import build_time_diameter_series
+    
     try:
         manager = SequenceManager()
         
@@ -98,6 +105,113 @@ def extract_diameter_data(sequence_data: Dict[str, Any]) -> Tuple[List[float], L
         
     except Exception as e:
         return [], [], f"提取直径数据失败: {str(e)}"
+
+
+def _perform_drag_fitting(time_data: List[float], diameter_data: List[float],
+                          file_path: str, output_dir: Optional[str],
+                          use_robust_fitting: bool, is_csv_input: bool = False) -> Dict[str, Any]:
+    """
+    执行拖曳曲线拟合和绘制结果的共同方法
+    
+    Args:
+        time_data: 时间数据列表（毫秒）
+        diameter_data: 直径数据列表（米）
+        file_path: 输入文件路径（用于生成输出文件名）
+        output_dir: 输出目录（可选）
+        use_robust_fitting: 是否使用鲁棒拟合
+        is_csv_input: 是否为CSV输入（如果是，则输出拟合后的CSV文件）
+        
+    Returns:
+        Dict[str, Any]: 拟合结果
+    """
+    # 执行拟合（启用数据过滤）
+    print(f"\n执行拖曳曲线拟合...")
+    fitter = DiameterDragFitter()
+    fit_result = fitter.fit_drag_curve(time_data, diameter_data, use_robust_fitting, time_unit='ms',
+                                     enable_data_filtering=True, drop_threshold=0.02, window_size=10)
+    
+    if not fit_result.get('success', False):
+        return {
+            'success': False,
+            'error': f"拟合失败: {fit_result.get('error', '未知错误')}",
+            'file_path': file_path,
+            'time_data': time_data,
+            'diameter_data': diameter_data
+        }
+    
+    print(f"✓ 拟合成功")
+    print(f"  参数: K={fit_result['K']:.4f}, B={fit_result['B']:.4f}, C={fit_result['C']:.4f}")
+    print(f"  质量: R²={fit_result.get('r_squared', 0):.4f}, RMSE={fit_result.get('rmse', 0):.4f}")
+    
+    # 如果是CSV输入，计算拟合值并保存CSV
+    csv_output_path = None
+    if is_csv_input:
+        print(f"\n生成拟合后的CSV文件...")
+        if output_dir is None:
+            output_dir = os.path.dirname(file_path) or '.'
+        
+        # 确保输出目录存在
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 生成输出文件名
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        csv_output_path = os.path.join(output_dir, f"{base_name}_fitted.csv")
+        
+        # 计算拟合值
+        t_array = np.array(time_data)
+        K = fit_result['K']
+        B = fit_result['B']
+        C = fit_result['C']
+        fitted_diameter = DiameterDragFitter.drag_function(t_array, K, B, C)
+        
+        # 保存CSV文件（只包含拟合数据）
+        try:
+            with open(csv_output_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['时间(ms)', '拟合直径(m)'])
+                for i in range(len(time_data)):
+                    writer.writerow([
+                        f'{time_data[i]:.6f}',
+                        f'{fitted_diameter[i]:.6f}'
+                    ])
+            print(f"✓ 拟合后的CSV文件已保存: {csv_output_path}")
+        except Exception as e:
+            print(f"⚠️ 保存CSV文件失败: {str(e)}")
+            csv_output_path = None
+    
+    # 绘制结果
+    print(f"\n绘制拟合结果...")
+    if output_dir is None:
+        output_dir = os.path.dirname(file_path) or '.'
+    
+    # 生成输出文件名
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    plot_path = os.path.join(output_dir, f"{base_name}_drag_fit.png")
+    
+    plotter = DragFitPlotter()
+    plot_success = plotter.plot_fit_results(time_data, diameter_data, fit_result, plot_path, time_unit='ms')
+    
+    if plot_success:
+        print(f"✓ 拟合结果图已保存: {plot_path}")
+    else:
+        print(f"⚠️ 保存拟合结果图失败")
+    
+    # 返回完整结果
+    result = {
+        'success': True,
+        'file_path': file_path,
+        'plot_path': plot_path if plot_success else None,
+        'csv_output_path': csv_output_path,
+        'fit_result': fit_result,
+        'data_summary': {
+            'data_points': len(time_data),
+            'time_range': [min(time_data), max(time_data)],
+            'diameter_range': [min(diameter_data), max(diameter_data)],
+            'explosion_duration': max(time_data) - min(time_data)
+        }
+    }
+    
+    return result
 
 
 def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = None, 
@@ -142,56 +256,50 @@ def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = Non
         
         print(f"✓ {extract_message}")
         
-        # 3. 执行拟合（启用数据过滤）
-        print(f"\n3. 执行拖曳曲线拟合...")
-        fitter = DiameterDragFitter()
-        fit_result = fitter.fit_drag_curve(time_data, diameter_data, use_robust_fitting, time_unit='ms',
-                                         enable_data_filtering=True, drop_threshold=0.02, window_size=10)
+        # 3. 执行拟合和绘制（调用共同方法）
+        result = _perform_drag_fitting(time_data, diameter_data, file_path, output_dir, use_robust_fitting, is_csv_input=False)
+        return result
         
-        if not fit_result.get('success', False):
+    except Exception as e:
+        return {
+            'success': False,
+            'error': f"拟合过程异常: {str(e)}",
+            'file_path': file_path
+        }
+
+
+def fit_drag_curve_from_csv(file_path: str, output_dir: Optional[str] = None,
+                            use_robust_fitting: bool = True) -> Dict[str, Any]:
+    """
+    从CSV文件拟合拖曳曲线
+    
+    Args:
+        file_path: CSV文件路径（格式：时间(ms),直径(m)）
+        output_dir: 输出目录（可选）
+        use_robust_fitting: 是否使用鲁棒拟合
+        
+    Returns:
+        Dict[str, Any]: 拟合结果
+    """
+    try:
+        print("=" * 60)
+        print("火球直径拖曳曲线拟合（CSV数据）")
+        print("=" * 60)
+        
+        # 1. 加载CSV文件
+        print(f"\n1. 加载CSV文件: {file_path}")
+        time_data, diameter_data, load_message = load_csv_data(file_path)
+        if not time_data or not diameter_data:
             return {
                 'success': False,
-                'error': f"拟合失败: {fit_result.get('error', '未知错误')}",
-                'file_path': file_path,
-                'time_data': time_data,
-                'diameter_data': diameter_data
+                'error': f"加载CSV文件失败: {load_message}",
+                'file_path': file_path
             }
         
-        print(f"✓ 拟合成功")
-        print(f"  参数: K={fit_result['K']:.4f}, B={fit_result['B']:.4f}, C={fit_result['C']:.4f}")
-        print(f"  质量: R²={fit_result.get('r_squared', 0):.4f}, RMSE={fit_result.get('rmse', 0):.4f}")
+        print(f"✓ {load_message}")
         
-        # 4. 绘制结果
-        print(f"\n4. 绘制拟合结果...")
-        if output_dir is None:
-            output_dir = os.path.dirname(file_path)
-        
-        # 生成输出文件名
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        plot_path = os.path.join(output_dir, f"{base_name}_drag_fit.png")
-        
-        plotter = DragFitPlotter()
-        plot_success = plotter.plot_fit_results(time_data, diameter_data, fit_result, plot_path, time_unit='ms')
-        
-        if plot_success:
-            print(f"✓ 拟合结果图已保存: {plot_path}")
-        else:
-            print(f"⚠️ 保存拟合结果图失败")
-        
-        # 5. 返回完整结果
-        result = {
-            'success': True,
-            'file_path': file_path,
-            'plot_path': plot_path if plot_success else None,
-            'fit_result': fit_result,
-            'data_summary': {
-                'data_points': len(time_data),
-                'time_range': [min(time_data), max(time_data)],
-                'diameter_range': [min(diameter_data), max(diameter_data)],
-                'explosion_duration': max(time_data) - min(time_data)
-            }
-        }
-        
+        # 2. 执行拟合和绘制（调用共同方法，标记为CSV输入）
+        result = _perform_drag_fitting(time_data, diameter_data, file_path, output_dir, use_robust_fitting, is_csv_input=True)
         return result
         
     except Exception as e:
@@ -205,15 +313,18 @@ def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = Non
 def main():
     """主函数：命令行接口"""
     if len(sys.argv) < 2:
-        print("用法: python fit_segmented_sequence.py <segmented_sequence.json> [output_dir] [--robust]")
+        print("用法: python fit_segmented_sequence.py <input_file> [output_dir] [--robust]")
         print("")
         print("参数:")
-        print("  segmented_sequence.json: 分割序列JSON文件路径")
+        print("  input_file: 输入文件路径（支持JSON或CSV格式）")
+        print("    - JSON格式: 分割序列JSON文件")
+        print("    - CSV格式: 包含时间(ms)和直径(m)列的CSV文件")
         print("  output_dir: 输出目录（可选，默认为输入文件所在目录）")
         print("  --robust: 使用鲁棒拟合（可选，默认为True）")
         print("")
         print("示例:")
         print("  python fit_segmented_sequence.py test_data/fireball_sequence_segmented.json")
+        print("  python fit_segmented_sequence.py experiment/diameter.csv ./output")
         print("  python fit_segmented_sequence.py test_data/fireball_sequence_segmented.json ./output --robust")
         return
     
@@ -227,8 +338,25 @@ def main():
         print(f"❌ 文件不存在: {file_path}")
         return
     
-    # 执行拟合
-    result = fit_drag_curve_from_sequence(file_path, output_dir, use_robust)
+    # 根据文件扩展名选择处理方式
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    if file_ext == '.csv':
+        # CSV文件：使用CSV拟合函数
+        result = fit_drag_curve_from_csv(file_path, output_dir, use_robust)
+    elif file_ext == '.json':
+        # JSON文件：使用序列拟合函数
+        result = fit_drag_curve_from_sequence(file_path, output_dir, use_robust)
+    else:
+        # 尝试自动检测：先尝试CSV，如果失败再尝试JSON
+        print(f"⚠️ 未识别的文件扩展名 '{file_ext}'，尝试自动检测...")
+        time_data, diameter_data, _ = load_csv_data(file_path)
+        if time_data and diameter_data:
+            print("✓ 检测为CSV格式")
+            result = fit_drag_curve_from_csv(file_path, output_dir, use_robust)
+        else:
+            print("✓ 检测为JSON格式")
+            result = fit_drag_curve_from_sequence(file_path, output_dir, use_robust)
     
     # 输出结果
     print("\n" + "=" * 60)
@@ -237,6 +365,8 @@ def main():
         print(f"📁 输入文件: {result['file_path']}")
         if result.get('plot_path'):
             print(f"📊 结果图表: {result['plot_path']}")
+        if result.get('csv_output_path'):
+            print(f"📄 拟合CSV文件: {result['csv_output_path']}")
         
         fit_result = result['fit_result']
         print(f"\n📈 拟合参数:")
