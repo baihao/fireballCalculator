@@ -14,7 +14,7 @@ import numpy as np
 LINE_WIDTH = 2                    # 线条宽度
 AXIS_PADDING_RATIO = 0.1          # 坐标轴边距比例（10%）
 X_PADDING_DEFAULT = 0.05          # x轴默认边距（距离）
-Y_PADDING_DEFAULT = 200.0         # y轴默认边距（热辐射量）
+Y_PADDING_DEFAULT = 20.0           # y轴默认边距（热辐射量，单位：kJ/m²）
 
 # 颜色常量
 COLOR_RADIATION = '#10b981'       # 累积热辐射量曲线颜色（绿色）
@@ -26,12 +26,12 @@ class RadiationChart(BaseChart):
     def __init__(self, width: float = 4, height: float = 2.5, dpi: int = 100):
         super().__init__(
             x_label="距离 (m)",
-            y_label="热辐射量 (J/m²)",
+            y_label="热辐射量 (kJ/m²)",
             title="累积热辐射量随距离分布",
-            xlim=(4.0, 6.0),
-            ylim=(0, 10000),
+            xlim=(6.0, 10.0),
+            ylim=(0, 1000),  # 调整y轴范围以适应kJ/m²单位（约0-1000 kJ/m²）
             placeholder_text="等待预测...",
-            placeholder_xy=(5.0, 5000),
+            placeholder_xy=(8.0, 500),
             width=width,
             height=height,
             dpi=dpi,
@@ -91,7 +91,7 @@ class RadiationChart(BaseChart):
 
         Args:
             distances: 距离数组（米）
-            heat_radiation: 累积热辐射量数组（J/m²）
+            heat_radiation: 累积热辐射量数组（kJ/m²）
         """
         # 基础有效性
         if distances is None or len(distances) == 0:

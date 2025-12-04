@@ -224,7 +224,11 @@ class SequenceModel:
         drag_fit_result: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """构建保存分析结果所需的字典。"""
-        return {
+        # 获取温度数据
+        temperature_time, temperature_data = self.get_temperature_series()
+        
+        # 构建导出数据
+        export_data = {
             "diameter_over_time": [
                 {"time_ms": float(t), "diameter_m": float(d)}
                 for t, d in (diameter_series or [])
@@ -244,6 +248,15 @@ class SequenceModel:
                 "expression": "D(t) = K * (1 - B * exp(-C * t^2))",
             },
         }
+        
+        # 如果有温度数据，添加到导出数据中
+        if temperature_time and temperature_data and len(temperature_time) > 0 and len(temperature_data) > 0:
+            export_data["temperature"] = [
+                [float(t), float(T)]
+                for t, T in zip(temperature_time, temperature_data)
+            ]
+        
+        return export_data
 
     def get_sequence_summary(self) -> Dict[str, Any]:
         """返回用于 UI 展示的序列摘要信息。"""

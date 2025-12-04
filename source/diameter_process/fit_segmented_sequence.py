@@ -18,10 +18,15 @@ from typing import List, Tuple, Dict, Any, Optional
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 source_path = os.path.join(project_root, 'source')
 sys.path.insert(0, source_path)
+# 确保 desktop 目录也在路径中，以便能找到 framework 模块
+desktop_path = os.path.join(source_path, 'desktop')
+if desktop_path not in sys.path:
+    sys.path.insert(0, desktop_path)
 
 from diameter_drag_fitting import DiameterDragFitter
 from drag_fit_plotter import DragFitPlotter
 from csv_data_loader import load_csv_data
+from farthest_point_extractor import extract_farthest_point_data
 
 
 def load_segmented_sequence(file_path: str) -> Tuple[bool, Dict[str, Any], str]:
@@ -215,7 +220,8 @@ def _perform_drag_fitting(time_data: List[float], diameter_data: List[float],
 
 
 def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = None, 
-                                use_robust_fitting: bool = True) -> Dict[str, Any]:
+                                use_robust_fitting: bool = True,
+                                output_farthest_point: bool = False) -> Dict[str, Any]:
     """
     从分割序列文件拟合拖曳曲线
     
@@ -223,6 +229,7 @@ def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = Non
         file_path: 分割序列JSON文件路径
         output_dir: 输出目录（可选）
         use_robust_fitting: 是否使用鲁棒拟合
+        output_farthest_point: 是否输出最远点坐标CSV文件
         
     Returns:
         Dict[str, Any]: 拟合结果
@@ -244,8 +251,15 @@ def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = Non
         
         print(f"✓ {message}")
         
-        # 2. 提取直径数据
-        print(f"\n2. 提取直径数据...")
+        # 2. 如果指定了输出最远点，先提取最远点数据
+        farthest_point_csv_path = None
+        if output_farthest_point:
+            print(f"\n2. 提取最远点数据...")
+            farthest_point_csv_path = extract_farthest_point_data(sequence_data, output_dir, file_path)
+        
+        # 3. 提取直径数据
+        step_num = 3 if output_farthest_point else 2
+        print(f"\n{step_num}. 提取直径数据...")
         time_data, diameter_data, extract_message = extract_diameter_data(sequence_data)
         if not time_data or not diameter_data:
             return {
@@ -256,8 +270,13 @@ def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = Non
         
         print(f"✓ {extract_message}")
         
-        # 3. 执行拟合和绘制（调用共同方法）
+        # 4. 执行拟合和绘制（调用共同方法）
         result = _perform_drag_fitting(time_data, diameter_data, file_path, output_dir, use_robust_fitting, is_csv_input=False)
+        
+        # 添加最远点CSV路径到结果中
+        if farthest_point_csv_path:
+            result['farthest_point_csv_path'] = farthest_point_csv_path
+        
         return result
         
     except Exception as e:
@@ -313,7 +332,7 @@ def fit_drag_curve_from_csv(file_path: str, output_dir: Optional[str] = None,
 def main():
     """主函数：命令行接口"""
     if len(sys.argv) < 2:
-        print("用法: python fit_segmented_sequence.py <input_file> [output_dir] [--robust]")
+        print("用法: python fit_segmented_sequence.py <input_file> [output_dir] [--robust] [-outputFarthestPoint]")
         print("")
         print("参数:")
         print("  input_file: 输入文件路径（支持JSON或CSV格式）")
@@ -321,17 +340,33 @@ def main():
         print("    - CSV格式: 包含时间(ms)和直径(m)列的CSV文件")
         print("  output_dir: 输出目录（可选，默认为输入文件所在目录）")
         print("  --robust: 使用鲁棒拟合（可选，默认为True）")
+        print("  -outputFarthestPoint: 输出每张图片的最远点坐标和像素半径CSV（仅适用于JSON格式）")
         print("")
         print("示例:")
         print("  python fit_segmented_sequence.py test_data/fireball_sequence_segmented.json")
         print("  python fit_segmented_sequence.py experiment/diameter.csv ./output")
         print("  python fit_segmented_sequence.py test_data/fireball_sequence_segmented.json ./output --robust")
+        print("  python fit_segmented_sequence.py test_data/fireball_sequence_segmented.json ./output -outputFarthestPoint")
         return
     
     # 解析命令行参数
     file_path = sys.argv[1]
-    output_dir = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else None
-    use_robust = '--robust' in sys.argv or '--no-robust' not in sys.argv  # 默认使用鲁棒拟合
+    output_dir = None
+    use_robust = True
+    output_farthest_point = False
+    
+    # 解析参数
+    for arg in sys.argv[2:]:
+        if arg.startswith('--'):
+            if arg == '--robust':
+                use_robust = True
+            elif arg == '--no-robust':
+                use_robust = False
+        elif arg == '-outputFarthestPoint':
+            output_farthest_point = True
+        elif not arg.startswith('-'):
+            # 非选项参数，作为输出目录
+            output_dir = arg
     
     # 检查文件是否存在
     if not os.path.exists(file_path):
@@ -343,20 +378,24 @@ def main():
     
     if file_ext == '.csv':
         # CSV文件：使用CSV拟合函数
+        if output_farthest_point:
+            print("⚠️ 警告: -outputFarthestPoint 参数仅适用于JSON格式文件，已忽略")
         result = fit_drag_curve_from_csv(file_path, output_dir, use_robust)
     elif file_ext == '.json':
         # JSON文件：使用序列拟合函数
-        result = fit_drag_curve_from_sequence(file_path, output_dir, use_robust)
+        result = fit_drag_curve_from_sequence(file_path, output_dir, use_robust, output_farthest_point)
     else:
         # 尝试自动检测：先尝试CSV，如果失败再尝试JSON
         print(f"⚠️ 未识别的文件扩展名 '{file_ext}'，尝试自动检测...")
         time_data, diameter_data, _ = load_csv_data(file_path)
         if time_data and diameter_data:
             print("✓ 检测为CSV格式")
+            if output_farthest_point:
+                print("⚠️ 警告: -outputFarthestPoint 参数仅适用于JSON格式文件，已忽略")
             result = fit_drag_curve_from_csv(file_path, output_dir, use_robust)
         else:
             print("✓ 检测为JSON格式")
-            result = fit_drag_curve_from_sequence(file_path, output_dir, use_robust)
+            result = fit_drag_curve_from_sequence(file_path, output_dir, use_robust, output_farthest_point)
     
     # 输出结果
     print("\n" + "=" * 60)
@@ -367,6 +406,8 @@ def main():
             print(f"📊 结果图表: {result['plot_path']}")
         if result.get('csv_output_path'):
             print(f"📄 拟合CSV文件: {result['csv_output_path']}")
+        if result.get('farthest_point_csv_path'):
+            print(f"📍 最远点CSV文件: {result['farthest_point_csv_path']}")
         
         fit_result = result['fit_result']
         print(f"\n📈 拟合参数:")
