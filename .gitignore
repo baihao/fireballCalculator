@@ -65,6 +65,9 @@ source/image_segment/*_summary.png
 !fireball_sequence.json
 !source/desktop/fireball_sequence.json
 !source/desktop/resources/**
+# Ignore zip files in resources directory
+source/desktop/resources/*.zip
+source/desktop/resources/所有图片.zip
 
 # Test data directory
 test_data/
@@ -79,6 +82,12 @@ source/image_segment/output_point_prompt/
 source/image_segment/output_point_prompt/**
 source/image_segment/output_sam/
 source/image_segment/output_sam/**
+
+# Experiment outputs and reports
+experiment/
+experiment/**
+reports/
+reports/**
 
 # Python caches
 __pycache__/

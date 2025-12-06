@@ -39,6 +39,10 @@ class ModelTab(QWidget):
         self.train_config_controller = TrainConfigController(self)
         self.fireball_calculator = FireballCalculator()
         self.training_files = []
+        # 存储训练文件中的温度数据
+        self.training_temperature_data = None  # (time_ms_array, temperature_K_array)
+        # 存储训练文件中的K值（用于直接使用，不进行当量缩放）
+        self.training_K_value = None  # 从训练文件中提取的K值
         
         # 设置UI组件引用（向后兼容）
         self._setup_ui_component_references()
@@ -192,12 +196,19 @@ class ModelTab(QWidget):
             print(f"生成 {material_name} 材料的预测曲线...")
             
             radius_calc = self.fireball_calculator
-            # 计算当量比值 M（当前当量/标准当量）
-            standard_equivalent = radius_calc.get_standard_equivalent(material_name)
-            m = radius_calc.calculate_equivalent_ratio(material_name, equivalent)
-            print(
-                f"当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT / 标准当量={standard_equivalent} kg TNT)"
-            )
+            # 如果加载了训练文件且训练文件中有K值，不进行当量缩放
+            # 这样可以保证预测结果与特征提取结果一致
+            if self.training_K_value is not None:
+                print(f"✓ 检测到训练文件K值 ({self.training_K_value:.3f} m)，将使用此K值进行预测（不进行当量缩放）")
+                # 不计算当量比值，直接使用训练文件的K值
+                m = 1.0  # 强制设为1.0，不进行缩放
+            else:
+                # 计算当量比值 M（当前当量/标准当量）
+                standard_equivalent = radius_calc.get_standard_equivalent(material_name)
+                m = radius_calc.calculate_equivalent_ratio(material_name, equivalent)
+                print(
+                    f"当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT / 标准当量={standard_equivalent} kg TNT)"
+                )
             
             # 生成时间序列
             time_points = int(duration / 1.0) + 1  # 1ms步长
@@ -221,13 +232,34 @@ class ModelTab(QWidget):
                 'heat_radiation_data': {}
             }
             
-            # 1. 火球直径随时间变化（应用当量缩放）
+            # 1. 火球直径随时间变化
             print("计算火球直径...")
-            D_m = []
-            for t in t_s:
-                diameter = radius_calc.calculate_diameter(t, material_name, m)
-                D_m.append(diameter)
-            D_m = np.array(D_m)
+            # 如果加载了训练文件且训练文件中有K值，直接使用训练文件的K值（不进行当量缩放）
+            # 这样可以保证预测结果与特征提取结果一致
+            if self.training_K_value is not None:
+                # 验证计算器中的K值
+                current_K = radius_calc.get_standard_parameters(material_name)['K']
+                print(f"✓ 使用训练文件中的K值 ({self.training_K_value:.3f} m)，不进行当量缩放")
+                print(f"  计算器中的K值: {current_K:.3f} m")
+                if abs(current_K - self.training_K_value) > 0.01:
+                    print(f"  ⚠️ 警告：计算器中的K值 ({current_K:.3f} m) 与训练文件K值 ({self.training_K_value:.3f} m) 不一致")
+                # 直接使用训练文件的K值计算直径
+                D_m = []
+                for t in t_s:
+                    # 使用训练文件的K值，当量比值设为1（不缩放）
+                    diameter = radius_calc.calculate_diameter(t, material_name, m=1.0)
+                    D_m.append(diameter)
+                D_m = np.array(D_m)
+                max_diameter = np.max(D_m)
+                print(f"  计算得到的最大直径: {max_diameter:.3f} m (理论值: {2*current_K:.3f} m)")
+            else:
+                # 没有训练文件K值，使用当量缩放
+                print(f"使用当量缩放（当量比值 M = {m:.3f}）")
+                D_m = []
+                for t in t_s:
+                    diameter = radius_calc.calculate_diameter(t, material_name, m)
+                    D_m.append(diameter)
+                D_m = np.array(D_m)
             self.prediction_data['diameter_data'] = D_m
             
             # 更新直径图表
@@ -235,8 +267,31 @@ class ModelTab(QWidget):
             
             # 2. 火球温度随时间变化
             print("计算火球温度...")
-            temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
-            T_K = temp_calc.temperature_modified(t_ms)
+            # 检查是否有训练文件中的温度数据
+            if self.training_temperature_data is not None:
+                train_time_ms, train_temp_K = self.training_temperature_data
+                # 使用训练温度数据，插值到预测时间网格（np.interp会自动处理外推）
+                T_K = np.interp(t_ms, train_time_ms, train_temp_K)
+                train_time_min = train_time_ms.min()
+                train_time_max = train_time_ms.max()
+                pred_time_min = t_ms.min()
+                pred_time_max = t_ms.max()
+                
+                # 检查时间范围覆盖情况
+                if train_time_min <= pred_time_min and train_time_max >= pred_time_max:
+                    print(f"✓ 使用训练文件中的温度数据（{len(train_time_ms)} 个数据点，完全覆盖预测时间范围）")
+                else:
+                    print(f"✓ 使用训练文件中的温度数据（{len(train_time_ms)} 个数据点）")
+                    if train_time_min > pred_time_min:
+                        print(f"  ⚠️ 注意：预测开始时间 ({pred_time_min:.1f} ms) 早于训练数据 ({train_time_min:.1f} ms)，使用边界值外推")
+                    if train_time_max < pred_time_max:
+                        print(f"  ⚠️ 注意：预测结束时间 ({pred_time_max:.1f} ms) 晚于训练数据 ({train_time_max:.1f} ms)，使用边界值外推")
+            else:
+                # 没有训练温度数据，使用默认温度模型
+                temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
+                T_K = temp_calc.temperature_modified(t_ms)
+                print("使用默认温度模型")
+            
             self.prediction_data['temperature_data'] = T_K
             
             # 更新温度图表
@@ -244,7 +299,7 @@ class ModelTab(QWidget):
             
             # 3. 热通量随时间变化 (不同距离)
             print("计算热通量...")
-            distances = [4.0, 4.5, 5.0, 5.5, 6.0]
+            distances = [6.0, 7.0, 8.0, 9.0, 10.0]
             heat_flux_series = []
             
             # 创建传输率参数对象
@@ -264,21 +319,26 @@ class ModelTab(QWidget):
             
             # 4. 累积热辐射量随距离分布
             print("计算累积热辐射...")
-            x_values = np.linspace(4.0, 6.0, 50)
-            H_values = []
+            x_values = np.linspace(6.0, 10.0, 50)
+            H_values_kJ_per_m2 = []
+            
+            # 转换为千焦每平方米：1 kJ = 1000 J
+            J_TO_KJ = 1000.0
             
             for x in x_values:
                 q_t = compute_heat_flux_over_time(x, t_ms, T_K, D_m, transmissivity_params)
-                H = integrate_heat_radiation(q_t, t_ms)
-                H_values.append(H)
+                H_J_per_m2 = integrate_heat_radiation(q_t, t_ms)
+                # 转换为 kJ/m²
+                H_kJ_per_m2 = H_J_per_m2 / J_TO_KJ
+                H_values_kJ_per_m2.append(H_kJ_per_m2)
             
             self.prediction_data['heat_radiation_data'] = {
                 'distances': x_values,
-                'heat_radiation': H_values
+                'heat_radiation': H_values_kJ_per_m2  # 单位：kJ/m²
             }
             
             # 更新累积热辐射图表
-            self.chart_controller.update_heat_radiation(x_values, H_values)
+            self.chart_controller.update_heat_radiation(x_values, H_values_kJ_per_m2)
             
             print("✅ 所有预测曲线生成完成！")
             
@@ -299,6 +359,8 @@ class ModelTab(QWidget):
             )
             if not files:
                 self.training_files = []
+                self.training_temperature_data = None  # 清空温度数据
+                self.training_K_value = None  # 清空K值
                 self._update_train_file_list_state()
                 return
             self.training_files = files
@@ -400,13 +462,13 @@ class ModelTab(QWidget):
                 # 写入热通量数据
                 writer.writerow(['# 热通量随时间变化数据 (W/m²)'])
                 header = ['时间(ms)']
-                for dist in ['4.0', '4.5', '5.0', '5.5', '6.0']:
+                for dist in ['6.0', '7.0', '8.0', '9.0', '10.0']:
                     header.append(f'热通量_x={dist}m')
                 writer.writerow(header)
                 
                 for i in range(len(t_ms)):
                     row = [f"{t_ms[i]:.3f}"]
-                    for dist in ['4.0', '4.5', '5.0', '5.5', '6.0']:
+                    for dist in ['6.0', '7.0', '8.0', '9.0', '10.0']:
                         if dist in self.prediction_data['heat_flux_data']:
                             row.append(f"{self.prediction_data['heat_flux_data'][dist][i]:.2f}")
                         else:
@@ -417,7 +479,7 @@ class ModelTab(QWidget):
                 
                 # 写入累积热辐射数据
                 writer.writerow(['# 累积热辐射量随距离分布数据'])
-                writer.writerow(['距离(m)', '热辐射量(J/m²)'])
+                writer.writerow(['距离(m)', '热辐射量(kJ/m²)'])
                 
                 distances = self.prediction_data['heat_radiation_data']['distances']
                 heat_radiation = self.prediction_data['heat_radiation_data']['heat_radiation']
@@ -425,7 +487,7 @@ class ModelTab(QWidget):
                 for i in range(len(distances)):
                     writer.writerow([
                         f"{distances[i]:.3f}",
-                        f"{heat_radiation[i]:.2f}"
+                        f"{heat_radiation[i]:.2f}"  # kJ/m²单位，使用2位小数
                     ])
                 
                 writer.writerow([''])
@@ -515,13 +577,59 @@ class ModelTab(QWidget):
         b_value = self._safe_float(drag_fit.get('B'))
         c_value = self._safe_float(drag_fit.get('C'))
         
+        # 调试信息：打印提取的值
+        print(f"从训练文件提取参数:")
+        print(f"  equivalent: {equivalent}")
+        print(f"  al_percent: {al_percent}")
+        print(f"  K值: {k_value}")
+        print(f"  B值: {b_value}")
+        print(f"  C值: {c_value}")
+        
         if equivalent is None or al_percent is None:
             return None
+        
+        # 提取温度数据（如果存在）
+        temperature_data = data.get('temperature', [])
+        if temperature_data and len(temperature_data) > 0:
+            try:
+                time_data = []
+                temp_data = []
+                for time_temp_pair in temperature_data:
+                    if len(time_temp_pair) >= 2:
+                        time_data.append(float(time_temp_pair[0]))
+                        temp_data.append(float(time_temp_pair[1]))
+                if len(time_data) > 0 and len(temp_data) > 0:
+                    self.training_temperature_data = (np.array(time_data), np.array(temp_data))
+                    print(f"✓ 从训练文件加载温度数据: {len(time_data)} 个数据点")
+            except Exception as e:
+                print(f"⚠️ 提取训练文件温度数据失败: {e}")
+                self.training_temperature_data = None
+        else:
+            # 如果没有温度数据，清空之前的温度数据
+            self.training_temperature_data = None
         
         material_name = self.get_material_by_al_content(al_percent)
         kwargs = {'standard_equivalent': equivalent}
         if k_value is not None:
-            kwargs['K'] = k_value
+            # 重要：训练文件中的K值是直径K值（来自拖曳函数 D(t) = K * (1 - B*exp(-C*t^2))）
+            # 而FireballCalculator中的K值是半径K值（来自 R(t) = K * (1 - B*exp(-C*t^2))）
+            # 需要将直径K值转换为半径K值：K_radius = K_diameter / 2
+            k_radius = k_value / 2.0
+            kwargs['K'] = k_radius
+            # 保存训练文件中的K值（直径K值），用于预测时直接使用（不进行当量缩放）
+            self.training_K_value = k_value  # 保存原始直径K值，用于显示
+            print(f"✓ 保存训练文件K值: {k_value:.3f} m (直径K值)")
+            print(f"  转换为半径K值: {k_radius:.3f} m，对应最大直径: {k_value:.3f} m")
+            # 验证K值是否正确更新到计算器中
+            try:
+                updated_K = self.fireball_calculator.get_standard_parameters(material_name)['K']
+                print(f"  验证：计算器中的K值 = {updated_K:.3f} m (半径)")
+            except Exception as e:
+                print(f"  ⚠️ 验证K值失败: {e}")
+        else:
+            # 如果没有K值，清空之前保存的K值
+            self.training_K_value = None
+            print(f"⚠️ 训练文件中没有K值，将使用当量缩放")
         if b_value is not None:
             kwargs['B'] = b_value
         if c_value is not None:
