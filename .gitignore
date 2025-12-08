@@ -63,6 +63,9 @@ source/desktop/log/
 source/desktop/log/**
 dist/**/log/
 dist/**/log/**
+# All log files
+*.log
+**/*.log
 
 # Generated data files
 *.csv
