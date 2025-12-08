@@ -11,6 +11,75 @@ Write-Host "=========================================="
 $EnvName = "fireball_calculator"
 $PythonVersion = "3.10"
 
+# Function to check and install PyTorch 2.5.1+ with CUDA 12.8
+function Install-PyTorchCUDA128 {
+    param([string]$EnvName)
+    
+    # Check and uninstall torchaudio if installed
+    Write-Host "Checking for torchaudio installation..."
+    $torchaudioCheck = conda run -n $EnvName python -c "import torchaudio" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[INFO] torchaudio found, uninstalling..."
+        conda run -n $EnvName python -m pip uninstall torchaudio -y | Out-Null
+        Write-Host "[OK] torchaudio uninstalled"
+    } else {
+        Write-Host "[OK] torchaudio not installed (as expected)"
+    }
+    
+    Write-Host "Checking PyTorch installation..."
+    $pytorchCheck = conda run -n $EnvName python -c "import torch; print('VERSION:', torch.__version__); print('CUDA:', getattr(torch.version, 'cuda', None))" 2>&1
+    $needsReinstall = $true
+    
+    if ($LASTEXITCODE -eq 0) {
+        $pytorchInfo = $pytorchCheck | Out-String
+        
+        # Check version and CUDA
+        $versionMatch = [regex]::Match($pytorchInfo, "VERSION:\s*([\d.]+)")
+        $cudaMatch = [regex]::Match($pytorchInfo, "CUDA:\s*([\d.]+)")
+        
+        $currentVersion = if ($versionMatch.Success) { $versionMatch.Groups[1].Value } else { "unknown" }
+        $currentCUDA = if ($cudaMatch.Success) { $cudaMatch.Groups[1].Value } else { "None" }
+        
+        # Check if version >= 2.5.1 and CUDA is 12.8
+        $versionParts = $currentVersion -split '\.'
+        $isVersionOK = $false
+        if ($versionParts.Length -ge 2) {
+            $major = [int]$versionParts[0]
+            $minor = [int]$versionParts[1]
+            $patch = if ($versionParts.Length -ge 3) { [int]$versionParts[2] } else { 0 }
+            $isVersionOK = ($major -gt 2) -or (($major -eq 2) -and ($minor -gt 5)) -or (($major -eq 2) -and ($minor -eq 5) -and ($patch -ge 1))
+        }
+        
+        if ($isVersionOK -and $currentCUDA -eq "12.8") {
+            Write-Host "[OK] PyTorch $currentVersion with CUDA 12.8 already installed, skipping reinstall"
+            $needsReinstall = $false
+        } else {
+            Write-Host "[INFO] PyTorch found but version/CUDA mismatch, will reinstall..."
+            Write-Host "  Current: PyTorch $currentVersion, CUDA $currentCUDA"
+            Write-Host "  Required: PyTorch 2.5.1+, CUDA 12.8"
+            Write-Host "Uninstalling current PyTorch..."
+            conda run -n $EnvName python -m pip uninstall torch torchvision -y | Out-Null
+        }
+    } else {
+        Write-Host "[INFO] PyTorch not found, will install PyTorch 2.5.1+ with CUDA 12.8"
+    }
+    
+    if ($needsReinstall) {
+        Write-Host "Installing PyTorch 2.5.1+ with CUDA 12.8..."
+        Write-Host "  (This may take a few minutes, downloading ~2-3GB)..."
+        conda run -n $EnvName python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] PyTorch CUDA 12.8 installed successfully"
+            # Verify installation
+            Write-Host "Verifying installation..."
+            $verify = conda run -n $EnvName python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA version:', getattr(torch.version, 'cuda', 'N/A'))" 2>&1
+            Write-Host $verify
+        } else {
+            Write-Host "[WARNING] PyTorch CUDA 12.8 installation may have failed"
+        }
+    }
+}
+
 # 1) Check conda
 if (-not (Get-Command conda -ErrorAction SilentlyContinue)) {
     Write-Host "[ERROR] Conda is not available. Please install Miniconda/Anaconda first."
@@ -57,6 +126,8 @@ foreach ($env in $existingEnvs.envs) {
 
 if ($envExists) {
     Write-Host "[OK] Environment already exists: $EnvName (will reuse existing environment)"
+    # Check and ensure PyTorch 2.5.1+ with CUDA 12.8 is installed
+    Install-PyTorchCUDA128 -EnvName $EnvName
 } else {
     Write-Host "Environment not found, creating: $EnvName"
     if (Test-Path "environment.yml") {
@@ -75,7 +146,10 @@ if ($envExists) {
         # Install pip dependencies manually
         Write-Host "Installing pip dependencies..."
         conda run -n $EnvName python -m pip install --upgrade pip
-        conda run -n $EnvName python -m pip install --ignore-installed "PySide6==6.10.1" "opencv-python>=4.11.0" "torch>=2.0.0" "torchvision>=0.15.0"
+        conda run -n $EnvName python -m pip install --ignore-installed "PySide6==6.10.1" "opencv-python>=4.11.0"
+        
+        # Check and install PyTorch 2.5.1+ with CUDA 12.8
+        Install-PyTorchCUDA128 -EnvName $EnvName
     } else {
         Write-Host "Creating environment with default settings (python=$PythonVersion)..."
         conda create -n $EnvName "python=$PythonVersion" -y

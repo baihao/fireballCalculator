@@ -12,6 +12,12 @@ import urllib.request
 import urllib.error
 import sys
 
+# 导入设备选择模块
+try:
+    from .device_selector import get_compatible_device
+except ImportError:
+    from device_selector import get_compatible_device
+
 # 尝试导入SAM相关模块
 SAM_AVAILABLE = False
 try:
@@ -58,28 +64,7 @@ class SAMModelManager:
         Returns:
             str: 实际使用的设备
         """
-        if device == "auto":
-            if torch.cuda.is_available():
-                # 显示必要的GPU信息
-                print(f"🚀 检测到CUDA支持")
-                print(f"   PyTorch版本: {torch.__version__}")
-                if hasattr(torch.version, 'cuda') and torch.version.cuda:
-                    print(f"   PyTorch CUDA版本: {torch.version.cuda}")
-                device_name = torch.cuda.get_device_name(torch.cuda.current_device())
-                print(f"   GPU: {device_name}")
-                return "cuda"
-            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                print("🍎 检测到MPS支持")
-                return "mps"
-            else:
-                print("💻 使用CPU")
-                print(f"   PyTorch版本: {torch.__version__}")
-                if hasattr(torch.version, 'cuda') and torch.version.cuda:
-                    print(f"   PyTorch CUDA版本: {torch.version.cuda} (但CUDA运行时不可用)")
-                else:
-                    print("   ⚠️ PyTorch未编译CUDA支持")
-                return "cpu"
-        return device
+        return get_compatible_device(device)
     
     def _get_checkpoint_url(self, model_type: str) -> Optional[str]:
         """

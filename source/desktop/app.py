@@ -6,12 +6,14 @@
 
 import sys
 import os
+from log import setup_logging
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 from framework import FireballAnalysisApp
 
 
 def main():
+    setup_logging()
     app = QApplication(sys.argv)
     
     # 设置应用程序信息
