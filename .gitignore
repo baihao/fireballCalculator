@@ -58,6 +58,12 @@ source/image_segment/*_summary.png
 **/processing_log.txt
 **/*_summary.png
 
+# Desktop app logs
+source/desktop/log/
+source/desktop/log/**
+dist/**/log/
+dist/**/log/**
+
 # Generated data files
 *.csv
 *.json

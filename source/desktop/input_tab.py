@@ -544,8 +544,11 @@ class InputTab(QWidget):
             for ext in image_extensions:
                 pattern = os.path.join(folder_path, ext)
                 image_files.extend(glob.glob(pattern))
-                pattern = os.path.join(folder_path, ext.upper())
-                image_files.extend(glob.glob(pattern))
+                # Windows文件系统不区分大小写，不需要搜索大写版本
+                # 如果需要在区分大小写的系统上支持，可以使用set去重
+            
+            # 使用set去重（处理可能的重复文件）
+            image_files = list(set(image_files))
             
             if image_files:
                 # 按文件名排序
