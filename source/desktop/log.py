@@ -6,6 +6,7 @@
 
 import sys
 import os
+import io
 import logging
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -21,6 +22,13 @@ def setup_logging():
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "app.log"
 
+    original_stdout = sys.stdout if sys.stdout is not None else sys.__stdout__
+    original_stderr = sys.stderr if sys.stderr is not None else sys.__stderr__
+    if original_stdout is None:
+        original_stdout = io.StringIO()
+    if original_stderr is None:
+        original_stderr = io.StringIO()
+
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s")
@@ -34,24 +42,64 @@ def setup_logging():
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    console_handler = logging.StreamHandler(sys.stdout)
+    safe_console_stream = original_stdout
+    if safe_console_stream and hasattr(safe_console_stream, "buffer"):
+        try:
+            safe_console_stream = io.TextIOWrapper(
+                safe_console_stream.buffer,
+                encoding="utf-8",
+                errors="replace",
+                line_buffering=True,
+            )
+        except Exception:
+            pass
+    if safe_console_stream is None:
+        safe_console_stream = io.StringIO()
+
+    console_handler = logging.StreamHandler(safe_console_stream)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
     class _StreamToLogger:
-        def __init__(self, level):
+        def __init__(self, level, stream):
             self.level = level
+            self.stream = stream
+            self._in_write = False
 
         def write(self, message: str):
-            msg = message.rstrip()
-            if msg:
-                logger.log(self.level, msg)
+            if self._in_write:
+                return
+            self._in_write = True
+            try:
+                msg = message.rstrip("\n")
+                if msg:
+                    record = logger.makeRecord(
+                        name="stdout" if self.level == logging.INFO else "stderr",
+                        level=self.level,
+                        fn="",
+                        lno=0,
+                        msg=msg,
+                        args=(),
+                        exc_info=None,
+                    )
+                    logger.handle(record)
+                if self.stream:
+                    try:
+                        self.stream.write(message)
+                    except Exception:
+                        pass
+            finally:
+                self._in_write = False
 
         def flush(self):
-            pass
+            if self.stream:
+                try:
+                    self.stream.flush()
+                except Exception:
+                    pass
 
-    sys.stdout = _StreamToLogger(logging.INFO)
-    sys.stderr = _StreamToLogger(logging.ERROR)
+    sys.stdout = _StreamToLogger(logging.INFO, original_stdout)
+    sys.stderr = _StreamToLogger(logging.ERROR, original_stderr)
 
     logger.info("日志初始化完成，输出目录: %s", os.fspath(log_file.parent))
 
