@@ -204,6 +204,9 @@ if (Test-Path $internalPath) {
     Get-ChildItem -Path $internalPath -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path $internalPath -Recurse -Directory -Filter "tests" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path $internalPath -Recurse -Directory -Filter "test" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    # Keep torch.testing (PyTorch may import it); do not remove torch/testing
+    # Optional: remove quantization if not used
+    Remove-Item -Path "$internalPath\torch\ao" -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "[Info] Removed pyc, __pycache__, test folders."
 }
 
