@@ -203,12 +203,12 @@ class ModelTab(QWidget):
                 # 不计算当量比值，直接使用训练文件的K值
                 m = 1.0  # 强制设为1.0，不进行缩放
             else:
-                # 计算当量比值 M（当前当量/标准当量）
-                standard_equivalent = radius_calc.get_standard_equivalent(material_name)
-                m = radius_calc.calculate_equivalent_ratio(material_name, equivalent)
-                print(
-                    f"当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT / 标准当量={standard_equivalent} kg TNT)"
-                )
+            # 计算当量比值 M（当前当量/标准当量）
+            standard_equivalent = radius_calc.get_standard_equivalent(material_name)
+            m = radius_calc.calculate_equivalent_ratio(material_name, equivalent)
+            print(
+                f"当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT / 标准当量={standard_equivalent} kg TNT)"
+            )
             
             # 生成时间序列
             time_points = int(duration / 1.0) + 1  # 1ms步长
@@ -255,11 +255,11 @@ class ModelTab(QWidget):
             else:
                 # 没有训练文件K值，使用当量缩放
                 print(f"使用当量缩放（当量比值 M = {m:.3f}）")
-                D_m = []
-                for t in t_s:
-                    diameter = radius_calc.calculate_diameter(t, material_name, m)
-                    D_m.append(diameter)
-                D_m = np.array(D_m)
+            D_m = []
+            for t in t_s:
+                diameter = radius_calc.calculate_diameter(t, material_name, m)
+                D_m.append(diameter)
+            D_m = np.array(D_m)
             self.prediction_data['diameter_data'] = D_m
             
             # 更新直径图表
@@ -288,8 +288,8 @@ class ModelTab(QWidget):
                         print(f"  ⚠️ 注意：预测结束时间 ({pred_time_max:.1f} ms) 晚于训练数据 ({train_time_max:.1f} ms)，使用边界值外推")
             else:
                 # 没有训练温度数据，使用默认温度模型
-                temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
-                T_K = temp_calc.temperature_modified(t_ms)
+            temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
+            T_K = temp_calc.temperature_modified(t_ms)
                 print("使用默认温度模型")
             
             self.prediction_data['temperature_data'] = T_K
