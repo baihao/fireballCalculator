@@ -280,8 +280,8 @@ def fit_drag_curve_from_sequence(file_path: str, output_dir: Optional[str] = Non
         return result
         
     except Exception as e:
-        return {
-            'success': False,
+            return {
+                'success': False,
             'error': f"拟合过程异常: {str(e)}",
             'file_path': file_path
         }
