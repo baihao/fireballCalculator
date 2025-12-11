@@ -509,23 +509,23 @@ def main():
         simulate_from_csv(diameter_csv, temperature_csv, output_dir=output_dir)
     else:
         # 默认使用模型计算
-    material = '40%Al/Rubber'
-    
-    # Plot 1: Heat flux vs time for multiple distances
-    print('Plotting heat flux vs time for different distances...')
-    plot_heat_flux_vs_time(material=material)
-    
-    # Plot 2: Time-integrated heat radiation vs distance
-    print('\nComputing time-integrated heat radiation...')
-    xs, Hs = compute_H_vs_distance(4.0, 6.0, 200, material=material)
+        material = '40%Al/Rubber'
+        
+        # Plot 1: Heat flux vs time for multiple distances
+        print('Plotting heat flux vs time for different distances...')
+        plot_heat_flux_vs_time(material=material)
+        
+        # Plot 2: Time-integrated heat radiation vs distance
+        print('\nComputing time-integrated heat radiation...')
+        xs, Hs = compute_H_vs_distance(4.0, 6.0, 200, material=material)
 
-    # Print a few samples
-    print('Heat radiation H(x) for 0–140 ms (J/m^2):')
-    for x, H in zip(xs[::50], Hs[::50]):
-        print(f'  x = {x:.2f} m -> H = {H:.2f} J/m^2')
+        # Print a few samples
+        print('Heat radiation H(x) for 0–140 ms (J/m^2):')
+        for x, H in zip(xs[::50], Hs[::50]):
+            print(f'  x = {x:.2f} m -> H = {H:.2f} J/m^2')
 
-    print('\nPlotting H(x) for x in [4, 6] m...')
-    plot_H_vs_distance(xs, Hs, material)
+        print('\nPlotting H(x) for x in [4, 6] m...')
+        plot_H_vs_distance(xs, Hs, material)
 
 
 if __name__ == '__main__':

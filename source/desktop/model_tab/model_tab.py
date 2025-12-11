@@ -43,6 +43,8 @@ class ModelTab(QWidget):
         self.training_temperature_data = None  # (time_ms_array, temperature_K_array)
         # 存储训练文件中的K值（用于直接使用，不进行当量缩放）
         self.training_K_value = None  # 从训练文件中提取的K值
+        # 存储训练文件中的当量值（作为标准当量）
+        self.training_equivalent = None  # 从训练文件中提取的当量值
         
         # 设置UI组件引用（向后兼容）
         self._setup_ui_component_references()
@@ -126,6 +128,11 @@ class ModelTab(QWidget):
         
     def start_prediction(self):
         """开始预测"""
+        # 防止重复点击：如果按钮已被禁用，说明正在执行中，直接返回
+        if not self.predict_btn.isEnabled():
+            print("⚠️ 预测正在进行中，请勿重复点击...")
+            return
+        
         try:
             print("🔥 开始预测...")
             self.modeling_status.setText("正在计算预测结果...")
@@ -196,19 +203,28 @@ class ModelTab(QWidget):
             print(f"生成 {material_name} 材料的预测曲线...")
             
             radius_calc = self.fireball_calculator
-            # 如果加载了训练文件且训练文件中有K值，不进行当量缩放
-            # 这样可以保证预测结果与特征提取结果一致
-            if self.training_K_value is not None:
-                print(f"✓ 检测到训练文件K值 ({self.training_K_value:.3f} m)，将使用此K值进行预测（不进行当量缩放）")
-                # 不计算当量比值，直接使用训练文件的K值
-                m = 1.0  # 强制设为1.0，不进行缩放
+            # 确定标准当量：如果有训练文件当量值，使用训练文件的当量值；否则使用计算器中的标准当量
+            if self.training_equivalent is not None:
+                standard_equivalent = self.training_equivalent
+                print(f"✓ 使用训练文件当量值作为标准当量: {standard_equivalent} kg TNT")
             else:
+                standard_equivalent = radius_calc.get_standard_equivalent(material_name)
+                print(f"✓ 使用计算器标准当量: {standard_equivalent} kg TNT")
+            
             # 计算当量比值 M（当前当量/标准当量）
-            standard_equivalent = radius_calc.get_standard_equivalent(material_name)
-            m = radius_calc.calculate_equivalent_ratio(material_name, equivalent)
-            print(
-                f"当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT / 标准当量={standard_equivalent} kg TNT)"
-            )
+            # 只有当用户输入的当量与标准当量不同时，才进行缩放（m != 1.0）
+            m = equivalent / standard_equivalent if standard_equivalent > 0 else 1.0
+            
+            if abs(m - 1.0) < 1e-6:
+                print(f"✓ 当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT = 标准当量={standard_equivalent} kg TNT，不进行缩放)")
+            else:
+                print(
+                    f"✓ 当量比值 M = {m:.3f} (当前当量={equivalent} kg TNT / 标准当量={standard_equivalent} kg TNT，将进行缩放)"
+                )
+            
+            # 如果加载了训练文件且训练文件中有K值，提示用户
+            if self.training_K_value is not None:
+                print(f"✓ 检测到训练文件K值 ({self.training_K_value:.3f} m)")
             
             # 生成时间序列
             time_points = int(duration / 1.0) + 1  # 1ms步长
@@ -234,27 +250,19 @@ class ModelTab(QWidget):
             
             # 1. 火球直径随时间变化
             print("计算火球直径...")
-            # 如果加载了训练文件且训练文件中有K值，直接使用训练文件的K值（不进行当量缩放）
-            # 这样可以保证预测结果与特征提取结果一致
+            if abs(m - 1.0) < 1e-6:
+                print(f"✓ 当量比值 M = 1.0，使用标准K值（不进行缩放）")
+            else:
+                print(f"✓ 当量比值 M = {m:.3f}，将根据当量比值缩放K值")
+            
             if self.training_K_value is not None:
                 # 验证计算器中的K值
                 current_K = radius_calc.get_standard_parameters(material_name)['K']
-                print(f"✓ 使用训练文件中的K值 ({self.training_K_value:.3f} m)，不进行当量缩放")
-                print(f"  计算器中的K值: {current_K:.3f} m")
-                if abs(current_K - self.training_K_value) > 0.01:
-                    print(f"  ⚠️ 警告：计算器中的K值 ({current_K:.3f} m) 与训练文件K值 ({self.training_K_value:.3f} m) 不一致")
-                # 直接使用训练文件的K值计算直径
-                D_m = []
-                for t in t_s:
-                    # 使用训练文件的K值，当量比值设为1（不缩放）
-                    diameter = radius_calc.calculate_diameter(t, material_name, m=1.0)
-                    D_m.append(diameter)
-                D_m = np.array(D_m)
-                max_diameter = np.max(D_m)
-                print(f"  计算得到的最大直径: {max_diameter:.3f} m (理论值: {2*current_K:.3f} m)")
-            else:
-                # 没有训练文件K值，使用当量缩放
-                print(f"使用当量缩放（当量比值 M = {m:.3f}）")
+                print(f"  训练文件K值: {self.training_K_value:.3f} m (直径)")
+                print(f"  计算器中的K值: {current_K:.3f} m (半径)")
+                if abs(current_K - self.training_K_value / 2.0) > 0.01:
+                    print(f"  ⚠️ 警告：计算器中的K值 ({current_K:.3f} m) 与训练文件K值 ({self.training_K_value:.3f} m / 2) 不一致")
+            
             D_m = []
             for t in t_s:
                 diameter = radius_calc.calculate_diameter(t, material_name, m)
@@ -288,8 +296,8 @@ class ModelTab(QWidget):
                         print(f"  ⚠️ 注意：预测结束时间 ({pred_time_max:.1f} ms) 晚于训练数据 ({train_time_max:.1f} ms)，使用边界值外推")
             else:
                 # 没有训练温度数据，使用默认温度模型
-            temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
-            T_K = temp_calc.temperature_modified(t_ms)
+                temp_calc = FireballTemperatureCalculator(mode='blend', blend_width_ms=12.0)
+                T_K = temp_calc.temperature_modified(t_ms)
                 print("使用默认温度模型")
             
             self.prediction_data['temperature_data'] = T_K
@@ -361,6 +369,7 @@ class ModelTab(QWidget):
                 self.training_files = []
                 self.training_temperature_data = None  # 清空温度数据
                 self.training_K_value = None  # 清空K值
+                self.training_equivalent = None  # 清空当量值
                 self._update_train_file_list_state()
                 return
             self.training_files = files
@@ -610,6 +619,9 @@ class ModelTab(QWidget):
         
         material_name = self.get_material_by_al_content(al_percent)
         kwargs = {'standard_equivalent': equivalent}
+        # 保存训练文件中的当量值（作为标准当量）
+        self.training_equivalent = equivalent
+        print(f"✓ 保存训练文件当量值: {equivalent} kg TNT（将作为标准当量）")
         if k_value is not None:
             # 重要：训练文件中的K值是直径K值（来自拖曳函数 D(t) = K * (1 - B*exp(-C*t^2))）
             # 而FireballCalculator中的K值是半径K值（来自 R(t) = K * (1 - B*exp(-C*t^2))）
