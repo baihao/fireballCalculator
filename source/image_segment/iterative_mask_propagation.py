@@ -14,6 +14,11 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import time
 
+try:
+    from .image_io import imread_unicode
+except ImportError:
+    from image_io import imread_unicode
+
 # 导入SAM初始化模块
 try:
     from .sam_initialization import create_sam_manager, check_sam_availability
@@ -479,7 +484,7 @@ class IterativeMaskPropagationSegmenter:
         """使用prompt点进行分割"""
         try:
             # 读取图片
-            image = cv2.imread(image_path)
+            image = imread_unicode(image_path, cv2.IMREAD_COLOR)
             if image is None:
                 return None
             
@@ -528,7 +533,7 @@ class IterativeMaskPropagationSegmenter:
         """从参考图片传播掩码到目标图片"""
         try:
             # 读取目标图片
-            target_image = cv2.imread(target_image_path)
+            target_image = imread_unicode(target_image_path, cv2.IMREAD_COLOR)
             if target_image is None:
                 print(f"    ⚠️ 无法读取目标图片: {target_image_path}")
                 return None
@@ -536,7 +541,7 @@ class IterativeMaskPropagationSegmenter:
             target_image_rgb = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
             
             # 读取参考图片
-            reference_image = cv2.imread(reference_image_path)
+            reference_image = imread_unicode(reference_image_path, cv2.IMREAD_COLOR)
             if reference_image is None:
                 print(f"    ⚠️ 无法读取参考图片: {reference_image_path}")
                 return None

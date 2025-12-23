@@ -14,6 +14,21 @@ from typing import List, Tuple, Optional, Dict, Any
 from collections import OrderedDict
 
 
+def _cv_imread_unicode(path: str) -> Optional[np.ndarray]:
+    """
+    兼容中文路径的图像读取：
+    Windows 下部分 OpenCV 版本对非 ASCII 路径支持不佳，使用 np.fromfile + cv2.imdecode。
+    """
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+        if data.size == 0:
+            return None
+        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        return img
+    except Exception:
+        return None
+
+
 class InteractiveImageWidget(QLabel):
     """支持交互的图像预览控件"""
     
@@ -90,7 +105,8 @@ class InteractiveImageWidget(QLabel):
             # 优先从缓存读取
             cached = self._image_cache.get(image_path)
             if cached is None:
-                image = cv2.imread(image_path)
+                # 使用自定义读取函数以兼容包含中文/特殊字符的路径
+                image = _cv_imread_unicode(image_path)
                 if image is None:
                     self.setText(f"无法加载图像: {image_path}")
                     return False
