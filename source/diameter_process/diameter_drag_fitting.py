@@ -491,59 +491,73 @@ class DiameterDragFitter:
             print(f"全局优化收敛: {result.success}, 迭代次数: {result.nit}")
             
             # 阶段2：局部精化（Levenberg-Marquardt算法）
-            print("阶段2: 局部精化...")
+            # print("阶段2: 局部精化...")
+            # 
+            # try:
+            #     # 使用全局优化结果作为初始值进行局部精化
+            #     popt, pcov = curve_fit(
+            #         self.drag_function,
+            #         t, D,
+            #         p0=[K_global, B_global, C_global],
+            #         bounds=([max_D, 0.1, 1e-6], [max_D * 2, 0.99, 1e-2]),
+            #         maxfev=self.max_iterations,
+            #         ftol=self.tolerance,
+            #         xtol=self.tolerance
+            #     )
+            #     
+            #     K_fit, B_fit, C_fit = popt
+            #     
+            #     # 计算参数不确定性
+            #     param_errors = np.sqrt(np.diag(pcov)) if pcov is not None else [0, 0, 0]
+            #     
+            #     print(f"局部精化结果: K={K_fit:.4f}±{param_errors[0]:.4f}, "
+            #           f"B={B_fit:.4f}±{param_errors[1]:.4f}, C={C_fit:.4f}±{param_errors[2]:.4f}")
+            #     
+            #     return {
+            #         'success': True,
+            #         'method': 'improved_robust',
+            #         'K': float(K_fit),
+            #         'B': float(B_fit),
+            #         'C': float(C_fit),
+            #         'K_error': float(param_errors[0]),
+            #         'B_error': float(param_errors[1]),
+            #         'C_error': float(param_errors[2]),
+            #         'covariance_matrix': pcov.tolist() if pcov is not None else None,
+            #         'optimization_result': {
+            #             'global_converged': result.success,
+            #             'global_iterations': result.nit,
+            #             'global_cost': result.fun
+            #         }
+            #     }
+            #     
+            # except Exception as e:
+            #     print(f"⚠️ 局部精化失败，使用全局优化结果: {e}")
+            #     return {
+            #         'success': True,
+            #         'method': 'global_only',
+            #         'K': float(K_global),
+            #         'B': float(B_global),
+            #         'C': float(C_global),
+            #         'optimization_result': {
+            #             'global_converged': result.success,
+            #             'global_iterations': result.nit,
+            #             'global_cost': result.fun
+            #         }
+            #     }
             
-            try:
-                # 使用全局优化结果作为初始值进行局部精化
-                popt, pcov = curve_fit(
-                    self.drag_function,
-                    t, D,
-                    p0=[K_global, B_global, C_global],
-                    bounds=([max_D, 0.1, 1e-6], [max_D * 2, 0.99, 1e-2]),
-                    maxfev=self.max_iterations,
-                    ftol=self.tolerance,
-                    xtol=self.tolerance
-                )
-                
-                K_fit, B_fit, C_fit = popt
-                
-                # 计算参数不确定性
-                param_errors = np.sqrt(np.diag(pcov)) if pcov is not None else [0, 0, 0]
-                
-                print(f"局部精化结果: K={K_fit:.4f}±{param_errors[0]:.4f}, "
-                      f"B={B_fit:.4f}±{param_errors[1]:.4f}, C={C_fit:.4f}±{param_errors[2]:.4f}")
-                
-                return {
-                    'success': True,
-                    'method': 'improved_robust',
-                    'K': float(K_fit),
-                    'B': float(B_fit),
-                    'C': float(C_fit),
-                    'K_error': float(param_errors[0]),
-                    'B_error': float(param_errors[1]),
-                    'C_error': float(param_errors[2]),
-                    'covariance_matrix': pcov.tolist() if pcov is not None else None,
-                    'optimization_result': {
-                        'global_converged': result.success,
-                        'global_iterations': result.nit,
-                        'global_cost': result.fun
-                    }
+            # 直接使用全局优化结果
+            return {
+                'success': True,
+                'method': 'global_only',
+                'K': float(K_global),
+                'B': float(B_global),
+                'C': float(C_global),
+                'optimization_result': {
+                    'global_converged': result.success,
+                    'global_iterations': result.nit,
+                    'global_cost': result.fun
                 }
-                
-            except Exception as e:
-                print(f"⚠️ 局部精化失败，使用全局优化结果: {e}")
-                return {
-                    'success': True,
-                    'method': 'global_only',
-                    'K': float(K_global),
-                    'B': float(B_global),
-                    'C': float(C_global),
-                    'optimization_result': {
-                        'global_converged': result.success,
-                        'global_iterations': result.nit,
-                        'global_cost': result.fun
-                    }
-                }
+            }
                 
         except Exception as e:
             print(f"⚠️ 改进的鲁棒拟合失败: {e}")

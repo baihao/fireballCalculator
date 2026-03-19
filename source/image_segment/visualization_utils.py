@@ -11,6 +11,11 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+try:
+    from .image_io import imread_unicode
+except ImportError:
+    from image_io import imread_unicode
+
 
 class SegmentationVisualizer:
     """分割可视化器"""
@@ -93,7 +98,7 @@ class SegmentationVisualizer:
                 print(f"   为图片 {i+1} 生成合并debug可视化...")
                 
                 # 读取目标图片
-                image = cv2.imread(image_path)
+                image = imread_unicode(image_path, cv2.IMREAD_COLOR)
                 if image is None:
                     continue
                 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -190,7 +195,7 @@ class SegmentationVisualizer:
         # 1. reference_segmentation (参考图片分割结果)
         ref_idx = debug_data['reference_image_idx']
         if ref_idx is not None and 0 <= ref_idx < len(image_paths):
-            ref_image = cv2.imread(image_paths[ref_idx])
+            ref_image = imread_unicode(image_paths[ref_idx], cv2.IMREAD_COLOR)
             if ref_image is not None:
                 ref_image_rgb = cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB)
                 axes[0, 0].imshow(ref_image_rgb)
@@ -207,7 +212,7 @@ class SegmentationVisualizer:
         
         # 2. reference_points (参考图片的采样点)
         if ref_idx is not None and 0 <= ref_idx < len(image_paths):
-            ref_image = cv2.imread(image_paths[ref_idx])
+            ref_image = imread_unicode(image_paths[ref_idx], cv2.IMREAD_COLOR)
             if ref_image is not None:
                 ref_image_rgb = cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB)
                 axes[0, 1].imshow(ref_image_rgb)
@@ -385,7 +390,7 @@ Postprocessing: Skipped
                     continue
                 
                 # 读取原图
-                image = cv2.imread(image_path)
+                image = imread_unicode(image_path, cv2.IMREAD_COLOR)
                 if image is None:
                     print(f"   图片 {i+1}: 跳过（读取失败）")
                     continue
@@ -545,7 +550,7 @@ Postprocessing: Skipped
                     break
                 
                 # 读取图像
-                image = cv2.imread(image_path)
+                image = imread_unicode(image_path, cv2.IMREAD_COLOR)
                 if image is None:
                     continue
                 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

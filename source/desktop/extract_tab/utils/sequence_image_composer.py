@@ -12,6 +12,84 @@ from typing import List, Optional, Dict, Any, Tuple
 from .draw_utils import draw_segmentation_on_image
 
 
+def _cv_imread_unicode(path: str, flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
+    """
+    兼容中文/非 ASCII 路径的图像读取。
+    
+    Windows 下部分 OpenCV 版本对包含中文/特殊字符的路径使用 cv2.imread 会返回 None。
+    使用 np.fromfile + cv2.imdecode 的方式避免编码问题。
+    
+    Args:
+        path: 图像文件路径
+        flags: OpenCV 读取标志，例如 cv2.IMREAD_COLOR / cv2.IMREAD_GRAYSCALE
+        
+    Returns:
+        np.ndarray 或 None：成功返回图像数组，失败返回 None
+    """
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+        if data.size == 0:
+            return None
+        img = cv2.imdecode(data, flags)
+        return img
+    except Exception:
+        return None
+
+
+def _cv_imwrite_unicode(path: str, image: np.ndarray, params: Optional[List[int]] = None) -> bool:
+    """
+    兼容中文/非 ASCII 路径的图像保存。
+    
+    Windows 下部分 OpenCV 版本对包含中文/特殊字符的路径使用 cv2.imwrite 会失败。
+    使用 cv2.imencode + 文件写入的方式避免编码问题。
+    
+    Args:
+        path: 图像文件路径
+        image: 图像数据（BGR格式）
+        params: OpenCV 编码参数（例如 [cv2.IMWRITE_JPEG_QUALITY, 95]）
+        
+    Returns:
+        bool: 保存成功返回 True，失败返回 False
+    """
+    try:
+        # 根据文件扩展名确定编码格式
+        ext = Path(path).suffix.lower()
+        if ext == '.jpg' or ext == '.jpeg':
+            encode_params = [cv2.IMWRITE_JPEG_QUALITY, 95]
+            encode_ext = '.jpg'
+        elif ext == '.png':
+            encode_params = [cv2.IMWRITE_PNG_COMPRESSION, 6]
+            encode_ext = '.png'
+        elif ext == '.bmp':
+            encode_params = None
+            encode_ext = '.bmp'
+        else:
+            # 默认使用 JPEG
+            encode_params = [cv2.IMWRITE_JPEG_QUALITY, 95]
+            encode_ext = '.jpg'
+        
+        # 使用用户指定的参数（如果提供）
+        if params is not None:
+            encode_params = params
+        
+        # 编码图像数据
+        if encode_params:
+            success, encoded_data = cv2.imencode(encode_ext, image, encode_params)
+        else:
+            success, encoded_data = cv2.imencode(encode_ext, image)
+        
+        if not success:
+            return False
+        
+        # 写入文件（使用二进制模式，支持中文路径）
+        with open(path, 'wb') as f:
+            f.write(encoded_data.tobytes())
+        
+        return True
+    except Exception:
+        return False
+
+
 def compose_sequence_images(
     image_paths: List[str],
     segmentation_results: List[Dict[str, Any]]
@@ -39,8 +117,8 @@ def compose_sequence_images(
         # 处理每张图像
         for i, image_path in enumerate(image_paths):
             try:
-                # 读取图像
-                image = cv2.imread(image_path)
+                # 读取图像（兼容中文路径）
+                image = _cv_imread_unicode(image_path, cv2.IMREAD_COLOR)
                 if image is None:
                     print(f"⚠️ 无法加载图像: {image_path}")
                     continue
@@ -107,8 +185,8 @@ def save_composed_images(
                 file_name = f"{base_name}_{start_index + i:04d}.{image_format}"
                 file_path = output_path / file_name
                 
-                # 保存图像
-                success = cv2.imwrite(str(file_path), image_bgr)
+                # 保存图像（兼容中文路径）
+                success = _cv_imwrite_unicode(str(file_path), image_bgr)
                 if success:
                     saved_paths.append(str(file_path))
                 else:

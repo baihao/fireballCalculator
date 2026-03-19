@@ -18,6 +18,11 @@ import os
 from pathlib import Path
 from typing import List, Tuple
 
+try:
+    from .image_io import imread_unicode
+except ImportError:
+    from image_io import imread_unicode
+
 
 def load_mask(mask_path: str) -> np.ndarray:
     """
@@ -30,7 +35,7 @@ def load_mask(mask_path: str) -> np.ndarray:
         np.ndarray: 二值化mask (0或1)
     """
     # 读取图像
-    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+    mask = imread_unicode(mask_path, cv2.IMREAD_GRAYSCALE)
     if mask is None:
         raise ValueError(f"无法加载mask图像: {mask_path}")
     

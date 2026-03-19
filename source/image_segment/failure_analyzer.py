@@ -12,6 +12,11 @@ from typing import Optional, List, Tuple
 from .mask_utils import MaskValidator
 from .prompt_generation import create_prompt_generator
 
+try:
+    from .image_io import imread_unicode
+except ImportError:
+    from image_io import imread_unicode
+
 
 class PropagationFailureAnalyzer:
     """传播失败分析器"""
@@ -61,8 +66,8 @@ class PropagationFailureAnalyzer:
                                   reference_mask: np.ndarray) -> List[str]:
         reasons: List[str] = []
         try:
-            target_image = cv2.imread(target_image_path)
-            reference_image = cv2.imread(reference_image_path)
+            target_image = imread_unicode(target_image_path, cv2.IMREAD_COLOR)
+            reference_image = imread_unicode(reference_image_path, cv2.IMREAD_COLOR)
             if target_image is None or reference_image is None:
                 reasons.append("无法读取图像文件")
                 return reasons
