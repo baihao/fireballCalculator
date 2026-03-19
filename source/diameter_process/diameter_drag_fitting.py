@@ -47,7 +47,7 @@
    c) 多阶段拟合策略（新增）：
       - 阶段1：全局优化（差分进化算法）
         * 避免局部最优解
-        * 参数范围：K∈[max(D), 3*max(D)], B∈[0.01, 0.999], C∈[1e-6, 1e-2]
+        * 参数范围：K∈[max(D), 3*max(D)], B∈[0.01, 0.999], C根据数据动态估计（基于10%-90%上升时间）
         * 目标函数：标准最小二乘
       - 阶段2：局部精化（Levenberg-Marquardt算法）
         * 基于全局优化结果进行精化
@@ -151,6 +151,58 @@ class DiameterDragFitter:
         """
         return K * (1 - B * np.exp(-C * t**2))
     
+    def _estimate_C_bounds(self, t: np.ndarray, D: np.ndarray, verbose: bool = True) -> Tuple[float, float]:
+        """
+        根据数据范围动态估计C参数的上下界
+        
+        D(t)=K*(1-B*exp(-C*t²))中，C控制上升速度：C越大上升越快
+        - 急速上升（0.2ms内完成主要膨胀）需C≈17
+        - 缓慢上升（100ms内完成）需C≈0.0007
+        
+        Args:
+            t: 时间数组（毫秒）
+            D: 直径数组
+            verbose: 是否打印估计信息
+            
+        Returns:
+            Tuple[float, float]: (C_min, C_max)
+        """
+        C_min = 1e-6  # 下界固定，支持极缓慢上升
+        
+        if len(t) < 3 or len(D) < 3:
+            return C_min, 100.0  # 数据不足时用默认上界
+        
+        t_span = t[-1] - t[0]
+        D_range = np.max(D) - np.min(D)
+        
+        if t_span <= 0 or D_range <= 0:
+            return C_min, 100.0
+        
+        # 估计上升时间：从10%到90%直径变化所需时间（沿时间顺序查找）
+        D_10 = np.min(D) + 0.1 * D_range
+        D_90 = np.min(D) + 0.9 * D_range
+        
+        idx_10 = np.where(D >= D_10)[0]
+        idx_90 = np.where(D >= D_90)[0]
+        
+        if len(idx_10) > 0 and len(idx_90) > 0:
+            idx_10, idx_90 = idx_10[0], idx_90[0]
+            t_rise = t[idx_90] - t[idx_10]
+            if idx_90 <= idx_10 or t_rise <= 0:
+                t_rise = t_span * 0.1
+            else:
+                t_rise = max(t_rise, t[1] - t[0])  # 至少为最小时间步
+        else:
+            t_rise = t_span * 0.1  # 回退：假设上升在10%时间窗内
+        
+        # C ≈ ln(10) / t_rise² 对应90%上升时间；上界取10倍余量
+        C_max = 10 * np.log(10) / (t_rise ** 2)
+        C_max = min(1000.0, max(C_min * 2, C_max))  # 限制在[2e-6, 1000]
+        
+        if verbose:
+            print(f"  C参数动态范围: C_min={C_min:.2e}, C_max={C_max:.2e} (基于上升时间≈{t_rise:.2f}ms)")
+        return C_min, C_max
+    
     def estimate_initial_parameters(self, time_data: np.ndarray, diameter_data: np.ndarray) -> Tuple[float, float, float]:
         """
         智能估计拟合的初始参数（改进版）
@@ -205,10 +257,10 @@ class DiameterDragFitter:
                     
                     if half_time > 0:
                         # 根据拖曳函数特性估计C（毫秒单位）
-                        # 对于毫秒时间单位，C值应该更小
+                        # C控制上升速度：exp(-C*t²)在t=half_time时约衰减到0.5
+                        # C = ln(2) / half_time² 对应半程上升时间
                         C_init = np.log(2) / (half_time**2)
-                        # 进一步调整以适应毫秒时间尺度
-                        C_init = C_init * 0.1  # 调整因子
+                        # 对于急速上升数据，不再人为缩小C
                     else:
                         C_init = 1e-3  # 毫秒单位的默认值
                 else:
@@ -219,7 +271,9 @@ class DiameterDragFitter:
             # 确保参数在合理范围内（考虑毫秒时间单位）
             K_init = max(max_diameter, K_init)
             B_init = max(0.1, min(0.99, B_init))
-            C_init = max(1e-6, min(1e-2, C_init))  # 毫秒单位的合理范围
+            # 使用数据驱动的C范围
+            C_min, C_max = self._estimate_C_bounds(time_data, diameter_data, verbose=False)
+            C_init = max(C_min, min(C_max, C_init))
             
             print(f"智能初始参数估计: K={K_init:.3f}, B={B_init:.3f}, C={C_init:.6f}")
             
@@ -395,8 +449,9 @@ class DiameterDragFitter:
         try:
             # 设置参数边界（考虑毫秒时间单位）
             max_D = np.max(D)
-            lower_bounds = [max_D, 0.1, 1e-6]  # K >= max(D), B >= 0.1, C >= 1e-6
-            upper_bounds = [max_D * 2, 0.99, 1e-2]  # K <= 2*max(D), B <= 0.99, C <= 1e-2
+            C_min, C_max = self._estimate_C_bounds(t, D)
+            lower_bounds = [max_D, 0.1, C_min]
+            upper_bounds = [max_D * 2, 0.99, C_max]
             
             # 执行curve_fit
             with warnings.catch_warnings():
@@ -465,10 +520,11 @@ class DiameterDragFitter:
             # 设置参数边界（考虑毫秒时间单位）
             max_D = np.max(D)
             min_D = np.min(D)
+            C_min, C_max = self._estimate_C_bounds(t, D)
             bounds = [
                 (max_D, max_D * 2),      # K: 最大直径到2倍最大直径（更严格）
                 (0.1, 0.99),             # B: 0.1到0.99（更合理范围）
-                (1e-6, 1e-2)             # C: 1e-6到1e-2 (毫秒单位)
+                (C_min, C_max)           # C: 根据数据范围动态估计
             ]
             
             # 使用差分进化算法进行全局优化
