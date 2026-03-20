@@ -121,20 +121,30 @@ class DragFitPlotter:
             else:
                 filtering_text = '数据过滤: 禁用'
             
-            ax1.text(0.05, 0.95, param_text, transform=ax1.transAxes, 
-                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
-                    verticalalignment='top', fontsize=10)
-            ax1.text(0.05, 0.75, quality_text, transform=ax1.transAxes,
-                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
-                    verticalalignment='top', fontsize=10)
-            ax1.text(0.05, 0.55, filtering_text, transform=ax1.transAxes,
-                    bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8),
-                    verticalalignment='top', fontsize=10)
+            # 信息框在右下成组横排（收窄间距），与图例同一区域对齐
+            _bx_kw = dict(boxstyle='round', alpha=0.88)
+            _info_fs = 8
+            _x_param, _x_quality, _x_filter = 0.48, 0.595, 0.71
+            ax1.text(_x_param, 0.02, param_text, transform=ax1.transAxes,
+                    bbox=dict(facecolor='wheat', **_bx_kw),
+                    horizontalalignment='center', verticalalignment='bottom', fontsize=_info_fs)
+            ax1.text(_x_quality, 0.02, quality_text, transform=ax1.transAxes,
+                    bbox=dict(facecolor='lightblue', **_bx_kw),
+                    horizontalalignment='center', verticalalignment='bottom', fontsize=_info_fs)
+            ax1.text(_x_filter, 0.02, filtering_text, transform=ax1.transAxes,
+                    bbox=dict(facecolor='lightgreen', **_bx_kw),
+                    horizontalalignment='center', verticalalignment='bottom', fontsize=_info_fs)
             
             ax1.set_xlabel(time_label)
             ax1.set_ylabel('火球直径 (m)')
             ax1.set_title('火球直径拖曳曲线拟合结果（改进算法）')
-            ax1.legend()
+            ax1.legend(
+                loc='lower left',
+                bbox_to_anchor=(0.82, 0.02),
+                fontsize=8,
+                framealpha=0.92,
+                borderaxespad=0.35,
+            )
             ax1.grid(True, alpha=0.3)
             
             # 残差图
@@ -150,9 +160,10 @@ class DragFitPlotter:
             
             # 添加残差统计
             residual_std = np.std(residuals)
-            ax2.text(0.05, 0.95, f'残差标准差: {residual_std:.4f} m', 
-                    transform=ax2.transAxes, bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8),
-                    verticalalignment='top', fontsize=10)
+            ax2.text(0.98, 0.02, f'残差标准差: {residual_std:.4f} m',
+                    transform=ax2.transAxes,
+                    bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.88),
+                    horizontalalignment='right', verticalalignment='bottom', fontsize=9)
             
             plt.tight_layout()
             
