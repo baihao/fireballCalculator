@@ -45,12 +45,14 @@ class PromptController:
         self._setup_ui_components(ui_builder.get_ui_components())
 
     def _set_status_line(self, text: str) -> None:
-        """状态写入运行日志（QTextEdit.append）或兼容 QLabel。"""
+        """状态写入运行日志（QPlainTextEdit / QTextEdit / QLabel）。"""
         w = self.extract_status
         if w is None:
             return
         try:
-            if hasattr(w, "append"):
+            if hasattr(w, "appendPlainText"):
+                w.appendPlainText(text if text.endswith("\n") else text + "\n")
+            elif hasattr(w, "append"):
                 w.append(text)
             elif hasattr(w, "setPlainText"):
                 w.setPlainText(text)
@@ -202,11 +204,10 @@ class PromptController:
                 
                 print(f"🎯 开始参考点选择模式: {current_type}")
             else:
-                # 完成选择参考点
-                self.reset_interaction_state()
-                # 交由独立函数处理校验与后续动作
+                # 完成选点：校验与写盘成功后再 reset_interaction_state（避免保存失败时已误退出选点模式）
                 if not self._finalize_prompt_selection():
                     return
+                self.reset_interaction_state()
                 
         except Exception as e:
             print(f"❌ 切换参考点选择模式失败: {e}")
@@ -241,17 +242,37 @@ class PromptController:
             self.extract_preview.set_interactive_enabled(True)
             return False
 
-        # 通过校验：退出交互并保存
-        self._set_status_line("参考点选择完成")
-        self.extract_preview.set_interaction_mode('none')
-        self.extract_preview.set_interactive_enabled(False)
+        # 通过校验：先写盘，成功后再由 toggle 末尾 reset_interaction_state 关闭交互
+        self._set_status_line("正在将参考点写入序列文件…")
         try:
             if hasattr(self.parent, "flush_parameters_before_action"):
                 self.parent.flush_parameters_before_action()
         except Exception:
             pass
-        self._auto_save_prompt_data()
-        print("✅ 参考点选择完成")
+        ok, msg = self._auto_save_prompt_data()
+        if not ok:
+            QMessageBox.warning(
+                self.parent,
+                "保存失败",
+                f"参考点未能写入序列文件，下次打开将无法直接分割：\n{msg}",
+            )
+            self._set_status_line("参考点保存失败，请检查文件权限或磁盘空间后重试")
+            # 保持选点模式，便于用户再次点击「完成」重试保存
+            self.is_prompt_selection_mode = True
+            if self.prompt_btn:
+                self.prompt_btn.setText("选择参考点完成")
+            current_type = self.get_current_point_type()
+            if self.extract_preview:
+                self.extract_preview.set_interaction_mode(current_type)
+                self.extract_preview.set_interactive_enabled(True)
+            return False
+        self._set_status_line("参考点选择完成，已写入序列文件")
+        try:
+            if hasattr(self.parent, "append_run_log"):
+                self.parent.append_run_log(f"✓ {msg}")
+        except Exception:
+            pass
+        print("✅ 参考点选择完成并已写入序列文件")
         return True
     
     def get_current_point_type(self) -> str:
@@ -443,31 +464,25 @@ class PromptController:
         except Exception:
             pass
     
-    def _auto_save_prompt_data(self):
-        """自动保存prompt数据和起爆点到当前序列文件"""
+    def _auto_save_prompt_data(self) -> Tuple[bool, str]:
+        """
+        将 prompt 与起爆点同步到当前序列 JSON（整文件写入）。
+        返回 (是否成功, 说明信息)。
+        """
         try:
-            # 检查是否有序列数据
             if not self.sequence_model.sequence_data:
-                print("没有序列数据，无法自动保存prompt数据")
-                return
-            
-            # 检查是否有数据需要保存
-            if (not self.sequence_model.get_prompt_data()
-                    and self.sequence_model.get_ignition_point() is None):
-                print("没有prompt数据或起爆点，无需保存")
-                return
-            
+                return False, "没有序列数据，无法保存参考点"
             success, message = self.sequence_model.save_prompt_artifacts()
-            
             if success:
-                print(f"✅ 自动保存prompt数据和起爆点成功: {message}")
-                self._set_status_line("参考点数据已自动保存")
+                print(f"✅ {message}")
+                self._set_status_line("参考点已写入序列文件，可重新打开该 JSON 直接做火球分割")
             else:
-                print(f"❌ 自动保存参考点数据失败: {message}")
-                self._set_status_line("参考点数据保存失败")
-                
+                print(f"❌ 保存参考点失败: {message}")
+                self._set_status_line(f"参考点保存失败: {message}")
+            return success, message
         except Exception as e:
-            print(f"❌ 自动保存参考点数据异常: {e}")
+            print(f"❌ 自动保存参考点异常: {e}")
+            return False, str(e)
     
     def set_prompt_controls_enabled(self, enabled: bool):
         """

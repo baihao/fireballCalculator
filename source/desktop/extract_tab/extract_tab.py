@@ -8,11 +8,13 @@ import json
 import os
 import sys
 import threading
+from collections import deque
 from typing import Optional
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
                                QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea)
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QTextCursor
 from .utils.segment_utils import build_time_diameter_series, run_segmentation_direct
 from .utils.sequence_manager import SequenceManager
 from .sequence_model import SequenceModel
@@ -36,9 +38,9 @@ class ExtractTab(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 状态日志缓冲区（用于多行显示）
-        self.status_log_buffer = []
-        self.max_status_lines = 5  # 最多显示5行
+        # 分割脚本流式输出：deque 控行数，与 QPlainTextEdit 同步裁剪
+        self.max_status_lines = 500
+        self.status_log_buffer: deque[str] = deque(maxlen=self.max_status_lines)
         
         # 初始化火球计算器和序列管理器
         self.fireball_calculator = FireballCalculator()
@@ -87,7 +89,7 @@ class ExtractTab(QWidget):
     
     def _setup_ui_component_references(self):
         """设置UI组件引用（向后兼容）"""
-        # 运行日志（QTextEdit，extract_status 与之同一引用）
+        # 运行日志（QPlainTextEdit，extract_status 与之同一引用）
         self.extract_status = self.ui_components['extract_status']
         self.run_log = self.ui_components.get('run_log', self.extract_status)
         
@@ -149,17 +151,47 @@ class ExtractTab(QWidget):
         """追加一行运行日志。"""
         try:
             w = self.ui_components.get('run_log')
-            if w is not None and hasattr(w, 'append'):
+            if w is None:
+                return
+            if hasattr(w, 'appendPlainText'):
+                w.appendPlainText((line if line.endswith('\n') else line + '\n'))
+            elif hasattr(w, 'append'):
                 w.append(line)
         except Exception as e:
             print(f"append_run_log: {e}")
 
+    def _scroll_run_log_to_bottom(self) -> None:
+        w = self.run_log
+        if w is None:
+            return
+        sb = w.verticalScrollBar()
+        if sb is not None:
+            sb.setValue(sb.maximum())
+
+    def _trim_plain_text_top(self, w, n_blocks: int) -> None:
+        """从文档顶部一次删除 n_blocks 个段落（批量删顶，避免逐行 setPlainText）。"""
+        if n_blocks <= 0 or w is None:
+            return
+        doc = w.document()
+        cursor = QTextCursor(doc)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        for _ in range(n_blocks):
+            if not cursor.movePosition(
+                QTextCursor.MoveOperation.NextBlock, QTextCursor.MoveMode.MoveAnchor
+            ):
+                break
+        start = QTextCursor(doc)
+        start.movePosition(QTextCursor.MoveOperation.Start)
+        start.setPosition(cursor.position(), QTextCursor.MoveMode.KeepAnchor)
+        start.removeSelectedText()
+
     def _status_set_plain(self, text: str) -> None:
-        """整段替换日志区（用于重置或分割过程多行输出）。"""
+        """整段替换日志区（用于重置等少量全量替换）。"""
         try:
             w = self.run_log
             if w is not None and hasattr(w, 'setPlainText'):
                 w.setPlainText(text)
+                self._scroll_run_log_to_bottom()
             elif w is not None and hasattr(w, 'setText'):
                 w.setText(text)
         except Exception as e:
@@ -596,9 +628,9 @@ class ExtractTab(QWidget):
         except Exception:
             pass
 
+        self.status_log_buffer.clear()
+        self.status_log_buffer.append("正在执行分割脚本…")
         self._status_set_plain("正在执行分割脚本…")
-        # 清空日志缓冲区
-        self.status_log_buffer = ["正在执行分割脚本…"]
 
         def worker():
             def on_line(line: str):
@@ -610,18 +642,20 @@ class ExtractTab(QWidget):
         return True
 
     def _on_segmentation_log(self, line: str):
-        text = line.rstrip('\n')
-        if text:
-            # 添加到日志缓冲区
+        w = self.run_log
+        if w is None or not hasattr(w, 'appendPlainText'):
+            return
+        # 一行日志内可能含多个 \n，按行写入以便 block 数与 deque 一致
+        for segment in line.split('\n'):
+            text = segment.rstrip('\r')
+            if not text:
+                continue
             self.status_log_buffer.append(text)
-            
-            # 保持缓冲区大小不超过最大行数
-            if len(self.status_log_buffer) > self.max_status_lines:
-                self.status_log_buffer.pop(0)
-            
-            # 更新状态显示
-            status_text = '\n'.join(self.status_log_buffer)
-            self._status_set_plain(status_text)
+            w.appendPlainText(text)
+            excess = w.document().blockCount() - self.max_status_lines
+            if excess > 0:
+                self._trim_plain_text_top(w, excess)
+        self._scroll_run_log_to_bottom()
 
     def _on_segmentation_finished(self, ok: bool):
         # 恢复控件（参考点启用状态由 _apply_sequence_data 根据是否已分割决定）

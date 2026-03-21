@@ -9,7 +9,8 @@ import os
 from typing import Any, Dict
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QSplitter, QSlider, QComboBox, QLineEdit, QGroupBox,
-                               QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QScrollArea, QCheckBox)
+                               QFileDialog, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QPlainTextEdit,
+                               QScrollArea, QCheckBox)
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
 from .checkbar import create_checkbar
@@ -171,13 +172,13 @@ class ExtractTabUI:
         log_label = QLabel("运行日志")
         log_label.setStyleSheet("color: #9ca3af; font-size: 12px; font-weight: bold;")
         left_layout.addWidget(log_label)
-        self.ui_components['run_log'] = QTextEdit()
+        self.ui_components['run_log'] = QPlainTextEdit()
         self.ui_components['run_log'].setReadOnly(True)
         self.ui_components['run_log'].setPlaceholderText("[日志] 导入、分割等输出将显示在此处…")
         self.ui_components['run_log'].setMinimumHeight(100)
         self.ui_components['run_log'].setMaximumHeight(200)
         self.ui_components['run_log'].setStyleSheet("""
-            QTextEdit {
+            QPlainTextEdit {
                 background-color: #0b1220;
                 border: 1px solid #374151;
                 border-radius: 8px;
