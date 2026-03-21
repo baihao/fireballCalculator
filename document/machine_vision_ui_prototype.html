@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>机器视觉模块 UI 原型（Input + 特征提取 合并预览）</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #0b1220;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #38bdf8;
+      --accent-2: #22d3ee;
+      --border: #1f2937;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+    }
+    .app {
+      display: grid;
+      grid-template-rows: 56px 1fr;
+      min-height: 100vh;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #0b1220, #0a1020);
+    }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tab-btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .tab-btn.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35) inset;
+    }
+    .tab-btn.mock-inactive { opacity: 0.55; cursor: default; }
+
+    main {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 12px;
+      padding: 12px;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .side {
+      border-right: 1px solid var(--border);
+      padding-right: 12px;
+      overflow: auto;
+    }
+    .content { overflow: auto; min-width: 0; }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .panel + .panel { margin-top: 12px; }
+    .panel h3 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .panel h4 {
+      margin: 0 0 8px 0;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: none;
+    }
+
+    .fieldset-like {
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 8px;
+      padding: 10px 10px 8px;
+      margin-bottom: 12px;
+      position: relative;
+    }
+    .fieldset-like > .legend {
+      position: absolute;
+      top: -0.55em;
+      left: 10px;
+      background: var(--panel);
+      padding: 0 6px;
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .row { display: grid; gap: 6px; margin-bottom: 10px; }
+    .row:last-child { margin-bottom: 0; }
+    label { font-size: 12px; color: var(--muted); }
+    .hint { font-size: 11px; color: var(--muted); line-height: 1.4; margin-top: 4px; }
+
+    .optional-import-block {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px dashed rgba(148, 163, 184, 0.35);
+    }
+    .optional-import-block .optional-title {
+      margin: 0 0 6px 0;
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #0b1220;
+      color: var(--text);
+      font-size: 13px;
+    }
+    textarea.log-area {
+      min-height: 120px;
+      resize: vertical;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #cbd5e1;
+    }
+
+    .btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, #0f1a2d, #0b1322);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      width: 100%;
+      text-align: center;
+    }
+    .btn:hover { filter: brightness(1.06); }
+    .btn.primary {
+      border-color: var(--accent);
+      color: #fff;
+      background: linear-gradient(180deg, #0ea5e9, #06b6d4);
+    }
+    .btn.secondary { margin-top: 8px; }
+    .btn-stack .btn + .btn { margin-top: 8px; }
+
+    .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .spacer { flex: 1; }
+    .status { color: var(--muted); font-size: 12px; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+    /* 预览+参数仅占左列，右列专用于图表，参数不横向侵入图表区 */
+    .viewer {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .preview-column {
+      min-width: 0;
+    }
+    .chart-column {
+      min-width: 0;
+    }
+    .param-area-under-preview {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .param-area-under-preview > h3 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      color: var(--accent);
+    }
+    .param-groups-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      align-items: stretch;
+    }
+    /* group 内：属性纵向单列排列 */
+    .param-group-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .param-group-grid .cell {
+      display: grid;
+      gap: 4px;
+      align-content: start;
+    }
+    .param-group-grid label {
+      margin: 0;
+    }
+    .log-strip {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .log-strip h3 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      color: var(--accent);
+    }
+    @media (max-width: 1100px) {
+      .viewer { grid-template-columns: 1fr; }
+      .param-groups-row { grid-template-columns: 1fr; }
+    }
+
+    .canvas-wrap {
+      position: relative;
+      background: #050a16;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      min-height: 280px;
+      height: 360px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+    .canvas-wrap .placeholder {
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+      padding: 24px;
+    }
+    .timeline {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: 8px;
+    }
+    input[type="range"] { width: 100%; }
+
+    .chart {
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px;
+      height: 150px;
+    }
+    .chart-title {
+      font-size: 12px;
+      color: var(--accent);
+      text-align: center;
+      margin-bottom: 4px;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent-2);
+      margin-left: 6px;
+      font-weight: 500;
+    }
+
+    footer.note {
+      padding: 8px 16px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div style="font-weight:600;">爆炸火球分析系统 — UI 原型</div>
+      <div class="tabs">
+        <button type="button" class="tab-btn active">机器视觉</button>
+        <button type="button" class="tab-btn mock-inactive" disabled title="本原型仅展示机器视觉">建模与预测</button>
+        <button type="button" class="tab-btn mock-inactive" disabled title="本原型仅展示机器视觉">导出</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- ========== 左侧：数据源 + 参考点 + 提取动作 ========== -->
+      <aside class="side">
+        <div class="panel">
+          <h3>机器视觉</h3>
+
+          <div class="fieldset-like">
+            <span class="legend">数据源</span>
+            <div class="btn-stack">
+              <button type="button" class="btn primary" id="btn-pick-sequence" title="分割/特征结果 JSON">
+                导入爆炸序列文件
+              </button>
+              <input type="file" id="file-sequence" accept=".json,application/json" hidden />
+
+              <button type="button" class="btn secondary" id="btn-pick-images" title="多选图像或视频">
+                导入火球图像序列
+              </button>
+              <input type="file" id="file-images" accept="image/*,video/*" multiple hidden />
+            </div>
+            <p class="hint">序列文件含已有分割结果；图像序列需选参考点后执行特征提取。实现时通常二选一加载（可清空另一侧缓存）。</p>
+
+            <div class="optional-import-block">
+              <div class="optional-title">可选补充数据</div>
+              <p class="hint" style="margin-bottom:8px;">可与上述入口叠加：温度时间序列（CSV / JSON）。</p>
+              <button type="button" class="btn" id="btn-pick-temperature">导入火球温度时间序列</button>
+              <input type="file" id="file-temperature" accept=".csv,.json,.txt" hidden />
+            </div>
+          </div>
+
+          <div class="fieldset-like">
+            <span class="legend">参考点与分割</span>
+            <div class="toolbar" style="margin-bottom:8px;">
+              <button type="button" class="btn" style="width:auto; flex:1;">开始选点</button>
+              <button type="button" class="btn" style="width:auto; flex:1;">清除</button>
+            </div>
+            <div class="row">
+              <label>正 / 负 / 起爆点</label>
+              <div class="toolbar">
+                <label><input type="radio" name="pt" checked /> 前景点</label>
+                <label><input type="radio" name="pt" /> 背景点</label>
+                <label><input type="radio" name="pt" /> 起爆点</label>
+              </div>
+            </div>
+            <div class="row">
+              <label>已选参考点</label>
+              <textarea readonly rows="2" style="resize:none; min-height:48px;" placeholder="（无）"></textarea>
+            </div>
+            <div class="row">
+              <label>分割模型</label>
+              <select>
+                <option>U-Net 分割</option>
+                <option>DeepLabV3</option>
+                <option>SAM</option>
+              </select>
+            </div>
+            <div class="row">
+              <label>批大小</label>
+              <input type="number" min="1" value="8" />
+            </div>
+          </div>
+
+          <div class="fieldset-like">
+            <span class="legend">输出</span>
+            <button type="button" class="btn primary">开始特征提取</button>
+            <div class="toolbar" style="margin-top:10px;">
+              <button type="button" class="btn" style="width:auto;">保存结果序列</button>
+              <label style="margin-left:8px; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" /> 同时导出分割图
+              </label>
+            </div>
+            <div class="toolbar" style="margin-top:8px;">
+              <span class="status" id="side-status">待选择数据源</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ========== 右侧：预览 → 参数 → 日志 ========== -->
+      <section class="content">
+        <div class="panel">
+          <div class="toolbar" style="margin-bottom:8px;">
+            <div>提取结果预览与质量检查</div>
+            <div class="spacer"></div>
+            <span class="status">进度 0%</span>
+          </div>
+
+          <!-- 左列：预览 + 时间轴 + 参数（宽度与预览对齐，不占用右侧图表列） -->
+          <div class="viewer">
+            <div class="preview-column">
+              <div class="canvas-wrap">
+                <span class="placeholder">请选择图像序列或加载序列文件后显示预览</span>
+              </div>
+              <div class="timeline">
+                <input type="range" min="0" max="100" value="0" />
+                <span class="status">t = 0 ms</span>
+                <span class="status" style="white-space:nowrap;">跳转 <input type="number" style="width:56px;" value="0" /> ms</span>
+              </div>
+
+              <div class="param-area-under-preview">
+                <h3>爆炸信息与炸药参数 <span class="badge">可编辑</span></h3>
+                <p class="hint" style="margin:0 0 10px 0;">
+                  与下方运行日志均仅在预览列内，不占用右侧图表区域；实现时与序列 JSON 字段对齐。
+                </p>
+                <div class="param-groups-row">
+                  <div class="fieldset-like" style="margin-bottom:0;">
+                    <span class="legend">爆炸信息</span>
+                    <div class="param-group-grid">
+                      <div class="cell">
+                        <label for="mv-explosion-duration">爆炸时长（ms）</label>
+                        <input type="number" id="mv-explosion-duration" min="1" step="1" value="140" />
+                      </div>
+                      <div class="cell">
+                        <label for="mv-pixel-length">单位像素实际长度（m）</label>
+                        <input type="number" id="mv-pixel-length" min="0" step="0.0001" value="0.01" />
+                      </div>
+                    </div>
+                  </div>
+                  <div class="fieldset-like" style="margin-bottom:0;">
+                    <span class="legend">炸药参数</span>
+                    <div class="param-group-grid">
+                      <div class="cell">
+                        <label for="mv-explosive-type">炸药类别</label>
+                        <select id="mv-explosive-type">
+                          <option value="thermobaric">温压弹</option>
+                          <option value="TNT">TNT</option>
+                          <option value="Polyurethane">聚氨酯</option>
+                          <option value="AlRubber30">30% Al / 橡胶</option>
+                          <option value="AlRubber40">40% Al / 橡胶</option>
+                          <option value="AlRubber50">50% Al / 橡胶</option>
+                          <option value="AlRubber60">60% Al / 橡胶</option>
+                        </select>
+                      </div>
+                      <div class="cell">
+                        <label for="mv-equivalent">当量（kg TNT）</label>
+                        <input type="number" id="mv-equivalent" min="0" step="0.1" value="1" />
+                      </div>
+                      <div class="cell">
+                        <label for="mv-al-percent">含铝量（%）</label>
+                        <input type="number" id="mv-al-percent" min="0" max="100" step="1" value="30" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="log-strip">
+                <h3>运行日志</h3>
+                <textarea class="log-area" id="mv-log" readonly placeholder="[日志] 导入、分割、拟合等输出将显示在此处…">[日志] 待开始 — 请先导入序列或图像。</textarea>
+              </div>
+            </div>
+
+            <div class="chart-column">
+              <div class="chart">
+                <div class="chart-title">火球温度随时间变化</div>
+                <div class="placeholder" style="height:100px; display:grid; place-items:center; font-size:11px;">提取完成后显示</div>
+              </div>
+              <div class="chart" style="margin-top:10px;">
+                <div class="chart-title">火球直径随时间变化</div>
+                <div class="placeholder" style="height:100px; display:grid; place-items:center; font-size:11px;">提取完成后显示</div>
+              </div>
+              <div class="chart" style="margin-top:10px;">
+                <div class="chart-title">火球直径变化速率</div>
+                <div class="placeholder" style="height:100px; display:grid; place-items:center; font-size:11px;">提取完成后显示</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="note">
+      文件：<code>document/machine_vision_ui_prototype.html</code> — 仅布局与交互占位，不接业务逻辑。
+      参数与运行日志均在「预览列」内；数据源为「爆炸序列 / 图像序列」两按钮 + 可选温度导入。
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      function wire(btnId, inputId, label) {
+        const btn = document.getElementById(btnId);
+        const inp = document.getElementById(inputId);
+        const status = document.getElementById('side-status');
+        const log = document.getElementById('mv-log');
+        if (!btn || !inp) return;
+        btn.addEventListener('click', () => inp.click());
+        inp.addEventListener('change', () => {
+          const n = inp.files?.length || 0;
+          const name = inp.files?.[0]?.name || '';
+          status.textContent = n ? `已选 ${n} 个文件` : '待选择数据源';
+          log.value += '\n[' + new Date().toLocaleTimeString() + '] ' + label + ': ' + (name || '(无)') + (n > 1 ? ` 等共 ${n} 个` : '');
+        });
+      }
+      wire('btn-pick-sequence', 'file-sequence', '导入爆炸序列文件');
+      wire('btn-pick-images', 'file-images', '导入火球图像序列');
+      wire('btn-pick-temperature', 'file-temperature', '[可选] 温度时间序列');
+    })();
+  </script>
+</body>
+</html>
