@@ -43,6 +43,21 @@ class PromptController:
 
         # 初始化 UI 组件引用
         self._setup_ui_components(ui_builder.get_ui_components())
+
+    def _set_status_line(self, text: str) -> None:
+        """状态写入运行日志（QTextEdit.append）或兼容 QLabel。"""
+        w = self.extract_status
+        if w is None:
+            return
+        try:
+            if hasattr(w, "append"):
+                w.append(text)
+            elif hasattr(w, "setPlainText"):
+                w.setPlainText(text)
+            else:
+                w.setText(text)
+        except Exception:
+            pass
     
     def _setup_ui_components(self, ui_components: Dict[str, Any]):
         """
@@ -169,10 +184,16 @@ class PromptController:
         """切换参考点选择模式"""
         try:
             if not self.is_prompt_selection_mode:
+                # 进入选点前：将爆炸/炸药参数写回序列 JSON
+                try:
+                    if hasattr(self.parent, "flush_parameters_before_action"):
+                        self.parent.flush_parameters_before_action()
+                except Exception:
+                    pass
                 # 开始选择prompt点
                 self.is_prompt_selection_mode = True
                 self.prompt_btn.setText("选择参考点完成")
-                self.extract_status.setText("正在选择参考点...")
+                self._set_status_line("正在选择参考点...")
                 
                 # 根据当前单选按钮状态设置交互模式
                 current_type = self.get_current_point_type()
@@ -210,7 +231,7 @@ class PromptController:
             all_marked = False
 
         if not all_marked:
-            self.extract_status.setText("参考点选择未完成：存在未标注的分组")
+            self._set_status_line("参考点选择未完成：存在未标注的分组")
             QMessageBox.warning(self.parent, "未完成标注", "请确保每个分组至少标注一张图片！")
             # 保持在选择模式，便于继续补充标注
             self.is_prompt_selection_mode = True
@@ -221,9 +242,14 @@ class PromptController:
             return False
 
         # 通过校验：退出交互并保存
-        self.extract_status.setText("参考点选择完成")
+        self._set_status_line("参考点选择完成")
         self.extract_preview.set_interaction_mode('none')
         self.extract_preview.set_interactive_enabled(False)
+        try:
+            if hasattr(self.parent, "flush_parameters_before_action"):
+                self.parent.flush_parameters_before_action()
+        except Exception:
+            pass
         self._auto_save_prompt_data()
         print("✅ 参考点选择完成")
         return True
@@ -281,9 +307,13 @@ class PromptController:
     def _on_cancel_prompt_clicked(self):
         """处理取消按钮点击事件"""
         try:
+            try:
+                if hasattr(self.parent, "flush_parameters_before_action"):
+                    self.parent.flush_parameters_before_action()
+            except Exception:
+                pass
             self.cancel_current_image_points(self.current_image_index)
-            if self.extract_status:
-                self.extract_status.setText("已取消当前图像的参考点选择")
+            self._set_status_line("已取消当前图像的参考点选择")
         except Exception as e:
             print(f"❌ 处理取消按钮点击失败: {e}")
     
@@ -431,10 +461,10 @@ class PromptController:
             
             if success:
                 print(f"✅ 自动保存prompt数据和起爆点成功: {message}")
-                self.extract_status.setText("参考点数据已自动保存")
+                self._set_status_line("参考点数据已自动保存")
             else:
                 print(f"❌ 自动保存参考点数据失败: {message}")
-                self.extract_status.setText("参考点数据保存失败")
+                self._set_status_line("参考点数据保存失败")
                 
         except Exception as e:
             print(f"❌ 自动保存参考点数据异常: {e}")

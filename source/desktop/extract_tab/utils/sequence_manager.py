@@ -5,6 +5,7 @@
 负责火球分析序列数据的导入和导出
 """
 
+import glob
 import json
 import numpy as np
 import os
@@ -829,6 +830,133 @@ class SequenceManager:
             }
         
         return summary
+
+    # ------------------------------------------------------------------ #
+    # 机器视觉：图像文件夹 → 同级工作 JSON
+    # ------------------------------------------------------------------ #
+    def work_sequence_json_path_for_image_folder(self, folder_path: str) -> str:
+        """与图像序列文件夹同级：{文件夹名}_fireball_sequence.json"""
+        folder_path = os.path.abspath(folder_path)
+        parent = os.path.dirname(folder_path)
+        name = os.path.basename(folder_path.rstrip(os.sep))
+        return os.path.join(parent, f"{name}_fireball_sequence.json")
+
+    def collect_image_paths_in_folder(self, folder_path: str) -> List[str]:
+        """与 input_tab 一致：仅当前目录下常见图像扩展名，排序。"""
+        folder_path = os.path.abspath(folder_path)
+        image_extensions = ["*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tiff"]
+        image_files: List[str] = []
+        for ext in image_extensions:
+            pattern = os.path.join(folder_path, ext)
+            image_files.extend(glob.glob(pattern))
+        image_files = sorted(set(image_files))
+        return [os.path.abspath(p) for p in image_files]
+
+    def create_work_sequence_from_image_folder(
+        self,
+        folder_path: str,
+        material_type: str = "温压弹",
+        equivalent: str = "1",
+        al_percent: str = "30",
+        explosion_duration: str = "140",
+        pixel_length: str = "0.01",
+    ) -> Tuple[bool, str, Optional[str]]:
+        """
+        扫描文件夹内图像，在与文件夹同级路径写入 {文件夹名}_fireball_sequence.json。
+        返回 (成功, 消息, 工作文件绝对路径)。
+        """
+        abs_paths = self.collect_image_paths_in_folder(folder_path)
+        if not abs_paths:
+            return False, "所选文件夹中没有支持的图像文件", None
+        work_path = self.work_sequence_json_path_for_image_folder(folder_path)
+        ok, msg = self.export_sequence_data(
+            work_path,
+            abs_paths,
+            material_type,
+            equivalent,
+            al_percent,
+            explosion_duration,
+            pixel_length,
+            None,
+            None,
+        )
+        if not ok:
+            return False, msg, None
+        return True, msg, work_path
+
+    def load_temperature_data_file(self, file_path: str) -> Tuple[Optional[List[float]], Optional[List[float]]]:
+        """
+        从 CSV / JSON / 文本读取温度序列（与 input_tab.load_temperature_data 行为对齐）。
+        """
+        try:
+            if file_path.lower().endswith(".csv"):
+                try:
+                    import pandas as pd
+                    df = pd.read_csv(file_path)
+                    time_col = None
+                    temp_col = None
+                    for col in df.columns:
+                        cl = col.lower()
+                        if "time" in cl or "时间" in cl or "ms" in cl:
+                            time_col = col
+                        elif "temp" in cl or "温度" in cl or "k" in cl:
+                            temp_col = col
+                    if time_col is None or temp_col is None:
+                        time_col = df.columns[0]
+                        temp_col = df.columns[1]
+                    t = [float(x) for x in df[time_col].values]
+                    T = [float(x) for x in df[temp_col].values]
+                    return t, T
+                except ImportError:
+                    return self._read_temperature_csv_manual(file_path)
+            if file_path.lower().endswith(".json"):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if "time" in data and "temperature" in data:
+                    return [float(x) for x in data["time"]], [float(x) for x in data["temperature"]]
+                return None, None
+            time_data: List[float] = []
+            temp_data: List[float] = []
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if "," in line:
+                        parts = line.split(",")
+                        if len(parts) >= 2:
+                            try:
+                                time_data.append(float(parts[0]))
+                                temp_data.append(float(parts[1]))
+                            except ValueError:
+                                continue
+            if time_data and temp_data:
+                return time_data, temp_data
+            return None, None
+        except Exception as e:
+            print(f"加载温度数据失败: {e}")
+            return None, None
+
+    def _read_temperature_csv_manual(self, file_path: str) -> Tuple[Optional[List[float]], Optional[List[float]]]:
+        time_data: List[float] = []
+        temp_data: List[float] = []
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            for line in lines[1:]:
+                line = line.strip()
+                if line and "," in line:
+                    parts = line.split(",")
+                    if len(parts) >= 2:
+                        try:
+                            time_data.append(float(parts[0]))
+                            temp_data.append(float(parts[1]))
+                        except ValueError:
+                            continue
+            if time_data and temp_data:
+                return time_data, temp_data
+        except Exception as e:
+            print(f"手动读 CSV 失败: {e}")
+        return None, None
+
 
 if __name__ == "__main__":
     pass

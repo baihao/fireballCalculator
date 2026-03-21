@@ -9,6 +9,7 @@ ExtractTab / PromptController 等上层组件使用。
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from .utils.sequence_manager import SequenceManager
@@ -273,6 +274,55 @@ class SequenceModel:
             "explosion_duration": self._explosion_duration_ms,
         }
         return summary
+
+    # ------------------------------------------------------------------ #
+    # 参数写回 JSON / 温度
+    # ------------------------------------------------------------------ #
+    def apply_parameters_from_ui(
+        self,
+        material_type: str,
+        equivalent: str,
+        al_percent: str,
+        explosion_duration: str,
+        pixel_length: str,
+    ) -> None:
+        """根据 UI 更新内存中的 parameters 与 sequence_data（不写盘）。"""
+        self._parameters = {
+            "material_type": material_type,
+            "equivalent": str(equivalent).strip(),
+            "al_percent": str(al_percent).strip(),
+            "explosion_duration": str(explosion_duration).strip(),
+            "pixel_length": str(pixel_length).strip(),
+        }
+        try:
+            self._pixel_length = float(self._parameters["pixel_length"])
+        except ValueError:
+            self._pixel_length = 1.0
+        try:
+            self._explosion_duration_ms = float(self._parameters["explosion_duration"])
+        except ValueError:
+            self._explosion_duration_ms = 140.0
+        if self._current_path and isinstance(self._sequence_data, dict) and self._sequence_data:
+            self._sequence_data["parameters"] = dict(self._parameters)
+            img_seq = self._sequence_data.setdefault("image_sequence", {})
+            img_seq["duration"] = str(explosion_duration).strip()
+
+    def set_temperature_pairs(self, pairs: List[List[float]]) -> None:
+        """更新内存中的 temperature 段（[time_ms, T_K] 列表）。"""
+        if not isinstance(self._sequence_data, dict):
+            self._sequence_data = {}
+        self._sequence_data["temperature"] = pairs
+
+    def flush_sequence_json_to_disk(self) -> Tuple[bool, str]:
+        """将当前内存中的完整 sequence_data 写入 current_path。"""
+        if not self._current_path:
+            return False, "无序列文件路径"
+        try:
+            with open(self._current_path, "w", encoding="utf-8") as f:
+                json.dump(self._sequence_data, f, ensure_ascii=False, indent=2)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
 
     # ------------------------------------------------------------------ #
     # 内部辅助

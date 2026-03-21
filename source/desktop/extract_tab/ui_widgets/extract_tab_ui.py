@@ -60,8 +60,10 @@ class ExtractTabUI:
     
     def _create_sidebar_components(self):
         """创建侧边栏组件（不添加到布局，只创建组件引用）"""
-        # 序列文件选择按钮
-        self.ui_components['sequence_btn'] = QPushButton("选择火球爆炸序列文件")
+        # 数据源按钮
+        self.ui_components['sequence_btn'] = QPushButton("导入爆炸序列文件")
+        self.ui_components['image_folder_btn'] = QPushButton("导入火球图像序列")
+        self.ui_components['temp_btn'] = QPushButton("导入火球温度时间序列")
         
         # Prompt相关组件
         self.ui_components['prompt_btn'] = QPushButton("开始选择参考点")
@@ -123,20 +125,73 @@ class ExtractTabUI:
         preview_group = self._create_preview_group()
         left_layout.addWidget(preview_group)
         
-        # 添加弹性空间，将状态标签推到最下面
-        left_layout.addStretch()
-        
-        # 状态标签 - 改为多行显示
-        self.ui_components['extract_status'] = QLabel("待开始")
-        self.ui_components['extract_status'].setStyleSheet("color: #9ca3af; font-size: 11px; padding: 8px; text-align: left;")
-        self.ui_components['extract_status'].setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        # 设置状态标签的固定宽度和高度，支持多行显示
-        self.ui_components['extract_status'].setWordWrap(True)
-        self.ui_components['extract_status'].setMaximumWidth(400)  # 限制最大宽度，与图像预览最小宽度一致
-        self.ui_components['extract_status'].setMinimumWidth(200)  # 设置最小宽度
-        self.ui_components['extract_status'].setMaximumHeight(120)  # 设置最大高度，约5行文本
-        self.ui_components['extract_status'].setMinimumHeight(60)   # 设置最小高度
-        left_layout.addWidget(self.ui_components['extract_status'])
+        # 爆炸信息 / 炸药参数（与原型一致：两分组并排，组内纵向；仅占预览列宽度）
+        params_row = QHBoxLayout()
+        params_row.setSpacing(10)
+
+        explosion_group = QGroupBox("爆炸信息")
+        explosion_group.setStyleSheet(self._param_group_style())
+        eg_layout = QVBoxLayout()
+        eg_layout.setSpacing(6)
+        eg_layout.addWidget(QLabel("爆炸时长（ms）"))
+        self.ui_components['mv_explosion_duration'] = QLineEdit("140")
+        self._style_param_lineedit(self.ui_components['mv_explosion_duration'])
+        eg_layout.addWidget(self.ui_components['mv_explosion_duration'])
+        eg_layout.addWidget(QLabel("单位像素实际长度（m）"))
+        self.ui_components['mv_pixel_length'] = QLineEdit("0.01")
+        self._style_param_lineedit(self.ui_components['mv_pixel_length'])
+        eg_layout.addWidget(self.ui_components['mv_pixel_length'])
+        explosion_group.setLayout(eg_layout)
+
+        explosive_group = QGroupBox("炸药参数")
+        explosive_group.setStyleSheet(self._param_group_style())
+        ex_layout = QVBoxLayout()
+        ex_layout.setSpacing(6)
+        ex_layout.addWidget(QLabel("炸药类别"))
+        self.ui_components['mv_explosive_type'] = QComboBox()
+        self.ui_components['mv_explosive_type'].addItems(["温压弹"])
+        self.ui_components['mv_explosive_type'].setCurrentText("温压弹")
+        self._style_param_combo(self.ui_components['mv_explosive_type'])
+        ex_layout.addWidget(self.ui_components['mv_explosive_type'])
+        ex_layout.addWidget(QLabel("当量（kg TNT）"))
+        self.ui_components['mv_equivalent'] = QLineEdit("1")
+        self._style_param_lineedit(self.ui_components['mv_equivalent'])
+        ex_layout.addWidget(self.ui_components['mv_equivalent'])
+        ex_layout.addWidget(QLabel("含铝量（%）"))
+        self.ui_components['mv_al_percent'] = QLineEdit("30")
+        self._style_param_lineedit(self.ui_components['mv_al_percent'])
+        ex_layout.addWidget(self.ui_components['mv_al_percent'])
+        explosive_group.setLayout(ex_layout)
+
+        params_row.addWidget(explosion_group, 1)
+        params_row.addWidget(explosive_group, 1)
+        left_layout.addLayout(params_row)
+
+        # 运行日志（多行，不占右侧图表区）
+        log_label = QLabel("运行日志")
+        log_label.setStyleSheet("color: #9ca3af; font-size: 12px; font-weight: bold;")
+        left_layout.addWidget(log_label)
+        self.ui_components['run_log'] = QTextEdit()
+        self.ui_components['run_log'].setReadOnly(True)
+        self.ui_components['run_log'].setPlaceholderText("[日志] 导入、分割等输出将显示在此处…")
+        self.ui_components['run_log'].setMinimumHeight(100)
+        self.ui_components['run_log'].setMaximumHeight(200)
+        self.ui_components['run_log'].setStyleSheet("""
+            QTextEdit {
+                background-color: #0b1220;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                color: #cbd5e1;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+                padding: 8px;
+            }
+        """)
+        left_layout.addWidget(self.ui_components['run_log'])
+        # 兼容旧代码：extract_status 指向运行日志
+        self.ui_components['extract_status'] = self.ui_components['run_log']
+
+        left_layout.addStretch(1)
         
         left_widget.setLayout(left_layout)
         return left_widget
@@ -344,20 +399,69 @@ class ExtractTabUI:
         return diam_vel_group
     
     
+    def _param_group_style(self) -> str:
+        return """
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                margin-top: 8px;
+                padding-top: 8px;
+                background-color: #111827;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+                color: #38bdf8;
+            }
+        """
+
+    def _style_param_lineedit(self, w: QLineEdit) -> None:
+        w.setStyleSheet("""
+            QLineEdit {
+                background-color: #0b1220;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                padding: 6px 8px;
+                color: #e5e7eb;
+            }
+        """)
+
+    def _style_param_combo(self, w: QComboBox) -> None:
+        w.setStyleSheet("""
+            QComboBox {
+                background-color: #0b1220;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                padding: 6px 8px;
+                color: #e5e7eb;
+            }
+        """)
+
     def create_sidebar_widget(self) -> QGroupBox:
         """创建侧边栏组件"""
         # 确保侧边栏组件已创建
         if 'sequence_btn' not in self.ui_components:
             self._create_sidebar_components()
         
-        sidebar_widget = QGroupBox("特征提取")
+        sidebar_widget = QGroupBox("机器视觉")
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignTop)
         layout.setSpacing(8)
-        
-        # 序列文件选择
-        layout.addWidget(QLabel("火球爆炸序列文件（JSON格式）"))
-        layout.addWidget(self.ui_components['sequence_btn'])
+
+        data_group = QGroupBox("数据源")
+        data_group.setStyleSheet(self._param_group_style())
+        data_layout = QVBoxLayout()
+        data_layout.setSpacing(8)
+        data_layout.addWidget(QLabel("导入爆炸序列文件（JSON）"))
+        data_layout.addWidget(self.ui_components['sequence_btn'])
+        data_layout.addWidget(QLabel("导入火球图像序列（选择文件夹）"))
+        data_layout.addWidget(self.ui_components['image_folder_btn'])
+        data_layout.addWidget(QLabel("可选：温度时间序列（CSV/JSON）"))
+        data_layout.addWidget(self.ui_components['temp_btn'])
+        data_group.setLayout(data_layout)
+        layout.addWidget(data_group)
         
         # 参考点选择组
         prompt_group = self._create_prompt_selection_group()
@@ -382,7 +486,7 @@ class ExtractTabUI:
     
     def _create_prompt_selection_group(self) -> QGroupBox:
         """创建参考点选择组"""
-        prompt_group = QGroupBox("参考点选择")
+        prompt_group = QGroupBox("参考点与分割")
         prompt_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -429,7 +533,7 @@ class ExtractTabUI:
     
     def _create_export_group(self) -> QGroupBox:
         """创建导出分割结果组"""
-        export_group = QGroupBox("导出分割结果")
+        export_group = QGroupBox("输出")
         export_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;

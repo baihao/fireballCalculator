@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-特征提取模块标签页
+机器视觉模块标签页（原特征提取 + 原输入侧能力：序列/图像文件夹/温度、参数与日志）
 """
 
 import json
@@ -29,7 +29,7 @@ from diameter_process.diameter_drag_fitting import DiameterDragFitter
 
 
 class ExtractTab(QWidget):
-    """特征提取模块标签页"""
+    """机器视觉模块标签页"""
     # 异步分割：日志与完成信号
     log_received = Signal(str)
     seg_finished = Signal(bool)
@@ -67,6 +67,7 @@ class ExtractTab(QWidget):
         # 连接异步信号
         self.log_received.connect(self._on_segmentation_log)
         self.seg_finished.connect(self._on_segmentation_finished)
+        self.append_run_log("[日志] 待开始 — 请导入爆炸序列文件或火球图像序列文件夹。")
 
     def _has_analysis_results(self) -> bool:
         """是否具备可保存的分析结果（直径曲线 + 拟合参数）。"""
@@ -86,17 +87,32 @@ class ExtractTab(QWidget):
     
     def _setup_ui_component_references(self):
         """设置UI组件引用（向后兼容）"""
-        # 状态显示控件（仍在使用）
+        # 运行日志（QTextEdit，extract_status 与之同一引用）
         self.extract_status = self.ui_components['extract_status']
+        self.run_log = self.ui_components.get('run_log', self.extract_status)
         
         # 按钮控件引用（仍在使用）
         self.sequence_btn = self.ui_components['sequence_btn']
+        self.image_folder_btn = self.ui_components['image_folder_btn']
+        self.temp_btn = self.ui_components['temp_btn']
         self.extract_btn = self.ui_components['extract_btn']
         self.reextract_btn = self.ui_components['reextract_btn']
         self.save_button = self.ui_components['save_button']
         self.export_segmentation_checkbox = self.ui_components['export_segmentation_checkbox']
         
-        # cancel_prompt_btn 已由 PromptController 管理
+        # 参数控件（爆炸信息 / 炸药参数）
+        self.mv_explosion_duration = self.ui_components['mv_explosion_duration']
+        self.mv_pixel_length = self.ui_components['mv_pixel_length']
+        self.mv_explosive_type = self.ui_components['mv_explosive_type']
+        self.mv_equivalent = self.ui_components['mv_equivalent']
+        self.mv_al_percent = self.ui_components['mv_al_percent']
+
+        self.prompt_btn = self.ui_components['prompt_btn']
+        self.cancel_prompt_btn = self.ui_components['cancel_prompt_btn']
+        self.positive_radio = self.ui_components['positive_radio']
+        self.negative_radio = self.ui_components['negative_radio']
+        self.ignition_radio = self.ui_components['ignition_radio']
+        self.jump_btn = self.ui_components.get('jump_btn')
         
         # 信息显示控件（仍在使用）
         self.prompt_info_text = self.ui_components['prompt_info_text']
@@ -113,6 +129,8 @@ class ExtractTab(QWidget):
         
         # 侧边栏按钮（PromptController 相关的信号已在控制器内部连接）
         self.sequence_btn.clicked.connect(self.select_sequence_folder)
+        self.image_folder_btn.clicked.connect(self.select_image_sequence_folder)
+        self.temp_btn.clicked.connect(self.select_temperature_sequence)
         self.extract_btn.clicked.connect(self.start_feature_extraction)
         self.reextract_btn.clicked.connect(self.start_reextraction)
         # cancel_prompt_btn 的信号连接已由 PromptController 处理
@@ -121,9 +139,204 @@ class ExtractTab(QWidget):
         
         # 保存按钮
         self.save_button.clicked.connect(self.save_extraction_sequence)
+
+        # 参数变更：仅更新内存中的模型，写盘在「其他操作前」flush
+        for w in (self.mv_explosion_duration, self.mv_pixel_length, self.mv_equivalent, self.mv_al_percent):
+            w.textChanged.connect(self._on_mv_parameter_text_changed)
+        self.mv_explosive_type.currentTextChanged.connect(self._on_mv_parameter_text_changed)
     
+    def append_run_log(self, line: str) -> None:
+        """追加一行运行日志。"""
+        try:
+            w = self.ui_components.get('run_log')
+            if w is not None and hasattr(w, 'append'):
+                w.append(line)
+        except Exception as e:
+            print(f"append_run_log: {e}")
+
+    def _status_set_plain(self, text: str) -> None:
+        """整段替换日志区（用于重置或分割过程多行输出）。"""
+        try:
+            w = self.run_log
+            if w is not None and hasattr(w, 'setPlainText'):
+                w.setPlainText(text)
+            elif w is not None and hasattr(w, 'setText'):
+                w.setText(text)
+        except Exception as e:
+            print(f"_status_set_plain: {e}")
+
+    def flush_parameters_before_action(self) -> None:
+        """在执行其他操作前将当前参数写入当前序列 JSON（若有路径）。"""
+        try:
+            if not self.sequence_model.current_path:
+                return
+            self._sync_model_parameters_from_ui()
+            ok, err = self.sequence_model.flush_sequence_json_to_disk()
+            if not ok:
+                self.append_run_log(f"⚠️ 自动保存序列失败: {err}")
+        except Exception as e:
+            print(f"flush_parameters_before_action: {e}")
+
+    def flush_sequence_silent(self) -> None:
+        """供主窗口关闭时调用：尽量把当前参数写回磁盘。"""
+        try:
+            self.flush_parameters_before_action()
+        except Exception:
+            pass
+
+    def _sync_model_parameters_from_ui(self) -> None:
+        if not self.sequence_model.current_path:
+            return
+        self.sequence_model.apply_parameters_from_ui(
+            self.mv_explosive_type.currentText(),
+            self.mv_equivalent.text().strip(),
+            self.mv_al_percent.text().strip(),
+            self.mv_explosion_duration.text().strip(),
+            self.mv_pixel_length.text().strip(),
+        )
+
+    def _sync_ui_parameters_from_model(self) -> None:
+        """从已加载序列回填参数控件。"""
+        try:
+            p = self.sequence_model.parameters
+            if not p:
+                return
+            for w in (
+                self.mv_explosion_duration,
+                self.mv_pixel_length,
+                self.mv_equivalent,
+                self.mv_al_percent,
+            ):
+                w.blockSignals(True)
+            self.mv_explosive_type.blockSignals(True)
+            self.mv_explosion_duration.setText(str(p.get("explosion_duration", "140")))
+            self.mv_pixel_length.setText(str(p.get("pixel_length", "0.01")))
+            mt = str(p.get("material_type", "温压弹"))
+            idx = self.mv_explosive_type.findText(mt)
+            if idx >= 0:
+                self.mv_explosive_type.setCurrentIndex(idx)
+            else:
+                self.mv_explosive_type.setCurrentText(mt)
+            self.mv_equivalent.setText(str(p.get("equivalent", "1")))
+            self.mv_al_percent.setText(str(p.get("al_percent", "30")))
+            for w in (
+                self.mv_explosion_duration,
+                self.mv_pixel_length,
+                self.mv_equivalent,
+                self.mv_al_percent,
+            ):
+                w.blockSignals(False)
+            self.mv_explosive_type.blockSignals(False)
+        except Exception as e:
+            print(f"_sync_ui_parameters_from_model: {e}")
+
+    def _on_mv_parameter_text_changed(self, *args) -> None:
+        """参数框编辑时仅同步内存（需已加载序列且有路径）。"""
+        try:
+            if not self.sequence_model.current_path:
+                return
+            self._sync_model_parameters_from_ui()
+        except Exception:
+            pass
+
+    def select_image_sequence_folder(self):
+        """选择图像文件夹，在同级生成 {文件夹名}_fireball_sequence.json 并加载。"""
+        self.flush_parameters_before_action()
+        folder_path = QFileDialog.getExistingDirectory(self, "选择火球图像序列文件夹", "")
+        if not folder_path:
+            return
+        ok, msg, work_path = self.sequence_manager.create_work_sequence_from_image_folder(
+            folder_path,
+            self.mv_explosive_type.currentText(),
+            self.mv_equivalent.text().strip(),
+            self.mv_al_percent.text().strip(),
+            self.mv_explosion_duration.text().strip(),
+            self.mv_pixel_length.text().strip(),
+        )
+        if not ok or not work_path:
+            QMessageBox.warning(self, "警告", msg or "无法创建工作序列文件")
+            return
+        try:
+            self._reset_state_before_import()
+            success, sequence_data, message = self.sequence_manager.load_sequence_file(work_path)
+            if not success:
+                QMessageBox.critical(self, "错误", f"加载工作序列失败:\n{message}")
+                return
+            self._apply_sequence_data(sequence_data, work_path)
+            self.append_run_log(f"✓ 图像序列目录: {folder_path}")
+            self.append_run_log(f"✓ 工作文件: {work_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"导入图像序列失败:\n{str(e)}")
+            print(e)
+
+    def select_temperature_sequence(self):
+        """导入温度时间序列并立即写入当前序列 JSON。"""
+        self.flush_parameters_before_action()
+        if not self.sequence_model.current_path:
+            QMessageBox.warning(self, "警告", "请先导入爆炸序列或图像序列。")
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择火球温度时间序列文件",
+            "",
+            "CSV文件 (*.csv);;JSON文件 (*.json);;文本文件 (*.txt);;所有文件 (*)",
+        )
+        if not file_path:
+            return
+        t_data, T_data = self.sequence_manager.load_temperature_data_file(file_path)
+        if not t_data or not T_data:
+            QMessageBox.warning(self, "警告", "无法读取温度数据文件。")
+            return
+        pairs = [[float(t), float(T)] for t, T in zip(t_data, T_data)]
+        self.sequence_model.set_temperature_pairs(pairs)
+        ok, err = self.sequence_model.flush_sequence_json_to_disk()
+        if not ok:
+            QMessageBox.critical(self, "错误", f"写入温度数据失败:\n{err}")
+            return
+        self.update_temperature_chart(t_data, T_data)
+        self.append_run_log(f"✓ 已导入温度序列: {os.path.basename(file_path)} ({len(pairs)} 点)")
+
+    def _segmentation_lock_widgets(self):
+        """分割进行中需禁用的控件（预览与时间轴除外）。"""
+        widgets = [
+            self.sequence_btn,
+            self.image_folder_btn,
+            self.temp_btn,
+            self.extract_btn,
+            self.reextract_btn,
+            self.save_button,
+            self.prompt_btn,
+            self.cancel_prompt_btn,
+            self.positive_radio,
+            self.negative_radio,
+            self.ignition_radio,
+            self.mv_explosion_duration,
+            self.mv_pixel_length,
+            self.mv_explosive_type,
+            self.mv_equivalent,
+            self.mv_al_percent,
+        ]
+        if self.jump_btn is not None:
+            widgets.append(self.jump_btn)
+        ji = self.ui_components.get('jump_input')
+        if ji is not None:
+            widgets.append(ji)
+        if self.export_segmentation_checkbox is not None:
+            widgets.append(self.export_segmentation_checkbox)
+        cb = self.ui_components.get('check_bar')
+        if cb is not None:
+            widgets.append(cb)
+        return [w for w in widgets if w is not None]
+
+    def _set_segmentation_ui_locked(self, locked: bool) -> None:
+        for w in self._segmentation_lock_widgets():
+            try:
+                w.setEnabled(not locked)
+            except Exception:
+                pass
+
     def get_sidebar_widget(self):
-        """获取特征提取模块的侧边栏组件"""
+        """获取机器视觉模块的侧边栏组件"""
         if not hasattr(self, '_sidebar_widget'):
             # 使用UI构建器创建侧边栏
             self._sidebar_widget = self.ui_builder.create_sidebar_widget()
@@ -151,7 +364,7 @@ class ExtractTab(QWidget):
             
             # 4) 重置状态文本与按钮
             try:
-                self.extract_status.setText("待开始")
+                self._status_set_plain("待开始")
                 self.extract_btn.setVisible(True)
                 if hasattr(self, 'reextract_btn'):
                     self.reextract_btn.setVisible(False)
@@ -173,7 +386,7 @@ class ExtractTab(QWidget):
             image_paths = self.sequence_model.image_paths
             if not image_paths:
                 QMessageBox.warning(self, "警告", "序列文件中没有图像路径！")
-                self.extract_status.setText("无图像数据")
+                self.append_run_log("无图像数据")
                 return False
 
             # 应用序列显示（设置时间轴、显示第一张图像等）
@@ -215,7 +428,8 @@ class ExtractTab(QWidget):
                 status_msg += f"，参考点数据: {summary['total_prompt_points']} 点"
             if summary['has_ignition_point']:
                 status_msg += f"，起爆点: {summary['ignition_point']}"
-            self.extract_status.setText(status_msg)
+            self._sync_ui_parameters_from_model()
+            self.append_run_log(status_msg)
             return self.sequence_model.has_segmentation_data()
 
         except Exception as e:
@@ -226,6 +440,7 @@ class ExtractTab(QWidget):
     
     def select_sequence_folder(self):
         """选择火球爆炸序列JSON文件"""
+        self.flush_parameters_before_action()
         # 选择JSON文件
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择火球爆炸序列文件",
@@ -242,7 +457,7 @@ class ExtractTab(QWidget):
                 
                 if not success:
                     QMessageBox.critical(self, "错误", f"加载序列文件失败:\n{message}")
-                    self.extract_status.setText("文件加载失败")
+                    self.append_run_log("文件加载失败")
                     return
                 
                 # 统一应用逻辑
@@ -251,7 +466,7 @@ class ExtractTab(QWidget):
                     
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"处理序列文件失败:\n{str(e)}")
-                self.extract_status.setText("处理失败")
+                self.append_run_log("处理失败")
                 print(f"处理序列文件失败: {e}")
     
     def init_charts(self):
@@ -285,21 +500,22 @@ class ExtractTab(QWidget):
     def start_feature_extraction(self):
         """开始特征提取（调用分割脚本）"""
         try:
+            self.flush_parameters_before_action()
             print("🔥 开始特征提取...")
-            self.extract_status.setText("正在检查序列文件...")
+            self.append_run_log("正在检查序列文件...")
             self.extract_btn.setEnabled(False)
             
             # 检查是否有序列数据
             if not self.sequence_model.sequence_data:
                 QMessageBox.warning(self, "警告", "请先加载火球爆炸序列文件！")
-                self.extract_status.setText("请先加载序列文件")
+                self.append_run_log("请先加载序列文件")
                 self.extract_btn.setEnabled(True)
                 return
             
             # 检查序列文件路径
             if not self.sequence_model.current_path:
                 QMessageBox.warning(self, "警告", "无法找到序列文件路径！")
-                self.extract_status.setText("序列文件路径丢失")
+                self.append_run_log("序列文件路径丢失")
                 self.extract_btn.setEnabled(True)
                 return
             
@@ -310,7 +526,7 @@ class ExtractTab(QWidget):
                 # 情况1：没有prompt数据
                 QMessageBox.warning(self, "警告", 
                     "序列文件中没有特征点数据！\n\n请先：\n1. 点击'开始选择参考点'\n2. 在图像上选择正负点\n3. 完成特征点选择后再进行提取")
-                self.extract_status.setText("请先选择特征点")
+                self.append_run_log("请先选择特征点")
                 self.extract_btn.setEnabled(True)
                 return
                 
@@ -327,12 +543,12 @@ class ExtractTab(QWidget):
                 else:
                     # 用户取消，恢复按钮状态
                     self.extract_btn.setEnabled(True)
-                    self.extract_status.setText("已有分割结果")
+                    self.append_run_log("已有分割结果")
                     return
             
             # 情况3：有prompt数据但没有分割结果，执行分割
             print("开始执行分割脚本...")
-            self.extract_status.setText("正在执行分割脚本...")
+            self.append_run_log("正在执行分割脚本...")
             
             # 调用异步分割脚本（完成后的处理在 _on_segmentation_finished 中）
             self.run_segmentation_script(self.sequence_model.current_path)
@@ -341,7 +557,7 @@ class ExtractTab(QWidget):
             print(f"❌ 特征提取失败: {e}")
             import traceback
             traceback.print_exc()
-            self.extract_status.setText("特征提取失败")
+            self.append_run_log("特征提取失败")
             self.extract_btn.setEnabled(True)
             QMessageBox.critical(self, "错误", f"特征提取失败:\n{str(e)}")
     
@@ -373,21 +589,14 @@ class ExtractTab(QWidget):
     
     def run_segmentation_script(self, sequence_file_path: str) -> bool:
         """异步运行分割脚本：后台线程读日志，通过信号更新UI，不阻塞主线程。"""
-        # 1) 禁用交互控件
+        # 1) 禁用交互控件（除预览与时间轴外）
         try:
-            # 禁用 prompt 相关控件（由 PromptController 管理）
             self.prompt_controller.set_prompt_controls_enabled(False)
-            
-            # 禁用其他控件
-            for w in [
-                self.sequence_btn, self.extract_btn, self.reextract_btn, self.save_button
-            ]:
-                if hasattr(w, 'setEnabled'):
-                    w.setEnabled(False)
+            self._set_segmentation_ui_locked(True)
         except Exception:
             pass
 
-        self.extract_status.setText("正在执行分割脚本…")
+        self._status_set_plain("正在执行分割脚本…")
         # 清空日志缓冲区
         self.status_log_buffer = ["正在执行分割脚本…"]
 
@@ -412,36 +621,32 @@ class ExtractTab(QWidget):
             
             # 更新状态显示
             status_text = '\n'.join(self.status_log_buffer)
-            self.extract_status.setText(status_text)
+            self._status_set_plain(status_text)
 
     def _on_segmentation_finished(self, ok: bool):
-        # 恢复控件
+        # 恢复控件（参考点启用状态由 _apply_sequence_data 根据是否已分割决定）
         try:
-            # 启用 prompt 相关控件（由 PromptController 管理）
-            self.prompt_controller.set_prompt_controls_enabled(True)
-            
-            # 启用其他控件
-            for w in [
-                self.sequence_btn, self.extract_btn, self.reextract_btn, self.save_button
-            ]:
-                if hasattr(w, 'setEnabled'):
-                    w.setEnabled(True)
+            self._set_segmentation_ui_locked(False)
         except Exception:
             pass
 
         if ok:
-            self.extract_status.setText("分割完成，正在加载分割结果…")
+            self.append_run_log("分割完成，正在加载分割结果…")
             self.reload_sequence_with_segmentation_results()
-            self.extract_status.setText("特征提取完成")
-            # 依据分析结果是否就绪来控制保存按钮
+            self.append_run_log("特征提取完成")
             self._update_save_button_state()
         else:
-            self.extract_status.setText("分割脚本执行失败")
+            self.append_run_log("分割脚本执行失败")
+            try:
+                self.prompt_controller.set_prompt_controls_enabled(True)
+            except Exception:
+                pass
             QMessageBox.critical(self, "错误", "分割脚本执行失败！\n请检查控制台输出获取详细信息。")
     
     def prepare_for_reextraction(self):
         """准备重新提取：清除分割结果，重置为特征点选择模式"""
         try:
+            self.flush_parameters_before_action()
             success, message = self.sequence_model.clear_segmentation_results()
             if message:
                 print(("✅ " if success else "❌ ") + message)
@@ -461,7 +666,7 @@ class ExtractTab(QWidget):
             self.display_controller.handle_segmentation_update()
 
             # 更新状态
-            self.extract_status.setText("已清除分割结果，请重新选择特征点")
+            self.append_run_log("已清除分割结果，请重新选择特征点")
             
             print("✅ 已准备重新提取")
                 
@@ -552,6 +757,7 @@ class ExtractTab(QWidget):
     def start_reextraction(self):
         """开始重新提取"""
         try:
+            self.flush_parameters_before_action()
             print("🔄 开始重新提取...")
             
             # 检查是否有序列数据
@@ -595,6 +801,7 @@ class ExtractTab(QWidget):
     def save_extraction_sequence(self):
         """保存提取序列（按照example_data.json格式）"""
         try:
+            self.flush_parameters_before_action()
             # 改为保存直径与拟合参数结果
             diameter_series = self.chart_controller.get_cached_diameter()
             if not diameter_series:
@@ -631,15 +838,15 @@ class ExtractTab(QWidget):
                     elif self.export_segmentation_checkbox.isChecked():
                         message += "\n\n⚠️ 分割图片导出失败，请检查控制台输出"
                     QMessageBox.information(self, "成功", message)
-                    self.extract_status.setText("分析结果保存成功" + ("，分割图片已导出" if export_images_success else ""))
+                    self.append_run_log("分析结果保存成功" + ("，分割图片已导出" if export_images_success else ""))
                 else:
                     QMessageBox.critical(self, "错误", "保存失败，请检查文件路径和权限！")
-                    self.extract_status.setText("分析结果保存失败")
+                    self.append_run_log("分析结果保存失败")
                     
         except Exception as e:
             print(f"❌ 保存提取序列失败: {e}")
             QMessageBox.critical(self, "错误", f"保存提取序列失败:\n{str(e)}")
-            self.extract_status.setText("保存失败")
+            self.append_run_log("保存失败")
     
     def export_analysis_results_to_json(self, file_path: str) -> bool:
         """导出直径曲线、爆炸参数、拖曳拟合结果到 JSON 文件。"""
