@@ -9,6 +9,7 @@ ExtractTab / PromptController 等上层组件使用。
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from .utils.sequence_manager import SequenceManager
@@ -150,17 +151,24 @@ class SequenceModel:
         return self._ignition_point
 
     def save_prompt_artifacts(self) -> Tuple[bool, str]:
+        """
+        将当前参考点、起爆点写入 `image_sequence` 并**整文件写回** current_path。
+        与「读盘再合并」相比，以内存中完整 `_sequence_data` 为单一事实来源，避免与 flush 顺序导致遗漏。
+        """
         if not self._current_path:
             return False, "未指定序列文件路径，无法保存参考点数据"
-        success, message = self._manager.save_prompt_and_ignition_data_to_sequence(
-            self._current_path,
-            self.get_prompt_data(),
-            self._ignition_point,
-        )
-        if success:
-            # 同步更新 sequence_data 内的内容，避免重复读取
-            self._apply_prompt_to_sequence_data()
-        return success, message
+        if not self.get_prompt_data() and self.get_ignition_point() is None:
+            return False, "没有可保存的参考点或起爆点"
+        self._apply_prompt_to_sequence_data()
+        ok, err = self.flush_sequence_json_to_disk()
+        if not ok:
+            return False, err or "写入序列文件失败"
+        n_img = len(self.get_prompt_data())
+        n_pt = sum(len(d.get("points", [])) for d in self.get_prompt_data().values())
+        msg = f"参考点已同步到序列文件（{n_img} 张图，{n_pt} 个点）"
+        if self._ignition_point is not None:
+            msg += f"，起爆点 ({self._ignition_point[0]}, {self._ignition_point[1]})"
+        return True, msg
 
     def clear_prompt_artifacts(self) -> Tuple[bool, str]:
         if not self._current_path:
@@ -273,6 +281,55 @@ class SequenceModel:
             "explosion_duration": self._explosion_duration_ms,
         }
         return summary
+
+    # ------------------------------------------------------------------ #
+    # 参数写回 JSON / 温度
+    # ------------------------------------------------------------------ #
+    def apply_parameters_from_ui(
+        self,
+        material_type: str,
+        equivalent: str,
+        al_percent: str,
+        explosion_duration: str,
+        pixel_length: str,
+    ) -> None:
+        """根据 UI 更新内存中的 parameters 与 sequence_data（不写盘）。"""
+        self._parameters = {
+            "material_type": material_type,
+            "equivalent": str(equivalent).strip(),
+            "al_percent": str(al_percent).strip(),
+            "explosion_duration": str(explosion_duration).strip(),
+            "pixel_length": str(pixel_length).strip(),
+        }
+        try:
+            self._pixel_length = float(self._parameters["pixel_length"])
+        except ValueError:
+            self._pixel_length = 1.0
+        try:
+            self._explosion_duration_ms = float(self._parameters["explosion_duration"])
+        except ValueError:
+            self._explosion_duration_ms = 140.0
+        if self._current_path and isinstance(self._sequence_data, dict) and self._sequence_data:
+            self._sequence_data["parameters"] = dict(self._parameters)
+            img_seq = self._sequence_data.setdefault("image_sequence", {})
+            img_seq["duration"] = str(explosion_duration).strip()
+
+    def set_temperature_pairs(self, pairs: List[List[float]]) -> None:
+        """更新内存中的 temperature 段（[time_ms, T_K] 列表）。"""
+        if not isinstance(self._sequence_data, dict):
+            self._sequence_data = {}
+        self._sequence_data["temperature"] = pairs
+
+    def flush_sequence_json_to_disk(self) -> Tuple[bool, str]:
+        """将当前内存中的完整 sequence_data 写入 current_path。"""
+        if not self._current_path:
+            return False, "无序列文件路径"
+        try:
+            with open(self._current_path, "w", encoding="utf-8") as f:
+                json.dump(self._sequence_data, f, ensure_ascii=False, indent=2)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
 
     # ------------------------------------------------------------------ #
     # 内部辅助

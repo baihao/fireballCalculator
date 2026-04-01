@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QTextEdit, QFileDialog, QCheckBox, QGroupBox,
                                QGridLayout, QSplitter, QFrame, QScrollArea)
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QSize
-from PySide6.QtGui import QFont, QPalette, QColor, QPixmap, QPainter, QPen
+from PySide6.QtGui import QFont, QPalette, QColor, QPixmap, QPainter, QPen, QCloseEvent
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -240,18 +240,14 @@ class FireballAnalysisApp(QMainWindow):
             }
         """)
         
-        # 导入各个标签页
-        from input_tab import InputTab
+        # 导入各个标签页（输入已并入机器视觉 ExtractTab）
         from extract_tab.extract_tab import ExtractTab
         from model_tab.model_tab import ModelTab
         
-        # 创建各个标签页
-        self.input_tab = InputTab()
         self.extract_tab = ExtractTab()
         self.model_tab = ModelTab()
         
-        self.tab_widget.addTab(self.input_tab, "输入")
-        self.tab_widget.addTab(self.extract_tab, "特征提取")
+        self.tab_widget.addTab(self.extract_tab, "机器视觉")
         self.tab_widget.addTab(self.model_tab, "建模与预测")
         
         main_layout.addWidget(self.tab_widget)
@@ -268,6 +264,14 @@ class FireballAnalysisApp(QMainWindow):
         
         # 延迟初始化侧边栏，确保标签页完全创建
         QTimer.singleShot(100, lambda: self.on_tab_changed(0))
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        try:
+            if hasattr(self, "extract_tab") and hasattr(self.extract_tab, "flush_sequence_silent"):
+                self.extract_tab.flush_sequence_silent()
+        except Exception:
+            pass
+        super().closeEvent(event)
         
     def apply_dark_theme(self):
         """应用深色主题"""
@@ -343,32 +347,22 @@ class FireballAnalysisApp(QMainWindow):
             self._load_all_sidebars()
             self._sidebars_loaded = True
         
-        if index == 0:  # 输入
-            self.sidebar.set_sidebar_content(self.input_tab.get_sidebar_widget())
-        elif index == 1:  # 特征提取
+        if index == 0:  # 机器视觉
             self.sidebar.set_sidebar_content(self.extract_tab.get_sidebar_widget())
-        elif index == 2:  # 建模与预测
+        elif index == 1:  # 建模与预测
             self.sidebar.set_sidebar_content(self.model_tab.get_sidebar_widget())
     
     def _load_all_sidebars(self):
         """预加载所有侧边栏内容"""
-        # 获取所有侧边栏组件
-        input_sidebar = self.input_tab.get_sidebar_widget()
         extract_sidebar = self.extract_tab.get_sidebar_widget()
         model_sidebar = self.model_tab.get_sidebar_widget()
         
-        # 将所有侧边栏添加到布局中（初始隐藏）
         layout = QVBoxLayout()
-        layout.addWidget(input_sidebar)
         layout.addWidget(extract_sidebar)
         layout.addWidget(model_sidebar)
         
-        # 隐藏除输入外的所有侧边栏
-        extract_sidebar.hide()
         model_sidebar.hide()
-        
-        # 显示输入侧边栏
-        input_sidebar.show()
+        extract_sidebar.show()
         
         self.sidebar.sidebar_container.setLayout(layout)
             
