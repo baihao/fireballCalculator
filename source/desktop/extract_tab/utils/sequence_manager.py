@@ -574,7 +574,9 @@ class SequenceManager:
         explosion_duration: str,
         pixel_length: str,
         imported_time_data: Optional[Union[List[float], np.ndarray]] = None,
-        imported_temp_data: Optional[Union[List[float], np.ndarray]] = None
+        imported_temp_data: Optional[Union[List[float], np.ndarray]] = None,
+        frame_rate_fps: Optional[str] = None,
+        field_of_view_m: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         导出序列数据到JSON文件（包含数据验证）
@@ -596,7 +598,14 @@ class SequenceManager:
         try:
             # 首先验证数据完整性
             is_valid, error_msg = self.validate_export_data(
-                image_files, explosive_type, equivalent, al_percent, explosion_duration, pixel_length
+                image_files,
+                explosive_type,
+                equivalent,
+                al_percent,
+                explosion_duration,
+                pixel_length,
+                frame_rate_fps=frame_rate_fps,
+                field_of_view_m=field_of_view_m,
             )
             
             if not is_valid:
@@ -607,7 +616,13 @@ class SequenceManager:
                 "metadata": self._create_metadata(),
                 "image_sequence": self._create_image_sequence_data(image_files, explosion_duration),
                 "parameters": self._create_parameters_data(
-                    explosive_type, equivalent, al_percent, explosion_duration, pixel_length
+                    explosive_type,
+                    equivalent,
+                    al_percent,
+                    explosion_duration,
+                    pixel_length,
+                    frame_rate_fps=frame_rate_fps,
+                    field_of_view_m=field_of_view_m,
                 ),
                 "temperature": self._create_temperature_data(imported_time_data, imported_temp_data)
             }
@@ -664,7 +679,9 @@ class SequenceManager:
         equivalent: str,
         al_percent: str,
         explosion_duration: str,
-        pixel_length: str
+        pixel_length: str,
+        frame_rate_fps: Optional[str] = None,
+        field_of_view_m: Optional[str] = None,
     ) -> Dict[str, str]:
         """
         创建参数数据
@@ -675,17 +692,24 @@ class SequenceManager:
             al_percent: 含铝量百分比
             explosion_duration: 爆炸时长
             pixel_length: 像素长度
+            frame_rate_fps: 帧率（可选，机器视觉导出时写入）
+            field_of_view_m: 视场范围米（可选）
             
         Returns:
             Dict[str, str]: 参数数据
         """
-        return {
+        result: Dict[str, str] = {
             "material_type": explosive_type,
             "equivalent": equivalent,
             "al_percent": al_percent,
             "explosion_duration": explosion_duration,
-            "pixel_length": pixel_length
+            "pixel_length": pixel_length,
         }
+        if frame_rate_fps is not None and str(frame_rate_fps).strip():
+            result["frame_rate_fps"] = str(frame_rate_fps).strip()
+        if field_of_view_m is not None and str(field_of_view_m).strip():
+            result["field_of_view_m"] = str(field_of_view_m).strip()
+        return result
     
     def _create_temperature_data(
         self,
@@ -730,7 +754,9 @@ class SequenceManager:
         equivalent: str,
         al_percent: str,
         explosion_duration: str,
-        pixel_length: str
+        pixel_length: str,
+        frame_rate_fps: Optional[str] = None,
+        field_of_view_m: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         验证导出数据的完整性
@@ -787,6 +813,22 @@ class SequenceManager:
                 float(pixel_length)
             except ValueError:
                 return False, "像素长度必须是数字"
+            
+            if frame_rate_fps is not None and str(frame_rate_fps).strip():
+                try:
+                    v = float(frame_rate_fps)
+                    if v <= 0:
+                        return False, "帧率必须是正数"
+                except ValueError:
+                    return False, "帧率必须是数字"
+            
+            if field_of_view_m is not None and str(field_of_view_m).strip():
+                try:
+                    v = float(field_of_view_m)
+                    if v <= 0:
+                        return False, "视场范围必须是正数"
+                except ValueError:
+                    return False, "视场范围必须是数字"
             
             return True, ""
             
@@ -860,6 +902,8 @@ class SequenceManager:
         al_percent: str = "30",
         explosion_duration: str = "140",
         pixel_length: str = "0.01",
+        frame_rate_fps: Optional[str] = None,
+        field_of_view_m: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[str]]:
         """
         扫描文件夹内图像，在与文件夹同级路径写入 {文件夹名}_fireball_sequence.json。
@@ -879,6 +923,8 @@ class SequenceManager:
             pixel_length,
             None,
             None,
+            frame_rate_fps=frame_rate_fps,
+            field_of_view_m=field_of_view_m,
         )
         if not ok:
             return False, msg, None

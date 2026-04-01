@@ -13,13 +13,28 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QTextEdit, QFileDialog, QCheckBox, QGroupBox,
                                QGridLayout, QSplitter, QFrame, QScrollArea)
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QSize
-from PySide6.QtGui import QFont, QPalette, QColor, QPixmap, QPainter, QPen, QCloseEvent
+from PySide6.QtGui import QPalette, QColor, QPixmap, QPainter, QPen, QCloseEvent
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib
 matplotlib.use('Qt5Agg')
+# 嵌入式 Matplotlib 中文轴标题等：简体宋体系衬线回退
+matplotlib.rcParams["font.serif"] = [
+    "SimSun",
+    "NSimSun",
+    "Songti SC",
+    "STSong",
+    "Noto Serif CJK SC",
+    "Source Han Serif SC",
+    "Arial Unicode MS",
+    "DejaVu Serif",
+]
+matplotlib.rcParams["font.family"] = "serif"
+matplotlib.rcParams["axes.unicode_minus"] = False
+
+from ui_fonts import song_family_qss
 
 # 导入计算模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -105,12 +120,14 @@ class ImagePreviewWidget(QWidget):
         self.image_label = QLabel("预览图像")
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setScaledContents(False)  # 禁用自动缩放内容
-        self.image_label.setStyleSheet("""
-            QLabel {
+        _fq = song_family_qss()
+        self.image_label.setStyleSheet(f"""
+            QLabel {{
                 color: #9ca3af;
                 font-size: 14px;
                 background-color: transparent;
-            }
+                font-family: {_fq};
+            }}
         """)
         layout.addWidget(self.image_label)
         self.setLayout(layout)
@@ -216,12 +233,14 @@ class FireballAnalysisApp(QMainWindow):
         
         # 右侧标签页区域
         self.tab_widget = QTabWidget()
-        self.tab_widget.setStyleSheet("""
-            QTabWidget::pane {
+        _fq = song_family_qss()
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{
                 border: 1px solid #1f2937;
                 background-color: #111827;
-            }
-            QTabBar::tab {
+                font-family: {_fq};
+            }}
+            QTabBar::tab {{
                 background-color: #0b1220;
                 color: #e5e7eb;
                 padding: 8px 12px;
@@ -230,14 +249,15 @@ class FireballAnalysisApp(QMainWindow):
                 border-bottom: none;
                 border-top-left-radius: 8px;
                 border-top-right-radius: 8px;
-            }
-            QTabBar::tab:selected {
+                font-family: {_fq};
+            }}
+            QTabBar::tab:selected {{
                 background-color: #111827;
                 border-color: #38bdf8;
-            }
-            QTabBar::tab:hover {
+            }}
+            QTabBar::tab:hover {{
                 background-color: #1f2937;
-            }
+            }}
         """)
         
         # 导入各个标签页（输入已并入机器视觉 ExtractTab）
@@ -248,7 +268,7 @@ class FireballAnalysisApp(QMainWindow):
         self.model_tab = ModelTab()
         
         self.tab_widget.addTab(self.extract_tab, "机器视觉")
-        self.tab_widget.addTab(self.model_tab, "建模与预测")
+        self.tab_widget.addTab(self.model_tab, "机器学习")
         
         main_layout.addWidget(self.tab_widget)
         
@@ -275,69 +295,76 @@ class FireballAnalysisApp(QMainWindow):
         
     def apply_dark_theme(self):
         """应用深色主题"""
-        self.setStyleSheet("""
-            QMainWindow {
+        _fq = song_family_qss()
+        self.setStyleSheet(f"""
+            QMainWindow {{
                 background-color: #0f172a;
                 color: #e5e7eb;
-            }
-            QWidget {
+                font-family: {_fq};
+            }}
+            QWidget {{
                 background-color: #0f172a;
                 color: #e5e7eb;
-            }
-            QGroupBox {
+                font-family: {_fq};
+            }}
+            QGroupBox {{
                 font-weight: bold;
                 border: 1px solid #1f2937;
                 border-radius: 10px;
                 margin-top: 10px;
                 padding-top: 10px;
                 background-color: #111827;
-            }
-            QGroupBox::title {
+                font-family: {_fq};
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 5px 0 5px;
                 color: #38bdf8;
-            }
-            QPushButton {
+            }}
+            QPushButton {{
                 background-color: #0b1220;
                 border: 1px solid #1f2937;
                 border-radius: 8px;
                 padding: 8px 12px;
                 color: #e5e7eb;
-            }
-            QPushButton:hover {
+                font-family: {_fq};
+            }}
+            QPushButton:hover {{
                 background-color: #1f2937;
-            }
-            QPushButton:pressed {
+            }}
+            QPushButton:pressed {{
                 background-color: #374151;
-            }
-            QLineEdit, QComboBox {
+            }}
+            QLineEdit, QComboBox {{
                 background-color: #0b1220;
                 border: 1px solid #1f2937;
                 border-radius: 8px;
                 padding: 8px 10px;
                 color: #e5e7eb;
-            }
-            QLineEdit:focus, QComboBox:focus {
+                font-family: {_fq};
+            }}
+            QLineEdit:focus, QComboBox:focus {{
                 border-color: #38bdf8;
-            }
-            QLabel {
+            }}
+            QLabel {{
                 color: #9ca3af;
                 font-size: 12px;
-            }
-            QSlider::groove:horizontal {
+                font-family: {_fq};
+            }}
+            QSlider::groove:horizontal {{
                 border: 1px solid #1f2937;
                 height: 8px;
                 background: #0b1220;
                 border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
+            }}
+            QSlider::handle:horizontal {{
                 background: #38bdf8;
                 border: 1px solid #38bdf8;
                 width: 18px;
                 margin: -5px 0;
                 border-radius: 9px;
-            }
+            }}
         """)
         
     def on_tab_changed(self, index):
@@ -349,7 +376,7 @@ class FireballAnalysisApp(QMainWindow):
         
         if index == 0:  # 机器视觉
             self.sidebar.set_sidebar_content(self.extract_tab.get_sidebar_widget())
-        elif index == 1:  # 建模与预测
+        elif index == 1:  # 机器学习
             self.sidebar.set_sidebar_content(self.model_tab.get_sidebar_widget())
     
     def _load_all_sidebars(self):

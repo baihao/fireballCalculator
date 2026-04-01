@@ -28,6 +28,7 @@ class PromptController:
         
         # UI 组件引用（在 setup_ui_components 中设置）
         self.prompt_btn = None
+        self.finish_prompt_btn = None
         self.cancel_prompt_btn = None
         self.extract_status = None
         self.extract_preview = None
@@ -69,6 +70,7 @@ class PromptController:
             ui_components: UI 组件字典
         """
         self.prompt_btn = ui_components.get('prompt_btn')
+        self.finish_prompt_btn = ui_components.get('finish_prompt_btn')
         self.cancel_prompt_btn = ui_components.get('cancel_prompt_btn')
         self.extract_status = ui_components.get('extract_status')
         self.extract_preview = ui_components.get('extract_preview')
@@ -86,7 +88,9 @@ class PromptController:
         try:
             # 连接按钮点击事件
             if self.prompt_btn:
-                self.prompt_btn.clicked.connect(self.toggle_prompt_selection)
+                self.prompt_btn.clicked.connect(self.start_prompt_selection)
+            if self.finish_prompt_btn:
+                self.finish_prompt_btn.clicked.connect(self.on_finish_prompt_selection)
             if self.cancel_prompt_btn:
                 self.cancel_prompt_btn.clicked.connect(self._on_cancel_prompt_clicked)
             
@@ -102,6 +106,7 @@ class PromptController:
             if self.extract_preview:
                 self.extract_preview.point_clicked.connect(self._on_preview_point_clicked)
             
+            self._sync_prompt_action_buttons()
             print("✅ PromptController 信号连接完成")
         except Exception as e:
             print(f"⚠️ PromptController 信号连接失败: {e}")
@@ -145,11 +150,10 @@ class PromptController:
     def reset_interaction_state(self):
         """仅重置交互模式和相关 UI。"""
         self.is_prompt_selection_mode = False
-        if self.prompt_btn:
-            self.prompt_btn.setText("开始选择参考点")
         if self.extract_preview:
             self.extract_preview.set_interaction_mode('none')
             self.extract_preview.set_interactive_enabled(False)
+        self._sync_prompt_action_buttons()
 
     def load_prompt_data(self, prompt_data: Dict[int, Dict[str, List]]):
         """
@@ -182,36 +186,51 @@ class PromptController:
         """获取已标注的图片索引集合"""
         return self.sequence_model.get_annotated_indices()
     
-    def toggle_prompt_selection(self):
-        """切换参考点选择模式"""
+    def _sync_prompt_action_buttons(self) -> None:
+        """「开始选择参考点」与「参考点选择完成」互斥可用（整组被禁用时不变）。"""
         try:
-            if not self.is_prompt_selection_mode:
-                # 进入选点前：将爆炸/炸药参数写回序列 JSON
-                try:
-                    if hasattr(self.parent, "flush_parameters_before_action"):
-                        self.parent.flush_parameters_before_action()
-                except Exception:
-                    pass
-                # 开始选择prompt点
-                self.is_prompt_selection_mode = True
-                self.prompt_btn.setText("选择参考点完成")
-                self._set_status_line("正在选择参考点...")
-                
-                # 根据当前单选按钮状态设置交互模式
-                current_type = self.get_current_point_type()
+            if self.cancel_prompt_btn is not None and not self.cancel_prompt_btn.isEnabled():
+                return
+            if self.prompt_btn:
+                self.prompt_btn.setEnabled(not self.is_prompt_selection_mode)
+            if self.finish_prompt_btn:
+                self.finish_prompt_btn.setEnabled(self.is_prompt_selection_mode)
+        except Exception:
+            pass
+
+    def start_prompt_selection(self):
+        """进入参考点选择模式（「开始选择参考点」专用，不改变按钮文案）。"""
+        try:
+            if self.is_prompt_selection_mode:
+                return
+            try:
+                if hasattr(self.parent, "flush_parameters_before_action"):
+                    self.parent.flush_parameters_before_action()
+            except Exception:
+                pass
+            self.is_prompt_selection_mode = True
+            self._set_status_line("正在选择参考点...")
+            current_type = self.get_current_point_type()
+            if self.extract_preview:
                 self.extract_preview.set_interaction_mode(current_type)
                 self.extract_preview.set_interactive_enabled(True)
-                
-                print(f"🎯 开始参考点选择模式: {current_type}")
-            else:
-                # 完成选点：校验与写盘成功后再 reset_interaction_state（避免保存失败时已误退出选点模式）
-                if not self._finalize_prompt_selection():
-                    return
-                self.reset_interaction_state()
-                
+            self._sync_prompt_action_buttons()
+            print(f"🎯 开始参考点选择模式: {current_type}")
         except Exception as e:
-            print(f"❌ 切换参考点选择模式失败: {e}")
-            QMessageBox.critical(self.parent, "错误", f"切换参考点选择模式失败:\n{str(e)}")
+            print(f"❌ 进入参考点选择模式失败: {e}")
+            QMessageBox.critical(self.parent, "错误", f"进入参考点选择模式失败:\n{str(e)}")
+
+    def on_finish_prompt_selection(self):
+        """「参考点选择完成」：校验、写盘成功后退出交互。"""
+        try:
+            if not self.is_prompt_selection_mode:
+                return
+            if not self._finalize_prompt_selection():
+                return
+            self.reset_interaction_state()
+        except Exception as e:
+            print(f"❌ 完成参考点选择失败: {e}")
+            QMessageBox.critical(self.parent, "错误", f"完成参考点选择失败:\n{str(e)}")
     
     def _finalize_prompt_selection(self) -> bool:
         """
@@ -236,13 +255,14 @@ class PromptController:
             QMessageBox.warning(self.parent, "未完成标注", "请确保每个分组至少标注一张图片！")
             # 保持在选择模式，便于继续补充标注
             self.is_prompt_selection_mode = True
-            self.prompt_btn.setText("选择参考点完成")
             current_type = self.get_current_point_type()
-            self.extract_preview.set_interaction_mode(current_type)
-            self.extract_preview.set_interactive_enabled(True)
+            if self.extract_preview:
+                self.extract_preview.set_interaction_mode(current_type)
+                self.extract_preview.set_interactive_enabled(True)
+            self._sync_prompt_action_buttons()
             return False
 
-        # 通过校验：先写盘，成功后再由 toggle 末尾 reset_interaction_state 关闭交互
+        # 通过校验：先写盘，成功后再由 on_finish_prompt_selection 末尾 reset 关闭交互
         self._set_status_line("正在将参考点写入序列文件…")
         try:
             if hasattr(self.parent, "flush_parameters_before_action"):
@@ -259,12 +279,11 @@ class PromptController:
             self._set_status_line("参考点保存失败，请检查文件权限或磁盘空间后重试")
             # 保持选点模式，便于用户再次点击「完成」重试保存
             self.is_prompt_selection_mode = True
-            if self.prompt_btn:
-                self.prompt_btn.setText("选择参考点完成")
             current_type = self.get_current_point_type()
             if self.extract_preview:
                 self.extract_preview.set_interaction_mode(current_type)
                 self.extract_preview.set_interactive_enabled(True)
+            self._sync_prompt_action_buttons()
             return False
         self._set_status_line("参考点选择完成，已写入序列文件")
         try:
@@ -492,19 +511,22 @@ class PromptController:
             enabled: True 表示启用，False 表示禁用
         """
         try:
-            # 按钮控件
-            if self.prompt_btn:
-                self.prompt_btn.setEnabled(enabled)
             if self.cancel_prompt_btn:
                 self.cancel_prompt_btn.setEnabled(enabled)
-            
-            # 单选按钮控件
             if self.positive_radio:
                 self.positive_radio.setEnabled(enabled)
             if self.negative_radio:
                 self.negative_radio.setEnabled(enabled)
             if self.ignition_radio:
                 self.ignition_radio.setEnabled(enabled)
+
+            if not enabled:
+                if self.prompt_btn:
+                    self.prompt_btn.setEnabled(False)
+                if self.finish_prompt_btn:
+                    self.finish_prompt_btn.setEnabled(False)
+            else:
+                self._sync_prompt_action_buttons()
             
             # 图像预览控件的交互（点击事件）
             if self.extract_preview:

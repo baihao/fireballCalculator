@@ -22,6 +22,7 @@ from .ui_widgets.extract_tab_ui import ExtractTabUI
 from .utils.info_builder import build_segmentation_info_text
 from .controllers.prompt_controller import PromptController
 from .controllers.chart_controller import ChartController
+from .controllers.mv_parameters_controller import MvParametersController
 from .controllers.sequence_display_controller import SequencyDisplayController
 
 # 添加路径以导入火球计算器
@@ -60,7 +61,10 @@ class ExtractTab(QWidget):
             self.sequence_model,
             self.prompt_controller,
         )
-        
+        self.mv_params_controller = MvParametersController(
+            self, self.sequence_model, self.ui_components
+        )
+
         # 获取UI组件引用（为了向后兼容）
         self._setup_ui_component_references()
         
@@ -101,15 +105,9 @@ class ExtractTab(QWidget):
         self.reextract_btn = self.ui_components['reextract_btn']
         self.save_button = self.ui_components['save_button']
         self.export_segmentation_checkbox = self.ui_components['export_segmentation_checkbox']
-        
-        # 参数控件（爆炸信息 / 炸药参数）
-        self.mv_explosion_duration = self.ui_components['mv_explosion_duration']
-        self.mv_pixel_length = self.ui_components['mv_pixel_length']
-        self.mv_explosive_type = self.ui_components['mv_explosive_type']
-        self.mv_equivalent = self.ui_components['mv_equivalent']
-        self.mv_al_percent = self.ui_components['mv_al_percent']
 
         self.prompt_btn = self.ui_components['prompt_btn']
+        self.finish_prompt_btn = self.ui_components.get('finish_prompt_btn')
         self.cancel_prompt_btn = self.ui_components['cancel_prompt_btn']
         self.positive_radio = self.ui_components['positive_radio']
         self.negative_radio = self.ui_components['negative_radio']
@@ -141,11 +139,6 @@ class ExtractTab(QWidget):
         
         # 保存按钮
         self.save_button.clicked.connect(self.save_extraction_sequence)
-
-        # 参数变更：仅更新内存中的模型，写盘在「其他操作前」flush
-        for w in (self.mv_explosion_duration, self.mv_pixel_length, self.mv_equivalent, self.mv_al_percent):
-            w.textChanged.connect(self._on_mv_parameter_text_changed)
-        self.mv_explosive_type.currentTextChanged.connect(self._on_mv_parameter_text_changed)
     
     def append_run_log(self, line: str) -> None:
         """追加一行运行日志。"""
@@ -202,7 +195,7 @@ class ExtractTab(QWidget):
         try:
             if not self.sequence_model.current_path:
                 return
-            self._sync_model_parameters_from_ui()
+            self.mv_params_controller.sync_model_from_ui()
             ok, err = self.sequence_model.flush_sequence_json_to_disk()
             if not ok:
                 self.append_run_log(f"⚠️ 自动保存序列失败: {err}")
@@ -216,74 +209,24 @@ class ExtractTab(QWidget):
         except Exception:
             pass
 
-    def _sync_model_parameters_from_ui(self) -> None:
-        if not self.sequence_model.current_path:
-            return
-        self.sequence_model.apply_parameters_from_ui(
-            self.mv_explosive_type.currentText(),
-            self.mv_equivalent.text().strip(),
-            self.mv_al_percent.text().strip(),
-            self.mv_explosion_duration.text().strip(),
-            self.mv_pixel_length.text().strip(),
-        )
-
-    def _sync_ui_parameters_from_model(self) -> None:
-        """从已加载序列回填参数控件。"""
-        try:
-            p = self.sequence_model.parameters
-            if not p:
-                return
-            for w in (
-                self.mv_explosion_duration,
-                self.mv_pixel_length,
-                self.mv_equivalent,
-                self.mv_al_percent,
-            ):
-                w.blockSignals(True)
-            self.mv_explosive_type.blockSignals(True)
-            self.mv_explosion_duration.setText(str(p.get("explosion_duration", "140")))
-            self.mv_pixel_length.setText(str(p.get("pixel_length", "0.01")))
-            mt = str(p.get("material_type", "温压弹"))
-            idx = self.mv_explosive_type.findText(mt)
-            if idx >= 0:
-                self.mv_explosive_type.setCurrentIndex(idx)
-            else:
-                self.mv_explosive_type.setCurrentText(mt)
-            self.mv_equivalent.setText(str(p.get("equivalent", "1")))
-            self.mv_al_percent.setText(str(p.get("al_percent", "30")))
-            for w in (
-                self.mv_explosion_duration,
-                self.mv_pixel_length,
-                self.mv_equivalent,
-                self.mv_al_percent,
-            ):
-                w.blockSignals(False)
-            self.mv_explosive_type.blockSignals(False)
-        except Exception as e:
-            print(f"_sync_ui_parameters_from_model: {e}")
-
-    def _on_mv_parameter_text_changed(self, *args) -> None:
-        """参数框编辑时仅同步内存（需已加载序列且有路径）。"""
-        try:
-            if not self.sequence_model.current_path:
-                return
-            self._sync_model_parameters_from_ui()
-        except Exception:
-            pass
-
     def select_image_sequence_folder(self):
         """选择图像文件夹，在同级生成 {文件夹名}_fireball_sequence.json 并加载。"""
         self.flush_parameters_before_action()
         folder_path = QFileDialog.getExistingDirectory(self, "选择火球图像序列文件夹", "")
         if not folder_path:
             return
+        mt, eq, al, dur, px, fps_s, fov_s = (
+            self.mv_params_controller.parameter_values_for_sequence_creation(folder_path)
+        )
         ok, msg, work_path = self.sequence_manager.create_work_sequence_from_image_folder(
             folder_path,
-            self.mv_explosive_type.currentText(),
-            self.mv_equivalent.text().strip(),
-            self.mv_al_percent.text().strip(),
-            self.mv_explosion_duration.text().strip(),
-            self.mv_pixel_length.text().strip(),
+            mt,
+            eq,
+            al,
+            dur,
+            px,
+            frame_rate_fps=fps_s,
+            field_of_view_m=fov_s,
         )
         if not ok or not work_path:
             QMessageBox.warning(self, "警告", msg or "无法创建工作序列文件")
@@ -338,15 +281,11 @@ class ExtractTab(QWidget):
             self.reextract_btn,
             self.save_button,
             self.prompt_btn,
+            self.finish_prompt_btn,
             self.cancel_prompt_btn,
             self.positive_radio,
             self.negative_radio,
             self.ignition_radio,
-            self.mv_explosion_duration,
-            self.mv_pixel_length,
-            self.mv_explosive_type,
-            self.mv_equivalent,
-            self.mv_al_percent,
         ]
         if self.jump_btn is not None:
             widgets.append(self.jump_btn)
@@ -361,6 +300,10 @@ class ExtractTab(QWidget):
         return [w for w in widgets if w is not None]
 
     def _set_segmentation_ui_locked(self, locked: bool) -> None:
+        try:
+            self.mv_params_controller.set_enabled(not locked)
+        except Exception:
+            pass
         for w in self._segmentation_lock_widgets():
             try:
                 w.setEnabled(not locked)
@@ -460,7 +403,7 @@ class ExtractTab(QWidget):
                 status_msg += f"，参考点数据: {summary['total_prompt_points']} 点"
             if summary['has_ignition_point']:
                 status_msg += f"，起爆点: {summary['ignition_point']}"
-            self._sync_ui_parameters_from_model()
+            self.mv_params_controller.sync_ui_from_model()
             self.append_run_log(status_msg)
             return self.sequence_model.has_segmentation_data()
 
@@ -557,7 +500,7 @@ class ExtractTab(QWidget):
             if segmentation_status == 'no_prompt_data':
                 # 情况1：没有prompt数据
                 QMessageBox.warning(self, "警告", 
-                    "序列文件中没有特征点数据！\n\n请先：\n1. 点击'开始选择参考点'\n2. 在图像上选择正负点\n3. 完成特征点选择后再进行提取")
+                    "序列文件中没有特征点数据！\n\n请先：\n1. 点击「开始选择参考点」\n2. 在图像上选择正负点\n3. 点击「参考点选择完成」保存后再进行提取")
                 self.append_run_log("请先选择特征点")
                 self.extract_btn.setEnabled(True)
                 return

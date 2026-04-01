@@ -21,7 +21,7 @@ def build_prompt_info_text(prompt_data: Dict[int, Dict[str, List[List[int]]]],
         str: 多行说明文本
     """
     if not prompt_data and not ignition_point:
-        return "暂无选择的参考点\n\n提示：\n1. 先加载图像序列\n2. 点击'开始选择参考点'\n3. 在图像上点击选择正负点"
+        return "暂无选择的参考点\n\n提示：\n1. 先加载图像序列\n2. 点击「开始选择参考点」\n3. 在图像上点击选择正负点\n4. 点击「参考点选择完成」保存到序列文件"
 
     lines: List[str] = []
 
