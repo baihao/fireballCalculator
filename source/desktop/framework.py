@@ -35,6 +35,7 @@ matplotlib.rcParams["font.family"] = "serif"
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 from ui_fonts import song_family_qss
+from menu.app_menu_bar import setup_application_menu
 
 # 导入计算模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -276,6 +277,9 @@ class FireballAnalysisApp(QMainWindow):
         
         # 状态栏
         self.statusBar().showMessage("状态: 空闲")
+
+        # 原生菜单栏（文件 / 视图）
+        setup_application_menu(self)
         
     def setup_connections(self):
         """设置信号连接"""
