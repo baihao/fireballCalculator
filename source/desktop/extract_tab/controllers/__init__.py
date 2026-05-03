@@ -6,5 +6,6 @@
 """
 
 from .prompt_controller import PromptController
+from .mv_parameters_controller import MvParametersController
 
-__all__ = ['PromptController']
+__all__ = ['PromptController', 'MvParametersController']

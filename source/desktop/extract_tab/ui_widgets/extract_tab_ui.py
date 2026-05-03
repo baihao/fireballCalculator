@@ -68,6 +68,8 @@ class ExtractTabUI:
         
         # Prompt相关组件
         self.ui_components['prompt_btn'] = QPushButton("开始选择参考点")
+        self.ui_components['finish_prompt_btn'] = QPushButton("参考点选择完成")
+        self.ui_components['finish_prompt_btn'].setEnabled(False)
         self.ui_components['point_type_group'] = QButtonGroup()
         self.ui_components['positive_radio'] = QRadioButton("选择正点")
         self.ui_components['negative_radio'] = QRadioButton("选择负点")
@@ -130,30 +132,24 @@ class ExtractTabUI:
         params_row = QHBoxLayout()
         params_row.setSpacing(10)
 
-        explosion_group = QGroupBox("爆炸信息")
+        explosion_group = QGroupBox("图片参数")
         explosion_group.setStyleSheet(self._param_group_style())
         eg_layout = QVBoxLayout()
         eg_layout.setSpacing(6)
-        eg_layout.addWidget(QLabel("爆炸时长（ms）"))
-        self.ui_components['mv_explosion_duration'] = QLineEdit("140")
-        self._style_param_lineedit(self.ui_components['mv_explosion_duration'])
-        eg_layout.addWidget(self.ui_components['mv_explosion_duration'])
-        eg_layout.addWidget(QLabel("单位像素实际长度（m）"))
-        self.ui_components['mv_pixel_length'] = QLineEdit("0.01")
-        self._style_param_lineedit(self.ui_components['mv_pixel_length'])
-        eg_layout.addWidget(self.ui_components['mv_pixel_length'])
+        eg_layout.addWidget(QLabel("帧率（fps）"))
+        self.ui_components['mv_frame_rate_fps'] = QLineEdit("1000")
+        self._style_param_lineedit(self.ui_components['mv_frame_rate_fps'])
+        eg_layout.addWidget(self.ui_components['mv_frame_rate_fps'])
+        eg_layout.addWidget(QLabel("视场范围(m)"))
+        self.ui_components['mv_field_of_view_m'] = QLineEdit("60")
+        self._style_param_lineedit(self.ui_components['mv_field_of_view_m'])
+        eg_layout.addWidget(self.ui_components['mv_field_of_view_m'])
         explosion_group.setLayout(eg_layout)
 
         explosive_group = QGroupBox("炸药参数")
         explosive_group.setStyleSheet(self._param_group_style())
         ex_layout = QVBoxLayout()
         ex_layout.setSpacing(6)
-        ex_layout.addWidget(QLabel("炸药类别"))
-        self.ui_components['mv_explosive_type'] = QComboBox()
-        self.ui_components['mv_explosive_type'].addItems(["温压弹"])
-        self.ui_components['mv_explosive_type'].setCurrentText("温压弹")
-        self._style_param_combo(self.ui_components['mv_explosive_type'])
-        ex_layout.addWidget(self.ui_components['mv_explosive_type'])
         ex_layout.addWidget(QLabel("当量（kg TNT）"))
         self.ui_components['mv_equivalent'] = QLineEdit("1")
         self._style_param_lineedit(self.ui_components['mv_equivalent'])
@@ -509,8 +505,9 @@ class ExtractTabUI:
         prompt_layout.setAlignment(Qt.AlignTop)
         prompt_layout.setSpacing(8)
         
-        # 开始选择参考点按钮
+        # 开始选择参考点 / 完成选择（独立按钮）
         prompt_layout.addWidget(self.ui_components['prompt_btn'])
+        prompt_layout.addWidget(self.ui_components['finish_prompt_btn'])
         
         # 正负点和起爆点选择单选按钮组（纵向排列）
         point_type_layout = QVBoxLayout()

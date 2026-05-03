@@ -247,6 +247,8 @@ class SequenceModel:
                 "al_percent": self._parameters.get("al_percent"),
                 "explosion_duration": self._parameters.get("explosion_duration"),
                 "pixel_length": self._parameters.get("pixel_length"),
+                "frame_rate_fps": self._parameters.get("frame_rate_fps"),
+                "field_of_view_m": self._parameters.get("field_of_view_m"),
             },
             "drag_fit": drag_fit_result or {
                 "success": False,
@@ -285,19 +287,24 @@ class SequenceModel:
     # ------------------------------------------------------------------ #
     # 参数写回 JSON / 温度
     # ------------------------------------------------------------------ #
+    DEFAULT_MATERIAL_TYPE = "温压弹"
+
     def apply_parameters_from_ui(
         self,
-        material_type: str,
         equivalent: str,
         al_percent: str,
+        frame_rate_fps: str,
+        field_of_view_m: str,
         explosion_duration: str,
         pixel_length: str,
     ) -> None:
-        """根据 UI 更新内存中的 parameters 与 sequence_data（不写盘）。"""
+        """根据 UI 更新内存中的 parameters 与 sequence_data（不写盘）。炸药类别固定为温压弹。"""
         self._parameters = {
-            "material_type": material_type,
+            "material_type": self.DEFAULT_MATERIAL_TYPE,
             "equivalent": str(equivalent).strip(),
             "al_percent": str(al_percent).strip(),
+            "frame_rate_fps": str(frame_rate_fps).strip(),
+            "field_of_view_m": str(field_of_view_m).strip(),
             "explosion_duration": str(explosion_duration).strip(),
             "pixel_length": str(pixel_length).strip(),
         }

@@ -11,17 +11,14 @@ from typing import Optional, Tuple, Iterable
 import matplotlib
 from framework import MatplotlibWidget
 
-# 设置全局字体配置，确保中文正确显示
-# 优先使用系统支持中文的字体
-matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'Microsoft YaHei', 'DejaVu Sans', 'sans-serif']
-matplotlib.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+# 中文字体由 framework 在导入 matplotlib 时配置为简体宋体系 serif 回退栈
 
 # 字体大小常量
 FONT_SIZE_BODY = 6.5  # 正文字体大小（用于轴标签、刻度标签、占位文本等）
 FONT_SIZE_TITLE = 7   # 标题字体大小
 
-# 字体族常量
-FONT_FAMILY = 'sans-serif'  # 字体族
+# 字体族常量（与 framework 中 rcParams["font.family"] 一致）
+FONT_FAMILY = "serif"
 
 # 颜色常量
 COLOR_BACKGROUND = '#111827'      # 背景色

@@ -29,6 +29,26 @@ from csv_data_loader import load_csv_data
 from farthest_point_extractor import extract_farthest_point_data
 
 
+def _configure_matplotlib_chinese_font() -> None:
+    """图表中文使用简体宋体系（衬线），按系统常见字体名回退。"""
+    import matplotlib
+
+    matplotlib.rcParams["font.serif"] = [
+        "SimSun",
+        "NSimSun",
+        "宋体",
+        "Songti SC",
+        "STSong",
+        "Noto Serif CJK SC",
+        "Source Han Serif SC",
+        "AR PL UMing CN",
+        "Arial Unicode MS",
+        "DejaVu Serif",
+    ]
+    matplotlib.rcParams["font.family"] = "serif"
+    matplotlib.rcParams["axes.unicode_minus"] = False
+
+
 def load_segmented_sequence(file_path: str) -> Tuple[bool, Dict[str, Any], str]:
     """
     加载分割序列文件
@@ -91,9 +111,23 @@ def extract_diameter_data(sequence_data: Dict[str, Any]) -> Tuple[List[float], L
         except ValueError:
             explosion_duration_ms = 140  # 默认140毫秒
             print(f"⚠️ 无法解析爆炸时长 '{explosion_duration_str}'，使用默认值 {explosion_duration_ms} 毫秒")
-        
-        # 构建时间-直径序列
-        time_diameter_series = build_time_diameter_series(segmentation_results, explosion_duration_ms)
+
+        pixel_length_str = parameters.get("pixel_length", "1")
+        try:
+            pixel_length = float(pixel_length_str)
+        except (TypeError, ValueError):
+            pixel_length = 1.0
+            print(f"⚠️ 无法解析 pixel_length '{pixel_length_str}'，使用 1.0（将把像素半径当米，直径会偏大）")
+        if pixel_length <= 0:
+            pixel_length = 1.0
+            print("⚠️ pixel_length 须为正数，已回退为 1.0")
+
+        print(f"✓ 使用 parameters.pixel_length = {pixel_length} m/px 将分割半径（像素）换算为米")
+
+        # 构建时间-直径序列（必须传入 pixel_length，否则默认 1.0 会把「像素」当「米」）
+        time_diameter_series = build_time_diameter_series(
+            segmentation_results, explosion_duration_ms, pixel_length=pixel_length
+        )
         
         if not time_diameter_series:
             return [], [], "没有有效的直径数据点"
@@ -194,6 +228,8 @@ def _perform_drag_fitting(time_data: List[float], diameter_data: List[float],
     plot_path = os.path.join(output_dir, f"{base_name}_drag_fit.png")
     
     plotter = DragFitPlotter()
+    # DragFitPlotter.__init__ 会改 rcParams；在其后强制为简体细黑体系
+    _configure_matplotlib_chinese_font()
     plot_success = plotter.plot_fit_results(time_data, diameter_data, fit_result, plot_path, time_unit='ms')
     
     if plot_success:
