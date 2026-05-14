@@ -67,7 +67,8 @@ dist/**/log/**
 *.log
 **/*.log
 
-# Generated data files
+# Generated data files / ML dumps
+*.joblib
 *.csv
 *.json
 !example_data.json

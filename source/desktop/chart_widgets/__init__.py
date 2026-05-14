@@ -11,6 +11,8 @@ from .diameter_chart import DiameterChart
 from .diameter_velocity_chart import DiameterVelocityChart
 from .heat_flux_chart import HeatFluxChart
 from .radiation_chart import RadiationChart
+from .fireball_training_scatter_chart import FireballTrainingScatterChart
+from .kernel_regression_training_chart import KernelRegressionTrainingCurveChart
 
 __all__ = [
     'BaseChart',
@@ -20,5 +22,7 @@ __all__ = [
     'DiameterVelocityChart',
     'HeatFluxChart',
     'RadiationChart',
+    'FireballTrainingScatterChart',
+    'KernelRegressionTrainingCurveChart',
 ]
 
