@@ -1,18 +1,11 @@
+# 可选：在网络正常且需纯 conda 解环境时使用
+#   conda env create -f environment.yml
+# 默认推荐：使用 setup.sh + requirements.txt（仅用 conda 装 Python，其余 pip），避免 conda-forge 连接问题
+#
+# 需满足 document/fireball_gp_mogp_module_design.md：Python 3.10+、PyTorch、GPyTorch 等
 name: fireball_calculator
 channels:
-  - conda-forge
   - defaults
 dependencies:
-  - python=3.9
+  - python=3.10
   - pip
-  - numpy>=2.0.0
-  - matplotlib>=3.9.0
-  - pandas>=2.3.0
-  - pillow>=11.0.0
-  - scipy>=1.13.0
-  - pip:
-    - PySide6>=6.9.0
-    - opencv-python>=4.11.0
-    - torch>=2.0.0
-    - torchvision>=0.15.0
-    # segment-anything 通过 git submodule 管理，在 source/third_party/segment-anything/
