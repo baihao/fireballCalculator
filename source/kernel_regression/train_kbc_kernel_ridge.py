@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-供 ``training_tab`` / 包内调用：Kernel Ridge（RBF）拟合 K、B、C，LOOCV 选 gamma。
+供 ``training_tab`` / 包内调用：Kernel Ridge（RBF）拟合 K、B、C，LOOCV 选核长度尺度 \(\sigma\)。
 
 不包含命令行与训练目录加载；CLI 见 ``run.py``。数学约定见 ``KRR_KBC_METHOD.md``。
 
@@ -49,13 +49,24 @@ MODEL_ARTIFACT_FILENAMES = ("kbc_krr_K.joblib", "kbc_krr_B.joblib", "kbc_krr_C.j
 DEFAULT_KERNEL_RIDGE_ALPHA = 1e-3
 
 
-class TargetGammaErrors(TypedDict):
-    gamma: list[float]
+class TargetSigmaErrors(TypedDict):
+    sigma: list[float]
     train_mse: list[float]
     test_mse: list[float]
 
 
-ErrorsByTarget = Mapping[str, TargetGammaErrors]
+ErrorsByTarget = Mapping[str, TargetSigmaErrors]
+
+
+def sklearn_rbf_gamma_from_sigma(sigma: float) -> float:
+    """
+    高斯径向核 \(k=\exp(-\|x{-}x'\|^2/(2\sigma^2))\) 与 sklearn ``KernelRidge(..., gamma=…)``\
+    （\(k=\exp(-\gamma\|x{-}x'\|^2)\)）的换算：\(\gamma = 1/(2\sigma^2)\)。
+    """
+    s = float(sigma)
+    if s <= 0:
+        raise ValueError("sigma 须为正")
+    return 1.0 / (2.0 * s * s)
 
 
 def build_X(equiv: np.ndarray, al_pct: np.ndarray) -> np.ndarray:
@@ -71,7 +82,11 @@ def build_X(equiv: np.ndarray, al_pct: np.ndarray) -> np.ndarray:
     return np.column_stack([eq, eq * al_frac])
 
 
-def gamma_grid_from_equiv(equiv: np.ndarray, n_steps: int = 30) -> np.ndarray:
+def sigma_grid_from_equiv(equiv: np.ndarray, n_steps: int = 30) -> np.ndarray:
+    """
+    LOOCV 候选 **\(\sigma\)** 网格（与旧版误用的 sklearn ``gamma`` 取相同数值序列）：
+    \(\sigma_i = 1 + i\cdot (e_{\max}-e_{\min})/30\)。
+    """
     eq = np.asarray(equiv, dtype=np.float64).ravel()
     mn, mx = float(np.min(eq)), float(np.max(eq))
     span = mx - mn
@@ -79,17 +94,10 @@ def gamma_grid_from_equiv(equiv: np.ndarray, n_steps: int = 30) -> np.ndarray:
     return np.array([1.0 + i * stride for i in range(n_steps + 1)], dtype=np.float64)
 
 
-def stride_equiv_from_array(equiv: np.ndarray) -> float:
-    eq = np.asarray(equiv, dtype=np.float64).ravel()
-    mn, mx = float(np.min(eq)), float(np.max(eq))
-    span = mx - mn
-    return float(span / 30.0) if span > 1e-12 else 1.0
-
-
 def loocv_train_test_mse(
     X: np.ndarray,
     y: np.ndarray,
-    gamma: float,
+    sigma: float,
     *,
     alpha: float,
 ) -> tuple[float, float]:
@@ -99,6 +107,7 @@ def loocv_train_test_mse(
     if n < 2:
         raise ValueError("LOOCV 至少需要 2 条样本")
 
+    gamma_sk = sklearn_rbf_gamma_from_sigma(sigma)
     loo = LeaveOneOut()
     train_mses: list[float] = []
     test_sq_errors: list[float] = []
@@ -106,7 +115,7 @@ def loocv_train_test_mse(
     for train_idx, test_idx in loo.split(X):
         X_tr, X_te = X[train_idx], X[test_idx]
         y_tr, y_te = y[train_idx], y[test_idx]
-        model = KernelRidge(alpha=alpha, kernel="rbf", gamma=gamma)
+        model = KernelRidge(alpha=alpha, kernel="rbf", gamma=gamma_sk)
         model.fit(X_tr, y_tr)
         pred_tr = model.predict(X_tr)
         pred_te = model.predict(X_te)
@@ -116,33 +125,34 @@ def loocv_train_test_mse(
     return float(np.mean(train_mses)), float(np.mean(test_sq_errors))
 
 
-def sweep_gamma_loocv(
+def sweep_sigma_loocv(
     X: np.ndarray,
     y: np.ndarray,
-    gammas: np.ndarray,
+    sigmas: np.ndarray,
     *,
     alpha: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     tr_list: list[float] = []
     te_list: list[float] = []
-    for g in gammas:
-        tr, te = loocv_train_test_mse(X, y, float(g), alpha=alpha)
+    for s in sigmas:
+        tr, te = loocv_train_test_mse(X, y, float(s), alpha=alpha)
         tr_list.append(tr)
         te_list.append(te)
     tr_arr = np.asarray(tr_list, dtype=np.float64)
     te_arr = np.asarray(te_list, dtype=np.float64)
     j = int(np.argmin(te_arr))
-    return gammas, tr_arr, te_arr, float(gammas[j])
+    return sigmas, tr_arr, te_arr, float(sigmas[j])
 
 
 def fit_full_model(
     X: np.ndarray,
     y: np.ndarray,
-    gamma: float,
+    sigma: float,
     *,
     alpha: float,
 ) -> KernelRidge:
-    model = KernelRidge(alpha=alpha, kernel="rbf", gamma=gamma)
+    gamma_sk = sklearn_rbf_gamma_from_sigma(sigma)
+    model = KernelRidge(alpha=alpha, kernel="rbf", gamma=gamma_sk)
     model.fit(X, y)
     return model
 
@@ -152,13 +162,14 @@ def _save_model_bundle(
     model: KernelRidge,
     *,
     target: str,
-    best_gamma: float,
+    best_sigma: float,
     alpha: float,
     feature_desc: str,
 ) -> None:
     bundle: dict[str, Any] = {
         "target": target,
-        "best_gamma": best_gamma,
+        "best_sigma": best_sigma,
+        "sklearn_rbf_gamma": sklearn_rbf_gamma_from_sigma(best_sigma),
         "alpha": alpha,
         "kernel": "rbf",
         "feature_desc": feature_desc,
@@ -180,12 +191,12 @@ def _ensure_timestamp_root(parent: Path) -> tuple[Path, str]:
 
 
 def _errors_dict_from_arrays(
-    gammas: np.ndarray,
+    sigmas: np.ndarray,
     tr_ms: np.ndarray,
     te_ms: np.ndarray,
-) -> TargetGammaErrors:
+) -> TargetSigmaErrors:
     return {
-        "gamma": [float(g) for g in gammas],
+        "sigma": [float(s) for s in sigmas],
         "train_mse": [float(x) for x in tr_ms],
         "test_mse": [float(x) for x in te_ms],
     }
@@ -201,7 +212,7 @@ def train_kernel_regression_kbc(
 
     Returns:
         saved_root: 实际 artifact 目录（含三套 joblib、CSV、manifest.json）。
-        errors_by_target: 各目标与各 gamma 的 LOOCV 训练/测试 MSE。
+        errors_by_target: 各目标与各 \(\sigma\) 的 LOOCV 训练/测试 MSE。
     """
     alpha_v = float(DEFAULT_KERNEL_RIDGE_ALPHA if alpha is None else alpha)
 
@@ -216,8 +227,7 @@ def train_kernel_regression_kbc(
     C = np.array([r.C for r in records], dtype=np.float64)
     X = build_X(eq, al)
 
-    gammas = gamma_grid_from_equiv(eq, n_steps=30)
-    stride_val = stride_equiv_from_array(eq)
+    sigmas = sigma_grid_from_equiv(eq, n_steps=30)
 
     saved_root, ts_dir = _ensure_timestamp_root(Path(model_path))
 
@@ -227,41 +237,41 @@ def train_kernel_regression_kbc(
         "data_folder": training_model.data_folder,
         "alpha": alpha_v,
         "kernel": "rbf",
-        "gamma_formula": "gamma_i = 1 + i * stride, i=0..30; stride = (max_equiv - min_equiv) / 30",
-        "stride_equiv": stride_val,
-        "gammas": gammas.tolist(),
+        "rbf_parameterization": "k=exp(-||dx||^2/(2*sigma^2)); sklearn gamma=1/(2*sigma^2)",
+        "sigmas": sigmas.tolist(),
         "targets": {},
     }
 
     targets_y = {"K": K, "B": B, "C": C}
     filenames = dict(zip(("K", "B", "C"), MODEL_ARTIFACT_FILENAMES))
-    errors_by_target: dict[str, TargetGammaErrors] = {}
+    errors_by_target: dict[str, TargetSigmaErrors] = {}
 
     for name in ("K", "B", "C"):
         ys = targets_y[name]
-        gm, tr_ms, te_ms, best_g = sweep_gamma_loocv(X, ys, gammas, alpha=alpha_v)
-        errors_by_target[name] = _errors_dict_from_arrays(gm, tr_ms, te_ms)
+        sm, tr_ms, te_ms, best_s = sweep_sigma_loocv(X, ys, sigmas, alpha=alpha_v)
+        errors_by_target[name] = _errors_dict_from_arrays(sm, tr_ms, te_ms)
 
         csv_path = saved_root / f"kbc_krr_loocv_{name}.csv"
         with open(csv_path, "w", encoding="utf-8") as fh:
-            fh.write("gamma,train_mse_loocv_mean,test_mse_loocv_mean\n")
-            for gi, tt, vv in zip(gm, tr_ms, te_ms):
-                fh.write(f"{gi:.12g},{tt:.12g},{vv:.12g}\n")
+            fh.write("sigma,train_mse_loocv_mean,test_mse_loocv_mean\n")
+            for si, tt, vv in zip(sm, tr_ms, te_ms):
+                fh.write(f"{si:.12g},{tt:.12g},{vv:.12g}\n")
 
-        model = fit_full_model(X, ys, best_g, alpha=alpha_v)
+        model = fit_full_model(X, ys, best_s, alpha=alpha_v)
         bundle_path = saved_root / filenames[name]
         _save_model_bundle(
             bundle_path,
             model,
             target=name,
-            best_gamma=best_g,
+            best_sigma=best_s,
             alpha=alpha_v,
             feature_desc=FEATURE_DESC,
         )
 
         j = int(np.argmin(te_ms))
         manifest["targets"][name] = {
-            "best_gamma": best_g,
+            "best_sigma": best_s,
+            "sklearn_rbf_gamma": sklearn_rbf_gamma_from_sigma(best_s),
             "best_loocv_test_mse": float(te_ms[j]),
             "best_loocv_train_mse": float(tr_ms[j]),
             "model_file": filenames[name],

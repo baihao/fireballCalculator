@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-K/B/C Kernel Ridge：LOOCV 误差～γ 曲线，以及批量预测 \(K,B,C\)～当量 曲线。
+K/B/C Kernel Ridge：LOOCV 误差～\(\sigma\)（RBF 长度尺度）曲线，以及批量预测 \(K,B,C\)～当量 曲线。
 
 可被 ``run_test.py`` / 交互环境导入；也可用 ``python kernel_regression/graph.py loocv …``。
 """
@@ -43,19 +43,28 @@ def _ensure_python_path() -> Path:
     return src
 
 
-def _load_loocv_csv(path: Path) -> tuple[list[float], list[float], list[float]]:
-    gamma: list[float] = []
+def _load_loocv_csv(path: Path) -> tuple[list[float], list[float], list[float], str]:
+    xs: list[float] = []
     tr: list[float] = []
     te: list[float] = []
     with open(path, "r", encoding="utf-8") as fh:
         r = csv.DictReader(fh)
         if r.fieldnames is None:
             raise ValueError(f"空 CSV：{path}")
+        names = [c.strip() for c in r.fieldnames]
+        if "sigma" in names:
+            key = "sigma"
+            xlab = "σ（RBF 长度尺度；sklearn γ=1/(2σ²)）"
+        elif "gamma" in names:
+            key = "gamma"
+            xlab = "γ（旧 CSV 列名；值为 sklearn KernelRidge 的 gamma）"
+        else:
+            raise ValueError(f"CSV 需含 sigma 或 gamma 列：{path} {names}")
         for row in r:
-            gamma.append(float(row["gamma"]))
+            xs.append(float(row[key]))
             tr.append(float(row["train_mse_loocv_mean"]))
             te.append(float(row["test_mse_loocv_mean"]))
-    return gamma, tr, te
+    return xs, tr, te, xlab
 
 
 def plot_loocv_gamma_curves(
@@ -64,7 +73,7 @@ def plot_loocv_gamma_curves(
     output_path: str | Path | None = None,
 ) -> Path:
     """
-    读取 ``kbc_krr_loocv_{K,B,C}.csv``，在同一图中三行子图：各目标的训练/测试 MSE ～ γ。
+    读取 ``kbc_krr_loocv_{K,B,C}.csv``，在同一图中三行子图：各目标的训练/测试 MSE ～ σ（新）或旧列 ``gamma``。
     """
     root = Path(artifact_dir).expanduser().resolve()
     targets = ("K", "B", "C")
@@ -84,16 +93,19 @@ def plot_loocv_gamma_curves(
 
     matplotlib.rcParams["axes.unicode_minus"] = False
 
+    xlabel: str | None = None
     for ax, t in zip(axes, targets):
-        gamma, mt, mv = _load_loocv_csv(root / f"kbc_krr_loocv_{t}.csv")
-        ax.plot(gamma, mt, marker="o", linestyle="-", linewidth=1.2, markersize=3, label="LOOCV 训练 MSE")
-        ax.plot(gamma, mv, marker="s", linestyle="--", linewidth=1.2, markersize=3, label="LOOCV 测试 MSE")
+        xs, mt, mv, xlab = _load_loocv_csv(root / f"kbc_krr_loocv_{t}.csv")
+        if xlabel is None:
+            xlabel = xlab
+        ax.plot(xs, mt, marker="o", linestyle="-", linewidth=1.2, markersize=3, label="LOOCV 训练 MSE")
+        ax.plot(xs, mv, marker="s", linestyle="--", linewidth=1.2, markersize=3, label="LOOCV 测试 MSE")
         ax.set_ylabel("MSE")
-        ax.set_title(f"参数 {t}（RBF）：误差随 γ 变化")
+        ax.set_title(f"参数 {t}（RBF）：误差随超参变化")
         ax.grid(True, alpha=0.35)
         ax.legend(fontsize=8)
 
-    axes[-1].set_xlabel("γ（带宽系数，sklearn RBF）")
+    axes[-1].set_xlabel(xlabel or "σ / γ")
     fig.savefig(out, dpi=150)
     plt.close(fig)
     return out
@@ -142,7 +154,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="核岭回归 K/B/C 作图工具")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_loo = sub.add_parser("loocv", help="从 artifact 内 CSV 绘制 γ～LOOCV 训练/测试误差")
+    p_loo = sub.add_parser("loocv", help="从 artifact 内 CSV 绘制 σ（或旧 γ）～LOOCV 训练/测试误差")
     p_loo.add_argument(
         "--model-dir",
         type=str,
