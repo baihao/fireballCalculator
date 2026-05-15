@@ -1,14 +1,14 @@
 # 模型训练标签页（`training_tab`）软件设计
 
 本文档描述在 `source/desktop/training_tab` 中实现「模型训练」桌面 UI 的**架构与职责划分**，对齐 `document/machine_vision_ui_prototype.html` 中 **「模型训练」** 标签页的布局与交互意图；**软件组织形式参考** `source/desktop/extract_tab`。  
-**范围说明**：仅设计文档，不含实现代码。
+**范围说明**：以**当前代码状态**为准做设计与验收说明；与 HTML 原型的差异见 §2 备注。
 
 ---
 
 ## 1. 背景与目标
 
-- **产品来源**：HTML 原型将「模型训练」作为独立顶栏标签，左侧为操作与参数，右侧为四图网格 + 训练日志。
-- **桌面目标**：在 PySide6 应用中提供等价信息架构与控件集合，便于后续接入真实数据加载、划分、训练与图表刷新。
+- **产品来源**：HTML 原型将「模型训练」作为独立顶栏标签，左侧为操作与参数，右侧为图表区 + 训练日志（原型曾为四图网格；**当前实现为三张散点图一行排列**，无内嵌「训练曲线」图）。
+- **桌面目标**：在 PySide6 应用中提供等价信息架构与控件集合，便于后续接入真实数据加载、划分（**留一交叉验证**）、训练与图表刷新。
 - **约束**：首版实现可保留「占位 + 示意数据」路径，但目录与类职责应按本设计拆开，避免在单文件中堆叠 UI 与业务逻辑。
 
 ---
@@ -19,27 +19,27 @@
 
 ### 2.1 左侧栏（`aside`）
 
-| 分组（原型 legend） | 控件 | 行为要点 |
-|---------------------|------|----------|
-| **输入数据** | 主按钮「输入数据」+ 文件选择 | 选择实验数据表（CSV / JSON / TXT / XLSX 等，具体格式由后续数据层定义）；状态行显示是否已加载。 |
-| **模型训练** | 算法下拉 | 选项：`核回归`、`高斯过程`；切换后更新右侧第四图类型/标题及状态文案。 |
-| **划分与执行** | 「测试集比例」下拉 | 仅 **10%～40%**（步长 5%），与原型一致。 |
-| **划分与执行** | 按钮「开始训练」 | 触发训练流程（或首版：写日志 + 刷新示意曲线）。 |
-| **训练数据集信息** | 只读多行文本（概要） | 展示：训练模型名称、总样本数、训练集数量、测试集数量、当前测试集比例；样式与意图对齐「机器学习」侧「已选参考点」式只读信息区。 |
+| 分组（原型 legend） | 控件 | 行为要点（**当前实现**） |
+|---------------------|------|--------------------------|
+| **输入数据** | 主按钮「输入数据」+ 目录选择 | 选择**包含多组实验 JSON** 的文件夹（解析约定见 `utils/dataset_io.py`）；状态行显示已载入样本数与目录名。说明文案：**数据需大于 5 条，否则难以获得较好训练效果**。 |
+| **模型训练** | 算法下拉 | 选项：`核回归`、`高斯过程`；更新模型与顶部「算法：…」状态、侧栏概要中的模型名称（**已无第四张训练曲线图**，无需切换曲线类型）。 |
+| **划分与执行** | 「划分策略」下拉 | **当前唯一选项**：`留一交叉验证`（`TrainingDatasetModel.split_strategy = loocv`）。已摒弃原型的「测试集比例 10%～40%」。 |
+| **划分与执行** | 按钮「开始训练」 | **核回归**时：调用 `utils/krr_workflow.run_train_and_predict` → `kernel_regression.train_kernel_regression_kbc`（LOOCV）；模型 artefact 写入与训练数据目录**同级**的 `kr_model/kernel_regression_<timestamp>/`。成功后按当量范围 100 点、含铝范围 3 档预测 K/B/C，在三张散点上**叠加三条彩色曲线**（每档含铝一色）。高斯过程未接入时弹窗提示。 |
+| **训练数据集信息** | 只读多行文本（概要） | 展示：训练模型、数据目录、总样本数、**划分策略（LOOCV）**及一句 LOOCV 说明；若样本数 ≤5 则追加**提示**；含 B 均值辅助信息与样本明细（截取）。**不再**展示按比例划分的训练/测试条数。 |
 
 ### 2.2 右侧主区（`content`）
 
 | 区域 | 内容 |
 |------|------|
 | 标题栏 | 「模型训练视图」+ 当前算法状态（如「算法：核回归」）。 |
-| 说明文案 | 短 hint：散点含义、点大小与含铝量关系等（可与原型一致或略缩）。 |
-| 图表网格（2×2） | ① 最大直径–当量散点 ② 初始直径–当量散点 ③ 时间常数–当量散点 ④ 训练曲线（核回归：σ–MSE；高斯过程：示意超参曲线，与原型一致）。 |
+| 说明文案 | 短 hint：三张散点含义、点大小与含铝量、划分策略为 LOOCV 等。 |
+| 图表区（**1×3**） | ① K–当量 ② B–当量 ③ C–当量；`FireballTrainingScatterChart`。导入后仅散点；**核回归训练完成后**在同图叠加 3 条预测曲线（含铝 min～max 三等分，当量 min～max 百等分；颜色固定橙/紫/绿）。 |
 | 训练日志 | 只读文本区，追加「输入数据」「开始训练」等事件。 |
 
 ### 2.3 与已有 `chart_widgets` 的关系
 
-- 三张散点：使用 `FireballTrainingScatterChart` 三个实例（`for_max_diameter` / `for_initial_diameter` / `for_time_constant`），`update_data(当量, y, 含铝量或约定 size 列)`。
-- 第四张训练曲线：核回归使用 `KernelRegressionTrainingCurveChart`；高斯过程可预留第二套更新接口或独立小部件（设计阶段允许「控制器内分支」）。
+- **三张散点**：`FireballTrainingScatterChart`，`update_data(..., curves=[(x,y,color),…])` 可选叠加折线；训练成功后由 `TrainingChartController.redraw_scatters_with_prediction_curves` 写入核回归预测曲线。
+- **训练曲线部件**：包内仍保留 `KernelRegressionTrainingCurveChart`，**本标签页不再挂载**；需要时由其它入口或后续版本使用。
 
 ---
 
@@ -66,24 +66,25 @@ source/desktop/training_tab/
 ├── DESIGN.md                 # 本设计文档
 ├── __init__.py               # from .training_tab import TrainingTab; __all__
 ├── training_tab.py           # TrainingTab(QWidget)：装配、信号槽、调用 utils 与 ChartController
-├── training_dataset_model.py # （推荐）会话状态：路径、表格、划分计数、当前算法等（供 Tab / utils / 控制器读）
+├── training_dataset_model.py # 会话状态：含 `last_krr_artifact_root`（最近核回归 artefact 路径）等
 ├── ui_widgets/
 │   ├── __init__.py
 │   └── training_tab_ui.py    # TrainingTabUI：create_sidebar_widget + 标签页正文（图表/日志）；与 ExtractTabUI 侧边栏拆分方式一致
 ├── controllers/
 │   ├── __init__.py
-│   └── training_chart_controller.py   # 仅 UI 密切相关：四图 update_data / reset / 算法切换视图
+│   └── training_chart_controller.py   # 三张散点 refresh；`redraw_scatters_with_prediction_curves` 叠加 KRR 曲线
 └── utils/
     ├── __init__.py
-    ├── dataset_io.py         # 训练数据导入 / 导出（路径、格式、解析结果 → 可被 model 吸收）
-    └── training_bridge.py    # App 与训练 model（核回归/GP CLI、进程、服务）的连接层：发起训练、取结果 tensor/曲线等
+    ├── dataset_io.py         # 训练数据导入
+    ├── krr_workflow.py       # 核岭回归：`kr_model` 路径、`train_kernel_regression_kbc`、预测网格 → K/B/C 矩阵
+    └── training_bridge.py    # 预留：其它后端/GP 等
 ```
 
 说明：
 
 - **`training_dataset_model.py`**：建议保留，对齐 `extract_tab` 中 `sequence_model` 与界面之间的缓冲层。
-- **`utils/dataset_io.py`**：**与 UI 无关** 的读写与解析约定（CSV/JSON/XLSX、列映射、导出中间结果）；`TrainingTab` 只在槽函数里调用（如 `QFileDialog` 选路径 → 调用 `dataset_io.import_...` → 写回 model → 刷新 UI）。
-- **`utils/training_bridge.py`**：**与 UI 无关** 的训练执行与结果拉回（同步/异步、`QThread` 可在 Tab 层包一层薄壳，但 **业务编排与后端 API** 实现在此模块或其子模块）；不向 Qt 控件直接耦合。
+- **`utils/krr_workflow.py`**：**无 Qt**。将 `TrainingDatasetModel` 传入 `kernel_regression.train_kbc_kernel_ridge.train_kernel_regression_kbc`；`model_path` 为 ``<训练数据父目录>/kr_model``；训练后在 **[当量_min, 当量_max]** 上 **100** 点、**[含铝_min, 含铝_max]** 上 **3** 档调用 `predict_kernel_regression_kbc` 填满 K/B/C 矩阵。
+- **`utils/training_bridge.py`**：预留；核回归主路径已走 `krr_workflow`。
 
 ---
 
@@ -99,7 +100,7 @@ source/desktop/training_tab/
 
 ### 5.2 标签页正文（`TrainingTab`）
 
-- **仅**纵向布局：**工具栏行**（「模型训练视图」+ `train-model-status` 等价 QLabel）、**hint `QLabel`**、**2×2 `QGridLayout`**（四图）、**训练日志** `QPlainTextEdit`。
+- **仅**纵向布局：**工具栏行**（「模型训练视图」+ `train-model-status` 等价 QLabel）、**hint `QLabel`**、**1×3 `QGridLayout`**（三张散点）、**训练日志** `QPlainTextEdit`。
 
 ### 5.3 样式
 
@@ -111,10 +112,9 @@ source/desktop/training_tab/
 
 ### 6.1 `TrainingChartController`
 
-- 持有四个图表部件引用。
-- **算法切换**：更新第四图数据源与标题、`train-model-status` 等价 QLabel；若高斯过程无真实曲线，可走占位绘制（与原型一致）。
-- **可见性**：若标签页采用懒加载，首次显示时需触发 `canvas.draw`/resize（语义对齐 HTML 中 `train-charts-layout`，在 Qt 中用 `showEvent` 或 `resizeEvent` 防抖刷新）。
-- **数据入口**：对外提供形如「用当前 model 中的列刷新三张散点」「用给定 σ/MSE 曲线刷新第四图」等方法，由 `TrainingTab` 在适当时机调用（数据来自 model，聚合前可能已走 `dataset_io` / `training_bridge`）。
+- 持有三张散点引用。
+- **`redraw_scatters_from_training_model`**：仅散点。
+- **`redraw_scatters_with_prediction_curves`**：散点 + 传入的 `(equiv_grid, al_levels, K/B/C 矩阵)` 生成 `curves` 三元组列表调用 `update_data`。
 
 ---
 
@@ -140,10 +140,10 @@ source/desktop/training_tab/
 
 | 原型交互 | Tab 槽函数职责 |
 |----------|----------------|
-| 「输入数据」 | `QFileDialog` → `dataset_io` 导入 → 更新 model → 刷新**侧边栏**状态 / 概要 / 调用 `TrainingChartController` 更新散点。 |
-| 「测试集比例」变化 | 更新 model 划分计数 → 仅刷新概要文本（不必重训）。 |
-| 「开始训练」 | 校验数据已加载；追加训练日志；调用 `training_bridge`（可在另一线程）；完成后根据结果刷新第四图与日志、`TrainingChartController`。 |
-| 算法下拉切换 | 更新 model 与界面文案 → `TrainingChartController` 切换第四图视图。 |
+| 「输入数据」 | `QFileDialog` 选目录 → `dataset_io.import_training_folder` → 更新 model → 刷新侧栏状态 / 概要 / `TrainingChartController.redraw_scatters_from_training_model`。 |
+| 「划分策略」变化 | 更新 `model.split_strategy`（当前仅 loocv）→ 刷新概要文本。 |
+| 「开始训练」 | 选「核回归」且样本 ≥2：`krr_workflow.run_train_and_predict` → 更新 `model.last_krr_artifact_root`、概要 → `redraw_scatters_with_prediction_curves`。选「高斯过程」时提示未接入。 |
+| 算法下拉切换 | 更新 model 与「算法：…」文案、概要；**不再**调用控制器切换曲线视图。 |
 
 - 实例化：`TrainingTabUI`（内含 `create_sidebar_widget` + `create_main_layout`）、`TrainingDatasetModel`、`TrainingChartController`；按需 import `dataset_io`、`training_bridge`。
 - **`get_sidebar_widget()`**：提供给主窗口挂载至**全局左侧边栏**，与 `ExtractTab` 一致。
@@ -155,12 +155,14 @@ source/desktop/training_tab/
 ## 9. 数据流（概念）
 
 ```
-[文件] ──► dataset_io（导入）──► TrainingDatasetModel
+[目录] ──► dataset_io（导入）──► TrainingDatasetModel
                                        │
-TrainingTab ◄──── 用户修改比例 ────────┤→ 概要 UI 刷新
+TrainingTab ◄──── 用户修改划分策略 ────┤→ 概要 UI 刷新
                                        │
-TrainingTab ──► training_bridge（训练）──► 指标/曲线 ──► TrainingChartController（第四图）+ 日志
+TrainingTab ──► krr_workflow（核回归 train + predict）──► artifact …/kr_model/kernel_regression_<ts>/
                                        │
+                                       └──► TrainingChartController（散点 + 预测曲线）
+
 导出请求 ─────► dataset_io（导出）──── （数据来自 Model）
 ```
 
@@ -178,7 +180,7 @@ TrainingTab ──► training_bridge（训练）──► 指标/曲线 ──�
 
 | 非本次设计强制内容 | 说明 |
 |-------------------|------|
-| 真实训练后端 | 可先日志 + 示意 `KernelRegressionTrainingCurveChart.update_data()` 无参；真训练走 `training_bridge` 逐步实现。 |
+| 真实 GP 训练 | 未接线；核回归已走 `krr_workflow` + `source/kernel_regression`。 |
 | XLSX 解析 | 可依赖 pandas/openpyxl，放在 `utils/dataset_io.py`。 |
 | 单元测试 | 建议对 `TrainingDatasetModel`、`dataset_io`、`training_bridge` mock；`TrainingChartController` 可做最小 smoke。 |
 | 与 `gp_model` CLI 对齐 | 收口在 **`utils/training_bridge.py`**（或同级子模块），不在 `controllers/` 重复实现。 |
@@ -192,3 +194,5 @@ TrainingTab ──► training_bridge（训练）──► 指标/曲线 ──�
 | 0.1 | 2026-05-14 | 初稿：目录、`extract_tab` 对齐、原型映射、控制器拆分 |
 | 0.2 | 2026-05-14 | 取消 `training_data_controller` / `training_run_controller`；数据导入导出与训练连接层归入 `utils`；图表保留 `training_chart_controller` |
 | 0.3 | 2026-05-14 | 操作面板迁至**全局左侧边栏**（`get_sidebar_widget`），与 ExtractTab；标签页仅存图表区 + 日志；主窗口预载入三页侧边栏并互斥显示 |
+| 0.4 | 2026-05-15 | 去掉第四张训练曲线图（1×3 散点）；「测试集比例」改为「划分策略」且仅 **留一交叉验证**；侧栏与 `TrainingDatasetModel` 概要对齐 LOOCV、样本数 >5 提示；`TrainingChartController` 仅维护三张散点 |
+| 0.5 | 2026-05-15 | 「开始训练」接入 `krr_workflow` + `kernel_regression`；artefact 目录 ``<数据父目录>/kr_model``；训练后当量 100 点 × 含铝 3 档预测并在散点叠加曲线；`krr_workflow.py` |

@@ -32,20 +32,24 @@ class TrainingDatasetModel:
         self.data_folder: Optional[str] = None
         self.b_mean: Optional[float] = None
         self.total_samples: int = 0
-        self.test_pct: int = 20
+        self.split_strategy: str = "loocv"
         self.algorithm: str = "kernel"
+        self.last_krr_artifact_root: Optional[str] = None
 
     def set_algorithm(self, key: str) -> None:
         self.algorithm = key if key in ("kernel", "gp") else "kernel"
 
-    def set_test_pct(self, pct: int) -> None:
-        self.test_pct = max(10, min(40, int(pct)))
+    def set_split_strategy(self, key: str) -> None:
+        """当前仅支持留一交叉验证（loocv）。"""
+        _ = key
+        self.split_strategy = "loocv"
 
     def set_loaded_training_folder(self, folder: str, records: Sequence[TrainingExperimentRecord]) -> None:
         """由 `dataset_io` 载入后写入；清空或覆盖旧数据。"""
         self.data_folder = folder
         self.records = list(records)
         self.total_samples = len(self.records)
+        self.last_krr_artifact_root = None
         if self.records:
             self.b_mean = float(statistics.mean(r.B for r in self.records))
         else:
@@ -56,30 +60,27 @@ class TrainingDatasetModel:
         self.data_folder = None
         self.b_mean = None
         self.total_samples = 0
-
-    def counts(self):
-        """(train_n, test_n)"""
-        if self.total_samples <= 0:
-            return 0, 0
-        test_n = min(self.total_samples, round(self.total_samples * self.test_pct / 100))
-        test_n = max(0, test_n)
-        if self.total_samples >= 2 and self.test_pct > 0 and test_n == 0:
-            test_n = 1
-        if test_n >= self.total_samples and self.total_samples > 1:
-            test_n = self.total_samples - 1
-        return self.total_samples - test_n, test_n
+        self.last_krr_artifact_root = None
 
     def summary_text(self) -> str:
         model_name = "核回归" if self.algorithm == "kernel" else "高斯过程"
-        tr, te = self.counts()
+        strat_label = "留一交叉验证（LOOCV）" if self.split_strategy == "loocv" else self.split_strategy
         lines = [
             f"训练模型：{model_name}",
             f"数据目录：{self.data_folder or '（未选择）'}",
-            f"数据集总样本数：{self.total_samples}",
-            f"训练集数量：{tr}",
-            f"测试集数量：{te}",
-            f"当前测试集比例：{self.test_pct}%",
         ]
+        if self.last_krr_artifact_root:
+            lines.append(f"最新核回归 artefact：{self.last_krr_artifact_root}")
+        lines.extend(
+            [
+            f"数据集总样本数：{self.total_samples}",
+            f"划分策略：{strat_label}",
+            "（LOOCV：每折留出 1 条样本作验证，其余参与该折训练；共 n 折，n 为样本数）",
+            ]
+        )
+        if self.total_samples > 0:
+            if self.total_samples <= 5:
+                lines.append("提示：样本数 ≤5 时，难以获得较好的训练效果，建议扩充数据。")
         if self.total_samples > 0 and self.b_mean is not None:
             lines.append(f"拟合参数 B 的样本均值（辅助信息）：{self.b_mean:g}")
             lines.append("纵轴约定：最大直径 ← K；初始状态常数 ← B（拖曳拟合）；时间常数 ← C。")

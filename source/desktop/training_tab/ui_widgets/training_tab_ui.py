@@ -4,7 +4,7 @@
 模型训练模块 UI 构建器。
 
 左侧操作面板：**全局侧边栏**（`create_sidebar_widget`），与 `extract_tab` 一致；
-中间标签页：仅图表区 + 训练日志。
+中间标签页：三张散点图与训练日志（无第四训练曲线图）。
 """
 
 from typing import Any, Dict
@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 
 from chart_widgets import (
     FireballTrainingScatterChart,
-    KernelRegressionTrainingCurveChart,
 )
 
 
@@ -67,12 +66,11 @@ class TrainingTabUI:
         self.ui_components["train_model_combo"] = QComboBox()
         self.ui_components["train_model_combo"].addItems(["核回归", "高斯过程"])
 
-        self.ui_components["train_test_ratio_combo"] = QComboBox()
-        for pct in (10, 15, 20, 25, 30, 35, 40):
-            self.ui_components["train_test_ratio_combo"].addItem(f"{pct}%", pct)
-        self.ui_components["train_test_ratio_combo"].setCurrentIndex(2)
+        self.ui_components["train_split_strategy_combo"] = QComboBox()
+        self.ui_components["train_split_strategy_combo"].addItem("留一交叉验证", "loocv")
 
         self.ui_components["train_start_btn"] = QPushButton("开始训练")
+        self.ui_components["train_start_btn"].setEnabled(False)
         self.ui_components["train_start_btn"].setStyleSheet(
             "QPushButton { background-color: #0ea5e9; color: white; }"
         )
@@ -82,7 +80,7 @@ class TrainingTabUI:
         self.ui_components["train_dataset_summary"].setMinimumHeight(100)
         self.ui_components["train_dataset_summary"].setMaximumHeight(200)
         self.ui_components["train_dataset_summary"].setPlaceholderText(
-            "加载数据后将显示样本数及按测试集比例划分后的训练 / 测试集数量…"
+            "加载数据后将显示样本数、划分策略及样本明细…"
         )
         self.ui_components["train_dataset_summary"].setStyleSheet("""
             QPlainTextEdit {
@@ -100,7 +98,7 @@ class TrainingTabUI:
         """挂载到 **主窗口左侧边栏**，与 ExtractTab / ModelTab 侧栏结构一致。"""
         self._ensure_sidebar_controls()
 
-        sidebar_widget = QGroupBox("模型训练")
+        sidebar_widget = QGroupBox("机器学习")
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.setSpacing(8)
@@ -111,7 +109,9 @@ class TrainingTabUI:
         gv.setAlignment(Qt.AlignmentFlag.AlignTop)
         gv.setSpacing(8)
         gv.addWidget(self.ui_components["train_input_btn"])
-        hint1 = QLabel("实现时加载多组爆炸实验记录（CSV/JSON/XLSX 等），供右侧散点图与训练曲线使用。")
+        hint1 = QLabel(
+            "加载包含多组实验数据的文件夹，数据需大于5条，否则无法获得较好的训练效果"
+        )
         hint1.setWordWrap(True)
         gv.addWidget(hint1)
         gv.addWidget(self.ui_components["train_input_status"])
@@ -125,7 +125,7 @@ class TrainingTabUI:
         av.setSpacing(8)
         av.addWidget(QLabel("算法"))
         av.addWidget(self.ui_components["train_model_combo"])
-        ah = QLabel('默认「核回归」：第四图为带宽 σ 与训练 / 测试 MSE。')
+        ah = QLabel('当前训练流程与「留一交叉验证」划分策略配合。')
         ah.setWordWrap(True)
         av.addWidget(ah)
         gb_alg.setLayout(av)
@@ -136,8 +136,8 @@ class TrainingTabUI:
         rv = QVBoxLayout()
         rv.setAlignment(Qt.AlignmentFlag.AlignTop)
         rv.setSpacing(8)
-        rv.addWidget(QLabel("测试集比例"))
-        rv.addWidget(self.ui_components["train_test_ratio_combo"])
+        rv.addWidget(QLabel("划分策略"))
+        rv.addWidget(self.ui_components["train_split_strategy_combo"])
         rv.addWidget(self.ui_components["train_start_btn"])
         gb_run.setLayout(rv)
         layout.addWidget(gb_run)
@@ -149,7 +149,7 @@ class TrainingTabUI:
         sv.setSpacing(8)
         sv.addWidget(QLabel("数据与划分概要"))
         sv.addWidget(self.ui_components["train_dataset_summary"])
-        sh = QLabel("只读概要；接入后端后以真实数据集为准。")
+        sh = QLabel("只读概要；需多于 5 条样本时更有利于模型训练。")
         sh.setWordWrap(True)
         sv.addWidget(sh)
         gb_sum.setLayout(sv)
@@ -175,7 +175,7 @@ class TrainingTabUI:
         vl = QVBoxLayout(w)
 
         toolbar = QHBoxLayout()
-        title = QLabel("模型训练视图")
+        title = QLabel("机器学习视图")
         title.setStyleSheet("font-size:14px;font-weight:bold;color:#38bdf8;")
         toolbar.addWidget(title)
         toolbar.addStretch()
@@ -185,7 +185,7 @@ class TrainingTabUI:
         vl.addLayout(toolbar)
 
         self.ui_components["train_hint_label"] = QLabel(
-            "请先通过侧栏「输入数据」导入训练文件夹后再查看三张散点；第四图为核回归训练曲线（需在训练回填数据后绘制）。"
+            "请先通过侧栏「输入数据」导入训练文件夹后再查看三张散点（当量–K/B/C，点大小 ∝ 含铝量）。"
         )
         self.ui_components["train_hint_label"].setWordWrap(True)
         self.ui_components["train_hint_label"].setStyleSheet("color:#9ca3af;font-size:11px;margin-bottom:6px;")
@@ -203,29 +203,10 @@ class TrainingTabUI:
         self.ui_components["scatter_tau_chart"] = FireballTrainingScatterChart.for_time_constant(
             width=5, height=3
         )
-        self.ui_components["chart_train_curve"] = KernelRegressionTrainingCurveChart(width=5, height=3)
 
-        self.ui_components["train_gp_curve_placeholder"] = QLabel("")
-        self.ui_components["train_gp_curve_placeholder"].setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ui_components["train_gp_curve_placeholder"].setMinimumHeight(180)
-        self.ui_components["train_gp_curve_placeholder"].setStyleSheet(
-            "background-color: #111827; color:#9ca3af; font-size:12px; border: none;"
-        )
-        self.ui_components["train_gp_curve_placeholder"].hide()
-
-        curve_cell = QWidget()
-        curve_cell.setStyleSheet("border: none; background: transparent;")
-        cl = QVBoxLayout(curve_cell)
-        cl.setContentsMargins(0, 0, 0, 0)
-        cl.setSpacing(0)
-        cl.addWidget(self.ui_components["chart_train_curve"])
-        cl.addWidget(self.ui_components["train_gp_curve_placeholder"])
-
-        # 与 model_tab「机器学习」一致：图表控件直接放入网格，不套带边框外层
         grid.addWidget(self.ui_components["scatter_max_chart"], 0, 0)
         grid.addWidget(self.ui_components["scatter_init_chart"], 0, 1)
-        grid.addWidget(self.ui_components["scatter_tau_chart"], 1, 0)
-        grid.addWidget(curve_cell, 1, 1)
+        grid.addWidget(self.ui_components["scatter_tau_chart"], 0, 2)
 
         vl.addLayout(grid)
 

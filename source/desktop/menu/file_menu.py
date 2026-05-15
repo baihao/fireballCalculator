@@ -12,6 +12,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMenu
 
 TAB_INDEX_MACHINE_VISION = 0
+TAB_INDEX_ENGINEERING = 2
 
 
 def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
@@ -19,7 +20,7 @@ def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
     在已创建的「文件」菜单上添加条目。
 
     - 当前为「机器视觉」标签时：显示三个导入项（与侧边栏「数据源」按钮一致）。
-    - 当前为「机器学习」标签时：显示「导入训练文件」（与「选择训练文件」按钮一致）。
+    - 当前为「工程计算」标签时：显示「导入训练文件」（与「选择训练文件」按钮一致）。
     """
     extract_tab = main_window.extract_tab
     model_tab = main_window.model_tab
@@ -46,7 +47,7 @@ def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
         act_import_images.setVisible(mv)
         act_import_sequence.setVisible(mv)
         act_import_temp.setVisible(mv)
-        act_import_train.setVisible(not mv)
+        act_import_train.setVisible(index == TAB_INDEX_ENGINEERING)
 
     tab_widget.currentChanged.connect(update_import_visibility)
     update_import_visibility(tab_widget.currentIndex())

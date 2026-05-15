@@ -89,7 +89,7 @@ class ModelTabUI:
     
     def create_sidebar_widget(self) -> QGroupBox:
         """创建侧边栏组件"""
-        sidebar_widget = QGroupBox("机器学习")
+        sidebar_widget = QGroupBox("工程计算")
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignTop)
         layout.setSpacing(16)
