@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>机器视觉模块 UI 原型（Input + 特征提取 合并预览）</title>
+  <title>爆炸火球分析系统 — UI 原型（标签页）</title>
   <style>
     :root {
       --bg: #0f172a;
@@ -51,7 +51,6 @@
       border-color: var(--accent);
       box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35) inset;
     }
-    .tab-btn.mock-inactive { opacity: 0.55; cursor: default; }
 
     main {
       display: grid;
@@ -61,6 +60,8 @@
       overflow: hidden;
       min-height: 0;
     }
+    .tab-pane[hidden] { display: none !important; }
+
     .side {
       border-right: 1px solid var(--border);
       padding-right: 12px;
@@ -139,6 +140,12 @@
     textarea.log-area {
       min-height: 120px;
       resize: vertical;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #cbd5e1;
+    }
+    textarea.train-info-area {
       font-family: ui-monospace, monospace;
       font-size: 12px;
       line-height: 1.45;
@@ -288,196 +295,428 @@
       color: var(--muted);
       font-size: 11px;
     }
+
+    /* 模型训练：右侧四图网格 */
+    .train-charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 1100px) {
+      .train-charts-grid { grid-template-columns: 1fr; }
+    }
+    .train-chart-wrap {
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      min-height: 0;
+    }
+    .train-chart-wrap .train-chart-title {
+      font-size: 12px;
+      color: var(--accent);
+      text-align: center;
+      margin: 0 0 8px 0;
+      font-weight: 600;
+    }
+    .train-chart-wrap canvas {
+      display: block;
+      width: 100%;
+      height: 220px;
+      border-radius: 6px;
+      background: #050a16;
+    }
+    .train-hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin: 0 0 10px 0;
+      line-height: 1.45;
+    }
   </style>
 </head>
 <body>
   <div class="app">
     <header>
       <div style="font-weight:600;">爆炸火球分析系统 — UI 原型</div>
-      <div class="tabs">
-        <button type="button" class="tab-btn active">机器视觉</button>
-        <button type="button" class="tab-btn mock-inactive" disabled title="本原型仅展示机器视觉">建模与预测</button>
-        <button type="button" class="tab-btn mock-inactive" disabled title="本原型仅展示机器视觉">导出</button>
-      </div>
+      <nav class="tabs" aria-label="主功能切换">
+        <button type="button" class="tab-btn active" data-app-tab="vision" aria-controls="pane-vision-aside pane-vision-content" aria-selected="true">
+          机器视觉
+        </button>
+        <button type="button" class="tab-btn" data-app-tab="train" aria-controls="pane-train-aside pane-train-content" aria-selected="false">
+          模型训练
+        </button>
+        <button type="button" class="tab-btn" data-app-tab="modeling" aria-controls="pane-modeling-aside pane-modeling-content" aria-selected="false">
+          建模与预测
+        </button>
+        <button type="button" class="tab-btn" data-app-tab="export" aria-controls="pane-export-aside pane-export-content" aria-selected="false">
+          导出
+        </button>
+      </nav>
     </header>
 
-    <main>
-      <!-- ========== 左侧：数据源 + 参考点 + 提取动作 ========== -->
+    <main id="workspace-main">
+      <!-- ========== 左侧：按标签切换 ========== -->
       <aside class="side">
-        <div class="panel">
-          <h3>机器视觉</h3>
+        <div id="pane-vision-aside" class="tab-pane" data-app-tab-pane="vision" role="tabpanel">
+          <div class="panel">
+            <h3>机器视觉</h3>
 
-          <div class="fieldset-like">
-            <span class="legend">数据源</span>
-            <div class="btn-stack">
-              <button type="button" class="btn primary" id="btn-pick-sequence" title="分割/特征结果 JSON">
-                导入爆炸序列文件
-              </button>
-              <input type="file" id="file-sequence" accept=".json,application/json" hidden />
+            <div class="fieldset-like">
+              <span class="legend">数据源</span>
+              <div class="btn-stack">
+                <button type="button" class="btn primary" id="btn-pick-sequence" title="分割/特征结果 JSON">
+                  导入爆炸序列文件
+                </button>
+                <input type="file" id="file-sequence" accept=".json,application/json" hidden />
 
-              <button type="button" class="btn secondary" id="btn-pick-images" title="多选图像或视频">
-                导入火球图像序列
-              </button>
-              <input type="file" id="file-images" accept="image/*,video/*" multiple hidden />
-            </div>
-            <p class="hint">序列文件含已有分割结果；图像序列需选参考点后执行特征提取。实现时通常二选一加载（可清空另一侧缓存）。</p>
+                <button type="button" class="btn secondary" id="btn-pick-images" title="多选图像或视频">
+                  导入火球图像序列
+                </button>
+                <input type="file" id="file-images" accept="image/*,video/*" multiple hidden />
+              </div>
+              <p class="hint">序列文件含已有分割结果；图像序列需选参考点后执行特征提取。实现时通常二选一加载（可清空另一侧缓存）。</p>
 
-            <div class="optional-import-block">
-              <div class="optional-title">可选补充数据</div>
-              <p class="hint" style="margin-bottom:8px;">可与上述入口叠加：温度时间序列（CSV / JSON）。</p>
-              <button type="button" class="btn" id="btn-pick-temperature">导入火球温度时间序列</button>
-              <input type="file" id="file-temperature" accept=".csv,.json,.txt" hidden />
-            </div>
-          </div>
-
-          <div class="fieldset-like">
-            <span class="legend">参考点与分割</span>
-            <div class="toolbar" style="margin-bottom:8px;">
-              <button type="button" class="btn" style="width:auto; flex:1;">开始选点</button>
-              <button type="button" class="btn" style="width:auto; flex:1;">清除</button>
-            </div>
-            <div class="row">
-              <label>正 / 负 / 起爆点</label>
-              <div class="toolbar">
-                <label><input type="radio" name="pt" checked /> 前景点</label>
-                <label><input type="radio" name="pt" /> 背景点</label>
-                <label><input type="radio" name="pt" /> 起爆点</label>
+              <div class="optional-import-block">
+                <div class="optional-title">可选补充数据</div>
+                <p class="hint" style="margin-bottom:8px;">可与上述入口叠加：温度时间序列（CSV / JSON）。</p>
+                <button type="button" class="btn" id="btn-pick-temperature">导入火球温度时间序列</button>
+                <input type="file" id="file-temperature" accept=".csv,.json,.txt" hidden />
               </div>
             </div>
-            <div class="row">
-              <label>已选参考点</label>
-              <textarea readonly rows="2" style="resize:none; min-height:48px;" placeholder="（无）"></textarea>
+
+            <div class="fieldset-like">
+              <span class="legend">参考点与分割</span>
+              <div class="toolbar" style="margin-bottom:8px;">
+                <button type="button" class="btn" style="width:auto; flex:1;">开始选点</button>
+                <button type="button" class="btn" style="width:auto; flex:1;">清除</button>
+              </div>
+              <div class="row">
+                <label>正 / 负 / 起爆点</label>
+                <div class="toolbar">
+                  <label><input type="radio" name="pt" checked /> 前景点</label>
+                  <label><input type="radio" name="pt" /> 背景点</label>
+                  <label><input type="radio" name="pt" /> 起爆点</label>
+                </div>
+              </div>
+              <div class="row">
+                <label>已选参考点</label>
+                <textarea readonly rows="2" style="resize:none; min-height:48px;" placeholder="（无）"></textarea>
+              </div>
+              <div class="row">
+                <label>分割模型</label>
+                <select>
+                  <option>U-Net 分割</option>
+                  <option>DeepLabV3</option>
+                  <option>SAM</option>
+                </select>
+              </div>
+              <div class="row">
+                <label>批大小</label>
+                <input type="number" min="1" value="8" />
+              </div>
             </div>
-            <div class="row">
-              <label>分割模型</label>
-              <select>
-                <option>U-Net 分割</option>
-                <option>DeepLabV3</option>
-                <option>SAM</option>
-              </select>
-            </div>
-            <div class="row">
-              <label>批大小</label>
-              <input type="number" min="1" value="8" />
+
+            <div class="fieldset-like">
+              <span class="legend">输出</span>
+              <button type="button" class="btn primary">开始特征提取</button>
+              <div class="toolbar" style="margin-top:10px;">
+                <button type="button" class="btn" style="width:auto;">保存结果序列</button>
+                <label style="margin-left:8px; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                  <input type="checkbox" /> 同时导出分割图
+                </label>
+              </div>
+              <div class="toolbar" style="margin-top:8px;">
+                <span class="status" id="side-status">待选择数据源</span>
+              </div>
             </div>
           </div>
+        </div>
 
-          <div class="fieldset-like">
-            <span class="legend">输出</span>
-            <button type="button" class="btn primary">开始特征提取</button>
-            <div class="toolbar" style="margin-top:10px;">
-              <button type="button" class="btn" style="width:auto;">保存结果序列</button>
-              <label style="margin-left:8px; display:flex; align-items:center; gap:6px; cursor:pointer;">
-                <input type="checkbox" /> 同时导出分割图
+        <div id="pane-train-aside" class="tab-pane" data-app-tab-pane="train" role="tabpanel" hidden>
+          <div class="panel">
+            <h3>模型训练</h3>
+            <div class="fieldset-like">
+              <span class="legend">输入数据</span>
+              <div class="btn-stack">
+                <button type="button" class="btn primary" id="btn-train-input" title="实验数据表（CSV / JSON 等）">
+                  输入数据
+                </button>
+                <input type="file" id="file-train-input" accept=".csv,.json,.txt,.xlsx" hidden />
+              </div>
+              <p class="hint">实现时加载多组爆炸实验记录（当量、含铝量、直径与时间常数等），供右侧散点图与训练曲线使用。</p>
+              <div class="toolbar" style="margin-top:8px;">
+                <span class="status" id="train-input-status">未加载训练数据</span>
+              </div>
+            </div>
+            <div class="fieldset-like">
+              <span class="legend">模型训练</span>
+              <div class="row">
+                <label for="train-model-select">算法</label>
+                <select id="train-model-select">
+                  <option value="kernel" selected>核回归</option>
+                  <option value="gp">高斯过程</option>
+                </select>
+              </div>
+              <p class="hint">默认「核回归」：第四图为带宽 σ 与训练/测试 MSE 曲线。</p>
+            </div>
+            <div class="fieldset-like">
+              <span class="legend">划分与执行</span>
+              <div class="row">
+                <label for="train-test-split-pct">测试集比例</label>
+                <select id="train-test-split-pct">
+                  <option value="10">10%</option>
+                  <option value="15">15%</option>
+                  <option value="20" selected>20%</option>
+                  <option value="25">25%</option>
+                  <option value="30">30%</option>
+                  <option value="35">35%</option>
+                  <option value="40">40%</option>
+                </select>
+              </div>
+              <button type="button" class="btn primary" id="btn-start-training">开始训练</button>
+            </div>
+            <div class="fieldset-like">
+              <span class="legend">训练数据集信息</span>
+              <div class="row">
+                <label for="train-dataset-summary">数据与划分概要</label>
+                <textarea
+                  id="train-dataset-summary"
+                  class="train-info-area"
+                  readonly
+                  rows="6"
+                  style="resize: vertical; min-height: 120px;"
+                  placeholder="加载数据后将显示样本数及按测试集比例划分后的训练 / 测试集数量…">训练模型：（未指定）
+数据集总样本数：0
+训练集数量：0
+测试集数量：0</textarea>
+              </div>
+              <p class="hint">只读概要，样式类似「机器学习」侧的已选参考点信息；接入后端后以真实数据集为准。</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="pane-modeling-aside" class="tab-pane" data-app-tab-pane="modeling" role="tabpanel" hidden>
+          <div class="panel">
+            <h3>建模与预测</h3>
+            <div class="fieldset-like">
+              <span class="legend">输入</span>
+              <p class="hint" style="margin-top:0;">本标签页为占位：实现时可在此配置预测工况、选择已训练模型与不确定度显示等。</p>
+              <div class="row">
+                <label for="modeling-scenario">工况名称</label>
+                <input type="text" id="modeling-scenario" placeholder="（示例）工况 A" />
+              </div>
+              <button type="button" class="btn primary" disabled title="原型占位">运行预测</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="pane-export-aside" class="tab-pane" data-app-tab-pane="export" role="tabpanel" hidden>
+          <div class="panel">
+            <h3>导出</h3>
+            <div class="fieldset-like">
+              <span class="legend">导出内容</span>
+              <p class="hint" style="margin-top:0;">占位选项，实现时与报告模板、文件命名规则对接。</p>
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:6px;">
+                <input type="checkbox" checked disabled /> 特征与中间结果（JSON）
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:6px;">
+                <input type="checkbox" disabled /> 训练好的模型权重
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" disabled /> 分析报告（PDF / HTML）
               </label>
             </div>
-            <div class="toolbar" style="margin-top:8px;">
-              <span class="status" id="side-status">待选择数据源</span>
-            </div>
+            <button type="button" class="btn primary" disabled title="原型占位">开始导出</button>
           </div>
         </div>
       </aside>
 
-      <!-- ========== 右侧：预览 → 参数 → 日志 ========== -->
+      <!-- ========== 右侧：按标签切换 ========== -->
       <section class="content">
-        <div class="panel">
-          <div class="toolbar" style="margin-bottom:8px;">
-            <div>提取结果预览与质量检查</div>
-            <div class="spacer"></div>
-            <span class="status">进度 0%</span>
-          </div>
+        <div id="pane-vision-content" class="tab-pane" data-app-tab-pane="vision" role="tabpanel">
+          <div class="panel">
+            <div class="toolbar" style="margin-bottom:8px;">
+              <div>提取结果预览与质量检查</div>
+              <div class="spacer"></div>
+              <span class="status">进度 0%</span>
+            </div>
 
-          <!-- 左列：预览 + 时间轴 + 参数（宽度与预览对齐，不占用右侧图表列） -->
-          <div class="viewer">
-            <div class="preview-column">
-              <div class="canvas-wrap">
-                <span class="placeholder">请选择图像序列或加载序列文件后显示预览</span>
-              </div>
-              <div class="timeline">
-                <input type="range" min="0" max="100" value="0" />
-                <span class="status">t = 0 ms</span>
-                <span class="status" style="white-space:nowrap;">跳转 <input type="number" style="width:56px;" value="0" /> ms</span>
-              </div>
+            <!-- 左列：预览 + 时间轴 + 参数（宽度与预览对齐，不占用右侧图表列） -->
+            <div class="viewer">
+              <div class="preview-column">
+                <div class="canvas-wrap">
+                  <span class="placeholder">请选择图像序列或加载序列文件后显示预览</span>
+                </div>
+                <div class="timeline">
+                  <input type="range" min="0" max="100" value="0" />
+                  <span class="status">t = 0 ms</span>
+                  <span class="status" style="white-space:nowrap;">跳转 <input type="number" style="width:56px;" value="0" /> ms</span>
+                </div>
 
-              <div class="param-area-under-preview">
-                <h3>爆炸信息与炸药参数 <span class="badge">可编辑</span></h3>
-                <p class="hint" style="margin:0 0 10px 0;">
-                  与下方运行日志均仅在预览列内，不占用右侧图表区域；实现时与序列 JSON 字段对齐。
-                </p>
-                <div class="param-groups-row">
-                  <div class="fieldset-like" style="margin-bottom:0;">
-                    <span class="legend">爆炸信息</span>
-                    <div class="param-group-grid">
-                      <div class="cell">
-                        <label for="mv-explosion-duration">爆炸时长（ms）</label>
-                        <input type="number" id="mv-explosion-duration" min="1" step="1" value="140" />
-                      </div>
-                      <div class="cell">
-                        <label for="mv-pixel-length">单位像素实际长度（m）</label>
-                        <input type="number" id="mv-pixel-length" min="0" step="0.0001" value="0.01" />
+                <div class="param-area-under-preview">
+                  <h3>爆炸信息与炸药参数 <span class="badge">可编辑</span></h3>
+                  <p class="hint" style="margin:0 0 10px 0;">
+                    与下方运行日志均仅在预览列内，不占用右侧图表区域；实现时与序列 JSON 字段对齐。
+                  </p>
+                  <div class="param-groups-row">
+                    <div class="fieldset-like" style="margin-bottom:0;">
+                      <span class="legend">爆炸信息</span>
+                      <div class="param-group-grid">
+                        <div class="cell">
+                          <label for="mv-explosion-duration">爆炸时长（ms）</label>
+                          <input type="number" id="mv-explosion-duration" min="1" step="1" value="140" />
+                        </div>
+                        <div class="cell">
+                          <label for="mv-pixel-length">单位像素实际长度（m）</label>
+                          <input type="number" id="mv-pixel-length" min="0" step="0.0001" value="0.01" />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div class="fieldset-like" style="margin-bottom:0;">
-                    <span class="legend">炸药参数</span>
-                    <div class="param-group-grid">
-                      <div class="cell">
-                        <label for="mv-explosive-type">炸药类别</label>
-                        <select id="mv-explosive-type">
-                          <option value="thermobaric">温压弹</option>
-                          <option value="TNT">TNT</option>
-                          <option value="Polyurethane">聚氨酯</option>
-                          <option value="AlRubber30">30% Al / 橡胶</option>
-                          <option value="AlRubber40">40% Al / 橡胶</option>
-                          <option value="AlRubber50">50% Al / 橡胶</option>
-                          <option value="AlRubber60">60% Al / 橡胶</option>
-                        </select>
-                      </div>
-                      <div class="cell">
-                        <label for="mv-equivalent">当量（kg TNT）</label>
-                        <input type="number" id="mv-equivalent" min="0" step="0.1" value="1" />
-                      </div>
-                      <div class="cell">
-                        <label for="mv-al-percent">含铝量（%）</label>
-                        <input type="number" id="mv-al-percent" min="0" max="100" step="1" value="30" />
+                    <div class="fieldset-like" style="margin-bottom:0;">
+                      <span class="legend">炸药参数</span>
+                      <div class="param-group-grid">
+                        <div class="cell">
+                          <label for="mv-explosive-type">炸药类别</label>
+                          <select id="mv-explosive-type">
+                            <option value="thermobaric">温压弹</option>
+                            <option value="TNT">TNT</option>
+                            <option value="Polyurethane">聚氨酯</option>
+                            <option value="AlRubber30">30% Al / 橡胶</option>
+                            <option value="AlRubber40">40% Al / 橡胶</option>
+                            <option value="AlRubber50">50% Al / 橡胶</option>
+                            <option value="AlRubber60">60% Al / 橡胶</option>
+                          </select>
+                        </div>
+                        <div class="cell">
+                          <label for="mv-equivalent">当量（kg TNT）</label>
+                          <input type="number" id="mv-equivalent" min="0" step="0.1" value="1" />
+                        </div>
+                        <div class="cell">
+                          <label for="mv-al-percent">含铝量（%）</label>
+                          <input type="number" id="mv-al-percent" min="0" max="100" step="1" value="30" />
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
+
+                <div class="log-strip">
+                  <h3>运行日志</h3>
+                  <textarea class="log-area" id="mv-log" readonly placeholder="[日志] 导入、分割、拟合等输出将显示在此处…">[日志] 待开始 — 请先导入序列或图像。</textarea>
+                </div>
               </div>
 
-              <div class="log-strip">
-                <h3>运行日志</h3>
-                <textarea class="log-area" id="mv-log" readonly placeholder="[日志] 导入、分割、拟合等输出将显示在此处…">[日志] 待开始 — 请先导入序列或图像。</textarea>
+              <div class="chart-column">
+                <div class="chart">
+                  <div class="chart-title">火球温度随时间变化</div>
+                  <div class="placeholder" style="height:100px; display:grid; place-items:center; font-size:11px;">提取完成后显示</div>
+                </div>
+                <div class="chart" style="margin-top:10px;">
+                  <div class="chart-title">火球直径随时间变化</div>
+                  <div class="placeholder" style="height:100px; display:grid; place-items:center; font-size:11px;">提取完成后显示</div>
+                </div>
+                <div class="chart" style="margin-top:10px;">
+                  <div class="chart-title">火球直径变化速率</div>
+                  <div class="placeholder" style="height:100px; display:grid; place-items:center; font-size:11px;">提取完成后显示</div>
+                </div>
               </div>
             </div>
+          </div>
+        </div>
 
-            <div class="chart-column">
-              <div class="chart">
-                <div class="chart-title">火球温度随时间变化</div>
-                <div class="placeholder" style="height:100px; display:grid; place-items:center; font-size:11px;">提取完成后显示</div>
+        <div id="pane-train-content" class="tab-pane" data-app-tab-pane="train" role="tabpanel" hidden>
+          <div class="panel">
+            <div class="toolbar" style="margin-bottom:8px;">
+              <h3 style="margin:0; font-size:14px; color:var(--accent); font-weight:600;">模型训练视图</h3>
+              <div class="spacer"></div>
+              <span class="status" id="train-model-status">算法：核回归</span>
+            </div>
+            <p class="train-hint">
+              前三个图为实验数据散点（原型为示意数据）：横轴为炸药当量，圆点大小与含铝量正相关；当量增大时最大直径与初始直径总体升高、时间常数总体降低，初始直径可更分散。
+            </p>
+            <div class="train-charts-grid">
+              <div class="train-chart-wrap">
+                <div class="train-chart-title">火球最大直径 — 炸药当量</div>
+                <canvas id="chart-max-diameter" width="400" height="220"></canvas>
               </div>
-              <div class="chart" style="margin-top:10px;">
-                <div class="chart-title">火球直径随时间变化</div>
-                <div class="placeholder" style="height:100px; display:grid; place-items:center; font-size:11px;">提取完成后显示</div>
+              <div class="train-chart-wrap">
+                <div class="train-chart-title">火球初始直径 — 炸药当量</div>
+                <canvas id="chart-init-diameter" width="400" height="220"></canvas>
               </div>
-              <div class="chart" style="margin-top:10px;">
-                <div class="chart-title">火球直径变化速率</div>
-                <div class="placeholder" style="height:100px; display:grid; place-items:center; font-size:11px;">提取完成后显示</div>
+              <div class="train-chart-wrap">
+                <div class="train-chart-title">爆炸时间常数 — 炸药当量</div>
+                <canvas id="chart-time-const" width="400" height="220"></canvas>
+              </div>
+              <div class="train-chart-wrap">
+                <div class="train-chart-title" id="chart-train-chart-title">训练曲线（核回归）</div>
+                <canvas id="chart-train-curve" width="400" height="220"></canvas>
               </div>
             </div>
+            <div class="log-strip" style="margin-top:12px; padding-top:12px;">
+              <h3>训练日志</h3>
+              <textarea class="log-area" id="train-log" readonly placeholder="[训练] 数据导入、训练与评估输出…">[训练] 待机 — 可先「输入数据」或切换算法。</textarea>
+            </div>
+          </div>
+        </div>
+
+        <div id="pane-modeling-content" class="tab-pane" data-app-tab-pane="modeling" role="tabpanel" hidden>
+          <div class="panel">
+            <div class="toolbar" style="margin-bottom:10px;">
+              <div style="font-weight:600;">工况预测占位视图</div>
+              <div class="spacer"></div>
+              <span class="status">未连接后端</span>
+            </div>
+            <div class="canvas-wrap" style="height:420px;">
+              <span class="placeholder">实现时在此展示预测曲线 / 置信区间 / 表格结果等</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="pane-export-content" class="tab-pane" data-app-tab-pane="export" role="tabpanel" hidden>
+          <div class="panel">
+            <div class="toolbar" style="margin-bottom:10px;">
+              <div style="font-weight:600;">导出清单（占位）</div>
+              <div class="spacer"></div>
+              <span class="status">请选择左侧导出选项</span>
+            </div>
+            <textarea class="log-area" readonly style="min-height:220px;" placeholder="将列出待导出文件名、校验和、版本信息…"></textarea>
           </div>
         </div>
       </section>
     </main>
 
     <footer class="note">
-      文件：<code>document/machine_vision_ui_prototype.html</code> — 仅布局与交互占位，不接业务逻辑。
-      参数与运行日志均在「预览列」内；数据源为「爆炸序列 / 图像序列」两按钮 + 可选温度导入。
+      文件：<code>document/machine_vision_ui_prototype.html</code> — 顶部标签在「机器视觉 / 模型训练 / 建模与预测 / 导出」间切换主工作区左右栏；图表与日志均为占位示意。
     </footer>
   </div>
 
   <script>
+    (function tabSwitch() {
+      var tabs = document.querySelectorAll('.tab-btn[data-app-tab]');
+      var panes = document.querySelectorAll('.tab-pane[data-app-tab-pane]');
+      function setTab(name) {
+        panes.forEach(function (p) {
+          var on = p.getAttribute('data-app-tab-pane') === name;
+          p.hidden = !on;
+        });
+        tabs.forEach(function (t) {
+          var on = t.getAttribute('data-app-tab') === name;
+          t.classList.toggle('active', on);
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        if (name === 'train') {
+          requestAnimationFrame(function () {
+            window.dispatchEvent(new CustomEvent('train-charts-layout'));
+          });
+        }
+      }
+      tabs.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          setTab(btn.getAttribute('data-app-tab'));
+        });
+      });
+    })();
+
     (function () {
       function wire(btnId, inputId, label) {
         const btn = document.getElementById(btnId);
@@ -496,6 +735,456 @@
       wire('btn-pick-sequence', 'file-sequence', '导入爆炸序列文件');
       wire('btn-pick-images', 'file-images', '导入火球图像序列');
       wire('btn-pick-temperature', 'file-temperature', '[可选] 温度时间序列');
+
+      (function trainInputWire() {
+        var btn = document.getElementById('btn-train-input');
+        var inp = document.getElementById('file-train-input');
+        var st = document.getElementById('train-input-status');
+        var log = document.getElementById('train-log');
+        if (!btn || !inp) return;
+        btn.addEventListener('click', function () {
+          inp.click();
+        });
+        inp.addEventListener('change', function () {
+          var n = inp.files && inp.files.length ? inp.files.length : 0;
+          var name = inp.files && inp.files[0] ? inp.files[0].name : '';
+          if (st) st.textContent = n ? '已加载训练数据（' + n + ' 个文件）' : '未加载训练数据';
+          if (log)
+            log.value +=
+              '\n[' +
+              new Date().toLocaleTimeString() +
+              '] [模型训练] 输入数据: ' +
+              (name || '（无）') +
+              (n > 1 ? ' 等共 ' + n + ' 个' : '');
+          if (typeof window.__trainRefreshDatasetSummary === 'function') window.__trainRefreshDatasetSummary(n > 0);
+        });
+      })();
+
+      (function trainDatasetSummaryAndRun() {
+        var totalSamples = 0;
+        var summaryEl = document.getElementById('train-dataset-summary');
+        var splitEl = document.getElementById('train-test-split-pct');
+        var modelEl = document.getElementById('train-model-select');
+        var btnRun = document.getElementById('btn-start-training');
+        var trainLog = document.getElementById('train-log');
+
+        function modelLabel() {
+          if (!modelEl) return '（未指定）';
+          return modelEl.value === 'gp' ? '高斯过程' : '核回归';
+        }
+
+        function refresh() {
+          if (!summaryEl) return;
+          var pct = splitEl ? parseInt(splitEl.value, 10) : 20;
+          if (isNaN(pct)) pct = 20;
+          var testN = 0;
+          var trainN = 0;
+          if (totalSamples > 0) {
+            testN = Math.round((totalSamples * pct) / 100);
+            testN = Math.min(Math.max(testN, 0), totalSamples);
+            if (totalSamples >= 2 && pct > 0 && testN === 0) testN = 1;
+            if (testN >= totalSamples && totalSamples > 1) testN = totalSamples - 1;
+            trainN = totalSamples - testN;
+          }
+          summaryEl.value =
+            '训练模型：' +
+            modelLabel() +
+            '\n数据集总样本数：' +
+            totalSamples +
+            '\n训练集数量：' +
+            trainN +
+            '\n测试集数量：' +
+            testN +
+            '\n当前测试集比例：' +
+            pct +
+            '%';
+        }
+
+        window.__trainRefreshDatasetSummary = function (hasData) {
+          totalSamples = hasData ? 280 : 0;
+          refresh();
+        };
+
+        if (splitEl) splitEl.addEventListener('change', refresh);
+        if (modelEl) modelEl.addEventListener('change', refresh);
+        refresh();
+
+        if (btnRun) {
+          btnRun.addEventListener('click', function () {
+            var pct = splitEl ? parseInt(splitEl.value, 10) : 20;
+            if (trainLog) {
+              trainLog.value +=
+                '\n[' +
+                new Date().toLocaleTimeString() +
+                '] 开始训练 — 算法：' +
+                modelLabel() +
+                '，测试集比例 ' +
+                pct +
+                '%';
+              if (totalSamples <= 0) trainLog.value += '（提示：请先「输入数据」加载数据集）';
+            }
+            window.dispatchEvent(new CustomEvent('train-charts-layout'));
+          });
+        }
+      })();
+    })();
+
+    (function () {
+      function mulberry32(a) {
+        return function () {
+          let t = (a += 0x6d2b79f5);
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+
+      var rng = mulberry32(0x5f3759df);
+
+      function genExperiments(n) {
+        var pts = [];
+        for (var i = 0; i < n; i++) {
+          var yieldKg = 0.2 + rng() * 9.8;
+          var al = 5 + rng() * 55;
+          var yieldNorm = (yieldKg - 0.2) / 9.8;
+          var dMax = 1.2 + yieldNorm * 11 + rng() * 1.2 + (al / 100) * 1.5;
+          var d0 = 0.4 + yieldNorm * 3.2 + (rng() - 0.5) * 2.8;
+          var tau = 14 - yieldNorm * 9 + (rng() - 0.5) * 3.5 - (al / 200);
+          tau = Math.max(1.5, tau);
+          pts.push({ x: yieldKg, al: al, dMax: dMax, d0: d0, tau: tau });
+        }
+        return pts;
+      }
+
+      var experiments = genExperiments(28);
+
+      function drawAxes(ctx, w, h, pad, xLabel, yLabel) {
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, h - pad.b);
+        ctx.lineTo(w - pad.r, h - pad.b);
+        ctx.stroke();
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '11px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(xLabel, (pad.l + w - pad.r) / 2, h - 6);
+        ctx.save();
+        ctx.translate(14, (pad.t + h - pad.b) / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(yLabel, 0, 0);
+        ctx.restore();
+      }
+
+      function niceExtent(vals, margin) {
+        var min = Math.min.apply(null, vals);
+        var max = Math.max.apply(null, vals);
+        var m = margin || 0.08;
+        var r = max - min || 1;
+        return { min: min - r * m, max: max + r * m };
+      }
+
+      function drawScatter(canvas, getX, getY, getR, xLabel, yLabel) {
+        var rect = canvas.getBoundingClientRect();
+        var dpr = window.devicePixelRatio || 1;
+        var w = Math.floor(rect.width * dpr);
+        var h = Math.floor(rect.height * dpr);
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = '#050a16';
+        ctx.fillRect(0, 0, w, h);
+
+        var pad = { l: 44, r: 14, t: 14, b: 36 };
+        var xs = experiments.map(getX);
+        var ys = experiments.map(getY);
+        var rs = experiments.map(getR);
+        var ex = niceExtent(xs);
+        var ey = niceExtent(ys);
+        var er = niceExtent(rs, 0.15);
+
+        drawAxes(ctx, w, h, pad, xLabel, yLabel);
+
+        function xMap(v) {
+          return pad.l + ((v - ex.min) / (ex.max - ex.min)) * (w - pad.l - pad.r);
+        }
+        function yMap(v) {
+          return pad.t + (1 - (v - ey.min) / (ey.max - ey.min)) * (h - pad.t - pad.b);
+        }
+        function rMap(al) {
+          var t = (al - er.min) / (er.max - er.min);
+          t = Math.max(0, Math.min(1, t));
+          return 3 + t * 10;
+        }
+
+        for (var i = 0; i < experiments.length; i++) {
+          var p = experiments[i];
+          var cx = xMap(getX(p));
+          var cy = yMap(getY(p));
+          var rad = rMap(getR(p)) * dpr;
+          ctx.beginPath();
+          ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(56, 189, 248, 0.55)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(125, 211, 252, 0.45)';
+          ctx.lineWidth = 1 * dpr;
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = '#64748b';
+        ctx.font = 10 * dpr + 'px system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('点大小 ∝ 含铝量', pad.l, h - pad.b + 22 * dpr);
+      }
+
+      function kernelTrainTestMse(sigma) {
+        var tr = 0.02 + 0.42 * Math.pow(Math.max(sigma, 1e-6), 1.05);
+        var te = 13 * Math.exp(-sigma / 1) + 0.2 * Math.pow(sigma - 3, 2) + 0.52;
+        return { train: tr, test: te };
+      }
+
+      function drawKernelTraining(canvas) {
+        var rect = canvas.getBoundingClientRect();
+        var dpr = window.devicePixelRatio || 1;
+        var w = Math.floor(rect.width * dpr);
+        var h = Math.floor(rect.height * dpr);
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#050a16';
+        ctx.fillRect(0, 0, w, h);
+
+        var pad = { l: 44, r: 88, t: 18, b: 36 };
+        var sigMin = 0.01;
+        var sigMax = 10;
+        var mseMax = 14;
+
+        function sigToX(sig) {
+          var lx = Math.log10(sig);
+          var l0 = Math.log10(sigMin);
+          var l1 = Math.log10(sigMax);
+          return pad.l + ((lx - l0) / (l1 - l0)) * (w - pad.l - pad.r);
+        }
+        function mseToY(m) {
+          return pad.t + (1 - m / mseMax) * (h - pad.t - pad.b);
+        }
+
+        drawAxes(ctx, w, h, pad, 'σ（带宽）', 'MSE');
+
+        var n = 180;
+        ctx.lineWidth = 1.5 * dpr;
+        ctx.beginPath();
+        for (var i = 0; i <= n; i++) {
+          var t = i / n;
+          var sig = sigMin * Math.pow(sigMax / sigMin, t);
+          var y = mseToY(kernelTrainTestMse(sig).train);
+          var x = sigToX(sig);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = '#3b82f6';
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (var j = 0; j <= n; j++) {
+          var t2 = j / n;
+          var sig2 = sigMin * Math.pow(sigMax / sigMin, t2);
+          var y2 = mseToY(kernelTrainTestMse(sig2).test);
+          var x2 = sigToX(sig2);
+          if (j === 0) ctx.moveTo(x2, y2);
+          else ctx.lineTo(x2, y2);
+        }
+        ctx.strokeStyle = '#ef4444';
+        ctx.stroke();
+
+        var bestSig = 3;
+        var best = kernelTrainTestMse(bestSig);
+        var bx = sigToX(bestSig);
+        var by = mseToY(best.test);
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 2 * dpr;
+        var s = 5 * dpr;
+        ctx.beginPath();
+        ctx.moveTo(bx - s, by - s);
+        ctx.lineTo(bx + s, by + s);
+        ctx.moveTo(bx - s, by + s);
+        ctx.lineTo(bx + s, by - s);
+        ctx.stroke();
+
+        var ticks = [0.01, 0.1, 0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 9 * dpr + 'px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        for (var k = 0; k < ticks.length; k++) {
+          var tv = ticks[k];
+          if (tv < sigMin || tv > sigMax) continue;
+          var tx = sigToX(tv);
+          ctx.fillText(tv < 1 ? String(tv) : String(tv), tx, h - pad.b + 14 * dpr);
+        }
+
+        ctx.textAlign = 'left';
+        ctx.font = 10 * dpr + 'px system-ui, sans-serif';
+        var lx0 = w - pad.r + 8 * dpr;
+        var ly0 = pad.t + 12 * dpr;
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2 * dpr;
+        ctx.beginPath();
+        ctx.moveTo(lx0, ly0);
+        ctx.lineTo(lx0 + 18 * dpr, ly0);
+        ctx.stroke();
+        ctx.fillStyle = '#e2e8f0';
+        ctx.fillText('训练误差', lx0 + 22 * dpr, ly0 + 3 * dpr);
+        var ly1 = ly0 + 16 * dpr;
+        ctx.strokeStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.moveTo(lx0, ly1);
+        ctx.lineTo(lx0 + 18 * dpr, ly1);
+        ctx.stroke();
+        ctx.fillText('测试误差', lx0 + 22 * dpr, ly1 + 3 * dpr);
+        var ly2 = ly1 + 16 * dpr;
+        ctx.strokeStyle = '#22c55e';
+        ctx.beginPath();
+        ctx.moveTo(lx0 - s * 0.6, ly2);
+        ctx.lineTo(lx0 + 18 * dpr + s * 0.6, ly2 + s * 0.6);
+        ctx.moveTo(lx0 - s * 0.6, ly2 + s * 0.6);
+        ctx.lineTo(lx0 + 18 * dpr + s * 0.6, ly2 - s * 0.6);
+        ctx.stroke();
+        ctx.fillText('最小测试误差', lx0 + 22 * dpr, ly2 + 3 * dpr);
+      }
+
+      function drawGPLengthScale(canvas) {
+        var rect = canvas.getBoundingClientRect();
+        var dpr = window.devicePixelRatio || 1;
+        var w = Math.floor(rect.width * dpr);
+        var h = Math.floor(rect.height * dpr);
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#050a16';
+        ctx.fillRect(0, 0, w, h);
+        var pad = { l: 48, r: 14, t: 16, b: 36 };
+
+        drawAxes(ctx, w, h, pad, '长度尺度 ℓ', '对数边际似然');
+
+        function ellToX(ell) {
+          var eMin = 0.05;
+          var eMax = 5;
+          var lx = Math.log10(ell);
+          var l0 = Math.log10(eMin);
+          var l1 = Math.log10(eMax);
+          return pad.l + ((lx - l0) / (l1 - l0)) * (w - pad.l - pad.r);
+        }
+        function lmlToY(v) {
+          var vMin = -120;
+          var vMax = -40;
+          return pad.t + (1 - (v - vMin) / (vMax - vMin)) * (h - pad.t - pad.b);
+        }
+
+        ctx.beginPath();
+        var n = 120;
+        for (var i = 0; i <= n; i++) {
+          var t = i / n;
+          var ell = 0.05 * Math.pow(5 / 0.05, t);
+          var lml = -95 + 42 * Math.exp(-Math.pow(Math.log10(ell) + 0.2, 2) / 0.35) - ell * 3;
+          var x = ellToX(ell);
+          var y = lmlToY(lml);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = '#a78bfa';
+        ctx.lineWidth = 1.5 * dpr;
+        ctx.stroke();
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 10 * dpr + 'px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('（示意）超参优化曲线', (pad.l + w - pad.r) / 2, pad.t + 10 * dpr);
+      }
+
+      function redrawAll() {
+        var c1 = document.getElementById('chart-max-diameter');
+        var c2 = document.getElementById('chart-init-diameter');
+        var c3 = document.getElementById('chart-time-const');
+        var c4 = document.getElementById('chart-train-curve');
+        var sel = document.getElementById('train-model-select');
+        var titleEl = document.getElementById('chart-train-chart-title');
+        var st = document.getElementById('train-model-status');
+        if (!c1 || !c2 || !c3 || !c4 || !sel) return;
+        var trainContent = document.getElementById('pane-train-content');
+        if (!trainContent || trainContent.hidden) return;
+
+        drawScatter(
+          c1,
+          function (p) {
+            return p.x;
+          },
+          function (p) {
+            return p.dMax;
+          },
+          function (p) {
+            return p.al;
+          },
+          '炸药当量（kg TNT）',
+          '最大直径（m）'
+        );
+        drawScatter(
+          c2,
+          function (p) {
+            return p.x;
+          },
+          function (p) {
+            return p.d0;
+          },
+          function (p) {
+            return p.al;
+          },
+          '炸药当量（kg TNT）',
+          '初始直径（m）'
+        );
+        drawScatter(
+          c3,
+          function (p) {
+            return p.x;
+          },
+          function (p) {
+            return p.tau;
+          },
+          function (p) {
+            return p.al;
+          },
+          '炸药当量（kg TNT）',
+          '时间常数（ms）'
+        );
+
+        if (sel.value === 'kernel') {
+          if (titleEl) titleEl.textContent = '训练曲线（核回归：σ — MSE）';
+          if (st) st.textContent = '算法：核回归';
+          drawKernelTraining(c4);
+        } else {
+          if (titleEl) titleEl.textContent = '训练曲线（高斯过程：ℓ — 对数边际似然）';
+          if (st) st.textContent = '算法：高斯过程';
+          drawGPLengthScale(c4);
+        }
+      }
+
+      window.addEventListener('train-charts-layout', redrawAll);
+
+      var debounce;
+      window.addEventListener('resize', function () {
+        clearTimeout(debounce);
+        debounce = setTimeout(redrawAll, 120);
+      });
+
+      var trainSel = document.getElementById('train-model-select');
+      if (trainSel) trainSel.addEventListener('change', redrawAll);
+
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(redrawAll);
+      } else {
+        redrawAll();
+      }
     })();
   </script>
 </body>

@@ -264,11 +264,14 @@ class FireballAnalysisApp(QMainWindow):
         # 导入各个标签页（输入已并入机器视觉 ExtractTab）
         from extract_tab.extract_tab import ExtractTab
         from model_tab.model_tab import ModelTab
-        
+        from training_tab import TrainingTab
+
         self.extract_tab = ExtractTab()
+        self.training_tab = TrainingTab()
         self.model_tab = ModelTab()
-        
+
         self.tab_widget.addTab(self.extract_tab, "机器视觉")
+        self.tab_widget.addTab(self.training_tab, "模型训练")
         self.tab_widget.addTab(self.model_tab, "机器学习")
         
         main_layout.addWidget(self.tab_widget)
@@ -380,20 +383,22 @@ class FireballAnalysisApp(QMainWindow):
         
         if index == 0:  # 机器视觉
             self.sidebar.set_sidebar_content(self.extract_tab.get_sidebar_widget())
-        elif index == 1:  # 机器学习
+        elif index == 1:  # 模型训练
+            self.sidebar.set_sidebar_content(self.training_tab.get_sidebar_widget())
+        elif index == 2:  # 机器学习
             self.sidebar.set_sidebar_content(self.model_tab.get_sidebar_widget())
-    
+
     def _load_all_sidebars(self):
-        """预加载所有侧边栏内容"""
+        """预加载所有侧边栏内容（与全局左栏同款容器内叠放）。"""
         extract_sidebar = self.extract_tab.get_sidebar_widget()
+        training_sidebar = self.training_tab.get_sidebar_widget()
         model_sidebar = self.model_tab.get_sidebar_widget()
-        
+
         layout = QVBoxLayout()
-        layout.addWidget(extract_sidebar)
-        layout.addWidget(model_sidebar)
-        
-        model_sidebar.hide()
+        for w in (extract_sidebar, training_sidebar, model_sidebar):
+            layout.addWidget(w)
+            w.hide()
+
         extract_sidebar.show()
-        
         self.sidebar.sidebar_container.setLayout(layout)
             
