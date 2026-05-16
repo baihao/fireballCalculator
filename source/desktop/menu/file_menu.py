@@ -20,7 +20,7 @@ def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
     在已创建的「文件」菜单上添加条目。
 
     - 当前为「机器视觉」标签时：显示三个导入项（与侧边栏「数据源」按钮一致）。
-    - 当前为「工程计算」标签时：显示「导入训练文件」（与「选择训练文件」按钮一致）。
+    - 当前为「工程计算」标签时：显示「选择模型目录」（与侧栏「选择模型」一致）。
     """
     extract_tab = main_window.extract_tab
     model_tab = main_window.model_tab
@@ -38,8 +38,8 @@ def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
     act_import_temp.triggered.connect(extract_tab.select_temperature_sequence)
     file_menu.addAction(act_import_temp)
 
-    act_import_train = QAction("导入训练文件", main_window)
-    act_import_train.triggered.connect(model_tab.select_training_files)
+    act_import_train = QAction("选择模型目录", main_window)
+    act_import_train.triggered.connect(model_tab.select_model_folder)
     file_menu.addAction(act_import_train)
 
     def update_import_visibility(index: int) -> None:
