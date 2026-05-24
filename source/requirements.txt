@@ -1,5 +1,6 @@
 # 火球计算器：与 environment.yml / fireball_gp_mogp_module_design.md 对齐
-# 由 setup.sh 通过 pip 安装（不依赖 conda-forge 拉取大量包）
+# 由 setup.sh / setup.ps1 通过 pip 安装（不依赖 conda-forge 拉取大量包）
+# PyTorch / torchvision 由 setup.sh（macOS）或 setup.ps1（Windows CUDA 12.8）单独安装
 
 numpy>=1.26.0,<3
 matplotlib>=3.8.0
@@ -9,6 +10,4 @@ scipy>=1.11.0
 scikit-learn>=1.4.0
 PySide6>=6.6.0
 opencv-python>=4.8.0
-torch>=2.0.0,<3
-torchvision>=0.15.0
 gpytorch>=1.11.0

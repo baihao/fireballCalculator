@@ -1,0 +1,23 @@
+Collecting PySide6==6.10.1
+  Using cached pyside6-6.10.1-cp39-abi3-win_amd64.whl.metadata (5.5 kB)
+Collecting opencv-python
+  Using cached opencv_python-4.13.0.92-cp37-abi3-win_amd64.whl.metadata (20 kB)
+Collecting shiboken6==6.10.1 (from PySide6==6.10.1)
+  Using cached shiboken6-6.10.1-cp39-abi3-win_amd64.whl.metadata (2.6 kB)
+Collecting PySide6_Essentials==6.10.1 (from PySide6==6.10.1)
+  Using cached pyside6_essentials-6.10.1-cp39-abi3-win_amd64.whl.metadata (3.8 kB)
+Collecting PySide6_Addons==6.10.1 (from PySide6==6.10.1)
+  Using cached pyside6_addons-6.10.1-cp39-abi3-win_amd64.whl.metadata (4.2 kB)
+Collecting numpy>=2 (from opencv-python)
+  Using cached numpy-2.0.2-cp39-cp39-win_amd64.whl.metadata (59 kB)
+Using cached pyside6-6.10.1-cp39-abi3-win_amd64.whl (564 kB)
+Using cached pyside6_addons-6.10.1-cp39-abi3-win_amd64.whl (164.9 MB)
+Using cached pyside6_essentials-6.10.1-cp39-abi3-win_amd64.whl (74.5 MB)
+Using cached shiboken6-6.10.1-cp39-abi3-win_amd64.whl (1.2 MB)
+Using cached opencv_python-4.13.0.92-cp37-abi3-win_amd64.whl (40.2 MB)
+Using cached numpy-2.0.2-cp39-cp39-win_amd64.whl (15.9 MB)
+Installing collected packages: shiboken6, numpy, PySide6_Essentials, opencv-python, PySide6_Addons, PySide6
+
+
+Successfully installed PySide6-6.10.1 PySide6_Addons-6.10.1 PySide6_Essentials-6.10.1 numpy-2.0.1 opencv-python-4.13.0.92 shiboken6-6.10.1
+

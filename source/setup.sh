@@ -18,6 +18,29 @@ echo "=========================================="
 ENV_NAME="fireball_calculator"
 PYTHON_VERSION="3.10"
 REQ_FILE="${SCRIPT_DIR}/requirements.txt"
+TORCH_MIN_VERSION="2.5.1"
+
+pytorch_version_ok() {
+    conda run -n "${ENV_NAME}" python -c "
+import sys, torch
+ver = torch.__version__.split('+')[0].split('.')
+major, minor = int(ver[0]), int(ver[1])
+patch = int(ver[2]) if len(ver) > 2 else 0
+min_major, min_minor, min_patch = [int(x) for x in '${TORCH_MIN_VERSION}'.split('.')]
+ok = (major, minor, patch) >= (min_major, min_minor, min_patch)
+sys.exit(0 if ok else 1)
+" >/dev/null 2>&1
+}
+
+install_pytorch_mac() {
+    echo "正在安装 PyTorch（macOS / pip，支持 MPS）..."
+    if pytorch_version_ok; then
+        echo "✓ PyTorch $(conda run -n "${ENV_NAME}" python -c 'import torch; print(torch.__version__)') 已满足要求，跳过安装"
+        return 0
+    fi
+    conda run -n "${ENV_NAME}" python -m pip install "torch>=${TORCH_MIN_VERSION},<3" "torchvision>=0.20.0"
+    echo "✓ PyTorch 安装完成: $(conda run -n "${ENV_NAME}" python -c 'import torch; print(torch.__version__)')"
+}
 
 # 1) 检查 conda
 if ! command -v conda &> /dev/null; then
@@ -42,8 +65,11 @@ else
     echo "✓ 环境创建完成"
 fi
 
-echo "正在 pip install -r requirements.txt（含 torch / gpytorch 等）..."
 conda run -n "${ENV_NAME}" python -m pip install --upgrade pip
+
+install_pytorch_mac
+
+echo "正在 pip install -r requirements.txt（含 gpytorch 等）..."
 conda run -n "${ENV_NAME}" python -m pip install -r "${REQ_FILE}" --upgrade
 
 echo "✓ pip 依赖已安装/更新"
@@ -89,7 +115,7 @@ echo "=========================================="
 echo "环境准备完成"
 echo "=========================================="
 echo ""
-echo "依赖来源: ${REQ_FILE}（pip）；Python ${PYTHON_VERSION}、PyTorch、GPyTorch、Matplotlib 等"
+echo "依赖来源: ${REQ_FILE}（pip）+ setup.sh 安装 PyTorch；Python ${PYTHON_VERSION}、GPyTorch、Matplotlib 等"
 echo ""
 echo "下一步："
 echo "1) 激活环境:    conda activate ${ENV_NAME}"
