@@ -79,6 +79,31 @@ class ModelTabUI:
         charts_widget.setLayout(charts_layout)
         layout.addWidget(charts_widget)
 
+        log_label = QLabel("仿真日志")
+        log_label.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: bold;")
+        layout.addWidget(log_label)
+
+        self.ui_components["simulation_log"] = QPlainTextEdit()
+        self.ui_components["simulation_log"].setReadOnly(True)
+        self.ui_components["simulation_log"].setMinimumHeight(100)
+        self.ui_components["simulation_log"].setPlaceholderText(
+            "[仿真] 完成一次「开始仿真」后将输出火球直径、温度、热通量与累积热辐射等关键指标…"
+        )
+        self.ui_components["simulation_log"].setStyleSheet(
+            """
+            QPlainTextEdit {
+                background-color: #0b1220;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                color: #cbd5e1;
+                font-family: ui-monospace, 'Courier New', monospace;
+                font-size: 12px;
+                padding: 8px;
+            }
+        """
+        )
+        layout.addWidget(self.ui_components["simulation_log"])
+
         parent_widget.setLayout(layout)
         return layout
 

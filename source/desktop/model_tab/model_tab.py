@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QWidget, QMessageBox, QFileDialog
 from .ui_widgets.model_tab_ui import ModelTabUI
 from .controllers import ModelTabChartController, ModelController
 from .utils.calculator import build_prediction_bundle
+from .utils.simulation_log import build_simulation_log_lines
 
 # 添加路径以导入计算器
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -78,6 +79,43 @@ class ModelTab(QWidget):
         
         if "params_scroll_area" in self.ui_components:
             self.params_scroll_area = self.ui_components["params_scroll_area"]
+        if "simulation_log" in self.ui_components:
+            self.simulation_log = self.ui_components["simulation_log"]
+
+    def _now(self) -> str:
+        return datetime.now().strftime("%H:%M:%S")
+
+    def _append_simulation_log(self, line: str) -> None:
+        if not hasattr(self, "simulation_log"):
+            return
+        self.simulation_log.appendPlainText(f"[{self._now()}] {line}")
+
+    def _clear_simulation_log(self) -> None:
+        if hasattr(self, "simulation_log"):
+            self.simulation_log.clear()
+
+    def _write_simulation_summary_log(
+        self,
+        al_content: float,
+        *,
+        failed: bool = False,
+        error_message: str = "",
+    ) -> None:
+        if failed:
+            self._append_simulation_log(f"仿真失败 — {error_message}")
+            return
+        if not hasattr(self, "prediction_data") or self.prediction_data is None:
+            return
+        self._append_simulation_log("仿真完成，关键指标如下：")
+        for block_line in build_simulation_log_lines(
+            self.prediction_data,
+            al_percent=float(al_content),
+            kbc_source_label=self.model_ctrl.last_kbc_source,
+        ):
+            if block_line == "":
+                self.simulation_log.appendPlainText("")
+            else:
+                self.simulation_log.appendPlainText(block_line)
     
     def init_empty_charts(self):
         """初始化空图表，显示默认占位内容"""
@@ -117,6 +155,7 @@ class ModelTab(QWidget):
         if hasattr(self, "export_btn"):
             self.export_btn.setEnabled(False)
 
+        al_content = 30.0
         try:
             print("🔥 开始预测...")
             self.modeling_status.setText("正在计算预测结果...")
@@ -141,6 +180,8 @@ class ModelTab(QWidget):
                 material_name, duration, equivalent, al_content, env_temp, env_humidity, env_pressure
             )
 
+            self._write_simulation_summary_log(al_content)
+
             self.modeling_status.setText("预测完成")
             self._simulation_succeeded = True
             print("✅ 预测完成！")
@@ -151,6 +192,7 @@ class ModelTab(QWidget):
             traceback.print_exc()
             self.modeling_status.setText("预测失败")
             self._simulation_succeeded = False
+            self._write_simulation_summary_log(al_content, failed=True, error_message=str(e))
             QMessageBox.critical(self, "错误", f"预测失败:\n{str(e)}")
         finally:
             if hasattr(self, "predict_btn"):
@@ -227,6 +269,8 @@ class ModelTab(QWidget):
     def _load_model_folder(self, folder: str) -> None:
         self.prediction_data = None
         self._simulation_succeeded = False
+        self._clear_simulation_log()
+        self._append_simulation_log("已切换模型目录，请重新「开始仿真」以更新图表与日志。")
         if hasattr(self, "export_btn"):
             self.export_btn.setEnabled(False)
 
