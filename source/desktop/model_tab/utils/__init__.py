@@ -2,12 +2,16 @@
 
 from .calculator import (
     build_prediction_bundle,
+    default_simulation_duration_ms,
     diameter_drag_series,
     default_temperature_series,
+    equivalent_time_scale,
 )
 
 __all__ = [
     "build_prediction_bundle",
+    "default_simulation_duration_ms",
     "diameter_drag_series",
     "default_temperature_series",
+    "equivalent_time_scale",
 ]

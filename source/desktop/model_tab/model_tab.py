@@ -12,7 +12,7 @@ from datetime import datetime
 from PySide6.QtWidgets import QWidget, QMessageBox, QFileDialog
 from .ui_widgets.model_tab_ui import ModelTabUI
 from .controllers import ModelTabChartController, ModelController
-from .utils.calculator import build_prediction_bundle
+from .utils.calculator import build_prediction_bundle, default_simulation_duration_ms
 from .utils.simulation_log import build_simulation_log_lines
 
 # 添加路径以导入计算器
@@ -36,6 +36,9 @@ class ModelTab(QWidget):
         self.model_ctrl = ModelController(self.fireball_calculator)
         self._model_import_ok = False
         self._simulation_succeeded = False
+        self._duration_user_edited = False
+        self._syncing_duration_widget = False
+        self._eq_duration_sync_wired = False
         
         # 设置UI组件引用（向后兼容）
         self._setup_ui_component_references()
@@ -116,6 +119,40 @@ class ModelTab(QWidget):
                 self.simulation_log.appendPlainText("")
             else:
                 self.simulation_log.appendPlainText(block_line)
+
+    def _parse_equivalent_kg(self) -> float:
+        try:
+            text = self.p_eq.text().strip() if hasattr(self, "p_eq") else ""
+            return float(text) if text else 10.0
+        except ValueError:
+            return 10.0
+
+    def _sync_simulation_duration_from_equivalent(self) -> None:
+        """按当量更新侧栏「仿真时长」；若用户已手动改过则不再覆盖。"""
+        if self._duration_user_edited or not hasattr(self, "p_duration"):
+            return
+        duration_ms = default_simulation_duration_ms(self._parse_equivalent_kg())
+        self._syncing_duration_widget = True
+        self.p_duration.setText(f"{duration_ms:.6g}")
+        self._syncing_duration_widget = False
+
+    def _on_equivalent_changed(self) -> None:
+        self._sync_simulation_duration_from_equivalent()
+
+    def _on_duration_edited_by_user(self) -> None:
+        if self._syncing_duration_widget:
+            return
+        self._duration_user_edited = True
+
+    def _wire_equivalent_duration_sync(self) -> None:
+        if self._eq_duration_sync_wired:
+            return
+        if not hasattr(self, "p_eq") or not hasattr(self, "p_duration"):
+            return
+        self.p_eq.editingFinished.connect(self._on_equivalent_changed)
+        self.p_duration.editingFinished.connect(self._on_duration_edited_by_user)
+        self._eq_duration_sync_wired = True
+        self._sync_simulation_duration_from_equivalent()
     
     def init_empty_charts(self):
         """初始化空图表，显示默认占位内容"""
@@ -133,6 +170,7 @@ class ModelTab(QWidget):
                 self.predict_btn.clicked.connect(self.start_prediction)
             if hasattr(self, "export_btn"):
                 self.export_btn.clicked.connect(self.export_results)
+            self._wire_equivalent_duration_sync()
         except Exception:
             pass
         
@@ -161,10 +199,11 @@ class ModelTab(QWidget):
             self.modeling_status.setText("正在计算预测结果...")
             self.predict_btn.setEnabled(False)
 
-            equivalent = float(self.p_eq.text()) if self.p_eq.text() else 10.0
+            equivalent = self._parse_equivalent_kg()
             al_content = float(self.p_al.text()) if self.p_al.text() else 30.0
             step = float(self.p_step.text()) if self.p_step.text() else 1.0
-            duration = float(self.p_duration.text()) if self.p_duration.text() else 140.0
+            self._sync_simulation_duration_from_equivalent()
+            duration = float(self.p_duration.text()) if self.p_duration.text() else default_simulation_duration_ms(equivalent)
 
             env_temp = float(self.p_env_temp.text()) if self.p_env_temp.text() else 24.0
             env_humidity = float(self.p_env_humidity.text()) if self.p_env_humidity.text() else 48.0
@@ -281,6 +320,8 @@ class ModelTab(QWidget):
         if hasattr(self, "model_import_summary"):
             self.model_import_summary.setPlainText(result.summary_text)
         self.model_ctrl.apply_first_params_to_widgets(self.model_ctrl.last_first_params, self)
+        self._duration_user_edited = False
+        self._sync_simulation_duration_from_equivalent()
 
         if result.can_run_simulation:
             print(
@@ -315,10 +356,10 @@ class ModelTab(QWidget):
                 return
             
             # 获取预测参数
-            equivalent = float(self.p_eq.text()) if self.p_eq.text() else 10.0
+            equivalent = self._parse_equivalent_kg()
             al_content = float(self.p_al.text()) if self.p_al.text() else 30.0
             step = float(self.p_step.text()) if self.p_step.text() else 1.0
-            duration = float(self.p_duration.text()) if self.p_duration.text() else 140.0
+            duration = float(self.p_duration.text()) if self.p_duration.text() else default_simulation_duration_ms(equivalent)
             
             # 获取环境参数
             env_temp = float(self.p_env_temp.text()) if self.p_env_temp.text() else 24.0
@@ -421,5 +462,6 @@ class ModelTab(QWidget):
             self.ui_components.update(self.ui_builder.get_ui_components())
             self._setup_ui_component_references()
             self.setup_connections()
+            self._wire_equivalent_duration_sync()
         
         return self._sidebar_widget

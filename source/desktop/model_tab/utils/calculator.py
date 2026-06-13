@@ -3,7 +3,8 @@
 """
 工程计算 — 火球直径（显式 K/B/C 拖曳式）、默认温度、热通量与累积热辐射。
 
-温度时间序列：无训练温度数据时使用 ``FireballTemperatureCalculator`` 默认 blend 模型。
+温度时间序列：无训练温度数据时使用 ``FireballTemperatureCalculator`` 参考 CSV（标定当量
+100 kg TNT）；其它当量在时间上按 ``(m/100)^(2/3)`` 缩放后再取样。
 """
 
 from __future__ import annotations
@@ -20,7 +21,10 @@ if _PKG_ROOT not in sys.path:
     sys.path.insert(0, _PKG_ROOT)
 
 from fireball_radius_calculator import FireballCalculator
-from fireball_temperature_calculator import FireballTemperatureCalculator
+from fireball_temperature_calculator import (
+    FireballTemperatureCalculator,
+    default_temperature_curve_csv_path,
+)
 from transmissivity_calculator import TransmissivityParams
 from fireball_heat_radiation_calculator import (
     compute_heat_flux_over_time,
@@ -31,6 +35,38 @@ DEFAULT_TEMP_BLEND_WIDTH_MS = 12.0
 J_TO_KJ = 1000.0
 DEFAULT_HEAT_FLUX_DISTANCES_M = (6.0, 7.0, 8.0, 9.0, 10.0)
 DEFAULT_RADIATION_X = (6.0, 10.0, 50)
+
+# 默认温度参考曲线标定：100 kg TNT 下的爆炸仿真时间窗（与 reference CSV 末时刻一致）
+REFERENCE_EQUIVALENT_KG = 100.0
+
+
+def reference_temperature_duration_ms() -> float:
+    """100 kg 标定工况下参考温度 CSV 的时间跨度（ms）。"""
+    path = default_temperature_curve_csv_path()
+    if path.is_file():
+        t_ms = np.loadtxt(path, delimiter=",", skiprows=1, usecols=0)
+        return float(np.max(t_ms))
+    return 2000.0
+
+
+REFERENCE_DURATION_MS = reference_temperature_duration_ms()
+
+
+def equivalent_time_scale(equivalent_kg: float) -> float:
+    """
+    相对 100 kg 标定工况的时间缩放因子：``(m / 100)^(2/3)``。
+
+    仿真时刻 t 对应参考曲线时刻 ``t_ref = t / scale``；特征爆炸时长随当量同比例放大。
+    """
+    m = float(equivalent_kg)
+    if m <= 0:
+        raise ValueError("当量必须大于 0")
+    return float((m / REFERENCE_EQUIVALENT_KG) ** (2.0 / 3.0))
+
+
+def default_simulation_duration_ms(equivalent_kg: float) -> float:
+    """与默认温度缩放一致的推荐仿真时长（ms）。"""
+    return REFERENCE_DURATION_MS * equivalent_time_scale(equivalent_kg)
 
 
 def diameter_drag_series(
@@ -67,10 +103,18 @@ def diameter_series_calculator_scaled(
     return out
 
 
-def default_temperature_series(t_ms: np.ndarray) -> np.ndarray:
-    """无实验温度序列时的默认温度曲线。"""
-    calc = FireballTemperatureCalculator(mode="blend", blend_width_ms=DEFAULT_TEMP_BLEND_WIDTH_MS)
-    return np.asarray(calc.temperature_modified(t_ms), dtype=np.float64)
+def default_temperature_series(t_ms: np.ndarray, equivalent_kg: float) -> np.ndarray:
+    """
+    无实验温度序列时的默认温度曲线。
+
+    参考剖面为 **100 kg TNT** 下 ``FireballTemperatureCalculator`` 的 CSV/PCHIP 曲线；
+    对当量 ``m`` kg，在仿真时刻 ``t`` 上取参考时刻 ``t_ref = t / (m/100)^(2/3)`` 的温度。
+    """
+    t = np.asarray(t_ms, dtype=np.float64)
+    scale = equivalent_time_scale(float(equivalent_kg))
+    t_ref = t / scale
+    calc = FireballTemperatureCalculator()
+    return np.asarray(calc.temperature_modified(t_ref), dtype=np.float64)
 
 
 def temperature_series_from_training(
@@ -181,7 +225,7 @@ def build_prediction_bundle(
     if training_temperature_data is not None:
         t_k = temperature_series_from_training(t_ms, training_temperature_data)
     else:
-        t_k = default_temperature_series(t_ms)
+        t_k = default_temperature_series(t_ms, float(equivalent))
 
     heat_series, heat_store = heat_flux_bundle(
         t_ms, t_k, d_m, env_temp, env_humidity, env_pressure
@@ -206,5 +250,10 @@ def build_prediction_bundle(
         "heat_radiation_data": {"distances": x_rad, "heat_radiation": h_rad},
         "kbc_source": kbc_source,
         "kbc_display": (float(Kd), float(b), float(c)),
+        "temperature_time_scale": (
+            None
+            if training_temperature_data is not None
+            else equivalent_time_scale(float(equivalent))
+        ),
         "_heat_flux_series_chart": heat_series,
     }
