@@ -134,7 +134,8 @@ class TrainingTab(QWidget):
         self._model.set_split_strategy(str(key))
         self._refresh_summary()
 
-    def _on_input_data_clicked(self) -> None:
+    def input_training_data(self) -> None:
+        """导入训练数据文件夹（侧栏「输入数据」与菜单「文件 → 输入数据」共用）。"""
         path = QFileDialog.getExistingDirectory(
             self,
             "选择训练数据文件夹",
@@ -179,6 +180,9 @@ class TrainingTab(QWidget):
             self._append_train_log(f"[模型训练] 跳过 — {line}")
         if len(result.diagnostics) > 25:
             self._append_train_log(f"[模型训练] … 另有 {len(result.diagnostics) - 25} 条跳过记录")
+
+    def _on_input_data_clicked(self) -> None:
+        self.input_training_data()
 
     def _on_start_training_clicked(self) -> None:
         if self._ui_state not in (TrainingUiState.DATA_PREPARED, TrainingUiState.TRAINING_DONE):

@@ -19,7 +19,7 @@ def setup_application_menu(main_window: QMainWindow) -> None:
     """
     在主窗口上创建菜单栏。
 
-    要求 main_window 已具备：tab_widget、extract_tab、model_tab、sidebar。
+    要求 main_window 已具备：tab_widget、extract_tab、training_tab、model_tab、sidebar。
     「退出」仅出现在「文件」菜单中（NoRole，不并入 macOS 应用菜单）。
     """
     bar = main_window.menuBar()
