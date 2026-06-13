@@ -33,11 +33,7 @@ class TrainingDatasetModel:
         self.b_mean: Optional[float] = None
         self.total_samples: int = 0
         self.split_strategy: str = "loocv"
-        self.algorithm: str = "kernel"
         self.last_krr_artifact_root: Optional[str] = None
-
-    def set_algorithm(self, key: str) -> None:
-        self.algorithm = key if key in ("kernel", "gp") else "kernel"
 
     def set_split_strategy(self, key: str) -> None:
         """当前仅支持留一交叉验证（loocv）。"""
@@ -63,10 +59,9 @@ class TrainingDatasetModel:
         self.last_krr_artifact_root = None
 
     def summary_text(self) -> str:
-        model_name = "核回归" if self.algorithm == "kernel" else "高斯过程"
         strat_label = "留一交叉验证（LOOCV）" if self.split_strategy == "loocv" else self.split_strategy
         lines = [
-            f"训练模型：{model_name}",
+            "训练模型：核岭回归（Kernel Ridge）",
             f"数据目录：{self.data_folder or '（未选择）'}",
         ]
         if self.last_krr_artifact_root:

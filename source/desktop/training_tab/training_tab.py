@@ -61,7 +61,6 @@ class TrainingTab(QWidget):
 
     def _wire_signals(self) -> None:
         c = self.ui_components
-        c["train_model_combo"].currentIndexChanged.connect(self._on_algorithm_changed)
         c["train_split_strategy_combo"].currentIndexChanged.connect(self._on_split_strategy_changed)
         c["train_input_btn"].clicked.connect(self._on_input_data_clicked)
         c["train_start_btn"].clicked.connect(self._on_start_training_clicked)
@@ -118,15 +117,6 @@ class TrainingTab(QWidget):
             self._ui_state = TrainingUiState.DATA_IMPORTED
         else:
             self._ui_state = TrainingUiState.DATA_PREPARED
-
-    def _sync_status_labels(self) -> None:
-        name = "核回归" if self._model.algorithm == "kernel" else "高斯过程"
-        self.ui_components["train_model_status_label"].setText(f"算法：{name}")
-
-    def _on_algorithm_changed(self, index: int) -> None:
-        self._model.set_algorithm("kernel" if index == 0 else "gp")
-        self._sync_status_labels()
-        self._refresh_summary()
 
     def _on_split_strategy_changed(self, index: int) -> None:
         combo = self.ui_components["train_split_strategy_combo"]
@@ -192,13 +182,6 @@ class TrainingTab(QWidget):
             return
         if not self._model.data_folder:
             QMessageBox.warning(self, "模型训练", "请先通过「输入数据」加载训练文件夹。")
-            return
-        if self._model.algorithm != "kernel":
-            QMessageBox.information(
-                self,
-                "模型训练",
-                "当前「开始训练」仅接入核岭回归（kernel_regression）；请选择「核回归」算法。",
-            )
             return
 
         is_retrain = self._ui_state == TrainingUiState.TRAINING_DONE
