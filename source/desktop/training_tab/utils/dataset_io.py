@@ -27,6 +27,21 @@ class TrainingFolderImportResult:
     diagnostics: List[str] = field(default_factory=list)
 
 
+def _read_json_file(path: Path) -> dict:
+    """读取 JSON；Windows 上部分文件为 GBK/ANSI，需多编码尝试。"""
+    raw: str | None = None
+    last_decode_error: UnicodeDecodeError | None = None
+    for encoding in ("utf-8", "utf-8-sig", "gbk", "cp936"):
+        try:
+            raw = path.read_text(encoding=encoding)
+            break
+        except UnicodeDecodeError as e:
+            last_decode_error = e
+    if raw is None:
+        raise last_decode_error or UnicodeDecodeError("unknown", b"", 0, 1, "decode failed")
+    return json.loads(raw)
+
+
 def _parse_one_drag_fit_sample(
     path: Path,
     *,
@@ -37,9 +52,8 @@ def _parse_one_drag_fit_sample(
     skip_reason 非空表示跳过该文件；strict 时为致命错误语义由调用方转为 error_message。
     """
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
+        data = _read_json_file(path)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
         reason = f"{path.name}: JSON 读取失败 ({e})"
         if strict_drag_fit_success:
             raise RuntimeError(reason) from e
