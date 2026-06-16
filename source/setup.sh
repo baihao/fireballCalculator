@@ -19,9 +19,25 @@ ENV_NAME="fireball_calculator"
 PYTHON_VERSION="3.10"
 REQ_FILE="${SCRIPT_DIR}/requirements.txt"
 TORCH_MIN_VERSION="2.5.1"
+SEGMENT_PATH="${SCRIPT_DIR}/third_party/segment-anything"
+
+conda_python() {
+    conda run -n "${ENV_NAME}" python "$@"
+}
+
+env_exists() {
+    conda env list | grep -qE "^${ENV_NAME}[[:space:]]"
+}
+
+python_version_ok() {
+    conda_python -c "
+import sys
+sys.exit(0 if sys.version_info[:2] == (3, 10) else 1)
+" >/dev/null 2>&1
+}
 
 pytorch_version_ok() {
-    conda run -n "${ENV_NAME}" python -c "
+    conda_python -c "
 import sys, torch
 ver = torch.__version__.split('+')[0].split('.')
 major, minor = int(ver[0]), int(ver[1])
@@ -32,14 +48,94 @@ sys.exit(0 if ok else 1)
 " >/dev/null 2>&1
 }
 
+requirements_satisfied() {
+    REQ_FILE="${REQ_FILE}" conda_python -c "
+import os, re, subprocess, sys
+req = os.environ['REQ_FILE']
+proc = subprocess.run(
+    [sys.executable, '-m', 'pip', 'install', '-r', req, '--dry-run'],
+    capture_output=True,
+    text=True,
+)
+if proc.returncode != 0:
+    sys.exit(1)
+text = (proc.stdout or '') + (proc.stderr or '')
+sys.exit(1 if re.search(r'Would install|Installing collected packages', text) else 0)
+" >/dev/null 2>&1
+}
+
+segment_anything_ok() {
+    if [ ! -d "${SEGMENT_PATH}" ]; then
+        return 0
+    fi
+    conda_python -c "import segment_anything" >/dev/null 2>&1
+}
+
+environment_satisfied() {
+    env_exists \
+        && python_version_ok \
+        && pytorch_version_ok \
+        && requirements_satisfied \
+        && segment_anything_ok
+}
+
 install_pytorch_mac() {
     echo "正在安装 PyTorch（macOS / pip，支持 MPS）..."
     if pytorch_version_ok; then
-        echo "✓ PyTorch $(conda run -n "${ENV_NAME}" python -c 'import torch; print(torch.__version__)') 已满足要求，跳过安装"
+        echo "✓ PyTorch $(conda_python -c 'import torch; print(torch.__version__)') 已满足要求，跳过安装"
         return 0
     fi
-    conda run -n "${ENV_NAME}" python -m pip install "torch>=${TORCH_MIN_VERSION},<3" "torchvision>=0.20.0"
-    echo "✓ PyTorch 安装完成: $(conda run -n "${ENV_NAME}" python -c 'import torch; print(torch.__version__)')"
+    conda_python -m pip install "torch>=${TORCH_MIN_VERSION},<3" "torchvision>=0.20.0"
+    echo "✓ PyTorch 安装完成: $(conda_python -c 'import torch; print(torch.__version__)')"
+}
+
+install_requirements() {
+    echo "正在 pip install -r requirements.txt（含 gpytorch 等）..."
+    conda_python -m pip install -r "${REQ_FILE}" --upgrade
+    echo "✓ pip 依赖已安装/更新"
+}
+
+install_segment_anything() {
+    if [ ! -d "${SEGMENT_PATH}" ]; then
+        return 0
+    fi
+    if segment_anything_ok; then
+        echo "✓ segment-anything 已安装，跳过"
+        return 0
+    fi
+    echo "检测到第三方子模块 segment-anything，尝试以可编辑模式安装..."
+    conda_python -m pip install -e "${SEGMENT_PATH}" || true
+}
+
+configure_env_vars() {
+    echo ""
+    echo "配置环境变量（解决 OpenMP 冲突）..."
+    CONDA_BASE="$(conda info --base)"
+    CONDA_ENV_DIR="${CONDA_BASE}/envs/${ENV_NAME}"
+    ACTIVATE_DIR="${CONDA_ENV_DIR}/etc/conda/activate.d"
+    DEACTIVATE_DIR="${CONDA_ENV_DIR}/etc/conda/deactivate.d"
+
+    mkdir -p "$ACTIVATE_DIR"
+    mkdir -p "$DEACTIVATE_DIR"
+
+    cat > "$ACTIVATE_DIR/env_vars.sh" << 'EOF'
+#!/bin/bash
+export KMP_DUPLICATE_LIB_OK=TRUE
+if [ -n "${FIREBALL_PROJECT_ROOT:-}" ]; then
+    export PYTHONPATH="${FIREBALL_PROJECT_ROOT}/source:${PYTHONPATH:-}"
+fi
+EOF
+
+    cat > "$DEACTIVATE_DIR/env_vars.sh" << 'EOF'
+#!/bin/bash
+unset KMP_DUPLICATE_LIB_OK
+EOF
+
+    chmod +x "$ACTIVATE_DIR/env_vars.sh"
+    chmod +x "$DEACTIVATE_DIR/env_vars.sh"
+
+    echo "✓ 环境变量配置完成"
+    echo "  - 自动设置 KMP_DUPLICATE_LIB_OK=TRUE（解决 OpenMP 冲突）"
 }
 
 # 1) 检查 conda
@@ -55,60 +151,31 @@ if [ ! -f "${REQ_FILE}" ]; then
     exit 1
 fi
 
-# 2) 创建空环境（仅用 defaults channel，避免 conda-forge 元数据拉取失败）
-if conda env list | grep -qE "^${ENV_NAME}[[:space:]]"; then
-    echo "✓ 已存在环境: ${ENV_NAME}，使用 pip 升级/同步 requirements.txt ..."
+# 2) 创建 conda 环境（若不存在）
+if env_exists; then
+    echo "✓ 已存在环境: ${ENV_NAME}"
 else
     echo "创建环境: ${ENV_NAME}（Python ${PYTHON_VERSION}，仅 base 包 + pip）..."
-    # --override-channels：忽略全局 conda 里配置的 conda-forge，减少无效请求
     conda create -n "${ENV_NAME}" -c defaults --override-channels "python=${PYTHON_VERSION}" pip -y
     echo "✓ 环境创建完成"
 fi
 
-conda run -n "${ENV_NAME}" python -m pip install --upgrade pip
-
-install_pytorch_mac
-
-echo "正在 pip install -r requirements.txt（含 gpytorch 等）..."
-conda run -n "${ENV_NAME}" python -m pip install -r "${REQ_FILE}" --upgrade
-
-echo "✓ pip 依赖已安装/更新"
-
-# 若存在本地子模块，进行可选安装（不强制）
-if [ -d "${SCRIPT_DIR}/third_party/segment-anything" ]; then
-    echo "检测到第三方子模块 segment-anything，尝试以可编辑模式安装..."
-    conda run -n "${ENV_NAME}" python -m pip install -e "${SCRIPT_DIR}/third_party/segment-anything" || true
+# 3) 检测依赖是否已满足
+if environment_satisfied; then
+    echo "✓ 当前环境 ${ENV_NAME} 已满足 Python ${PYTHON_VERSION}、PyTorch 与 requirements.txt 依赖，跳过 pip 安装"
+    configure_env_vars
+else
+    echo "环境需同步依赖（缺失或版本不满足）..."
+    conda_python -m pip install --upgrade pip
+    install_pytorch_mac
+    if requirements_satisfied; then
+        echo "✓ requirements.txt 依赖已满足，跳过"
+    else
+        install_requirements
+    fi
+    install_segment_anything
+    configure_env_vars
 fi
-
-# 3) 解决 OpenMP 库冲突（PyTorch 和其他库可能都包含 OpenMP）
-echo ""
-echo "配置环境变量（解决 OpenMP 冲突）..."
-CONDA_BASE="$(conda info --base)"
-CONDA_ENV_DIR="${CONDA_BASE}/envs/${ENV_NAME}"
-ACTIVATE_DIR="${CONDA_ENV_DIR}/etc/conda/activate.d"
-DEACTIVATE_DIR="${CONDA_ENV_DIR}/etc/conda/deactivate.d"
-
-mkdir -p "$ACTIVATE_DIR"
-mkdir -p "$DEACTIVATE_DIR"
-
-cat > "$ACTIVATE_DIR/env_vars.sh" << 'EOF'
-#!/bin/bash
-export KMP_DUPLICATE_LIB_OK=TRUE
-if [ -n "${FIREBALL_PROJECT_ROOT:-}" ]; then
-    export PYTHONPATH="${FIREBALL_PROJECT_ROOT}/source:${PYTHONPATH:-}"
-fi
-EOF
-
-cat > "$DEACTIVATE_DIR/env_vars.sh" << 'EOF'
-#!/bin/bash
-unset KMP_DUPLICATE_LIB_OK
-EOF
-
-chmod +x "$ACTIVATE_DIR/env_vars.sh"
-chmod +x "$DEACTIVATE_DIR/env_vars.sh"
-
-echo "✓ 环境变量配置完成"
-echo "  - 自动设置 KMP_DUPLICATE_LIB_OK=TRUE（解决 OpenMP 冲突）"
 
 echo ""
 echo "=========================================="

@@ -40,6 +40,13 @@ function Invoke-CondaPython {
     }
 }
 
+function Test-PythonVersion {
+    param([string]$EnvName)
+
+    $result = Invoke-CondaPython -EnvName $EnvName -Code "import sys; sys.exit(0 if sys.version_info[:2]==(3,10) else 1)"
+    return ($result.ExitCode -eq 0)
+}
+
 function Test-PyTorchCUDA128 {
     param([string]$EnvName)
 
@@ -53,6 +60,53 @@ ok = cuda == '12.8' and ((major, minor, patch) >= (2, 5, 1))
 sys.exit(0 if ok else 1)
 "@
     return ($result.ExitCode -eq 0)
+}
+
+function Test-RequirementsSatisfied {
+    param(
+        [string]$EnvName,
+        [string]$ReqFile
+    )
+
+    $env:FIREBALL_REQ_FILE = $ReqFile
+    $result = Invoke-CondaPython -EnvName $EnvName -Code @"
+import os, re, subprocess, sys
+req = os.environ['FIREBALL_REQ_FILE']
+proc = subprocess.run(
+    [sys.executable, '-m', 'pip', 'install', '-r', req, '--dry-run'],
+    capture_output=True,
+    text=True,
+)
+if proc.returncode != 0:
+    sys.exit(1)
+text = (proc.stdout or '') + (proc.stderr or '')
+sys.exit(1 if re.search(r'Would install|Installing collected packages', text) else 0)
+"@
+    Remove-Item Env:FIREBALL_REQ_FILE -ErrorAction SilentlyContinue
+    return ($result.ExitCode -eq 0)
+}
+
+function Test-SegmentAnythingInstalled {
+    param([string]$EnvName)
+
+    $result = Invoke-CondaPython -EnvName $EnvName -Code "import segment_anything"
+    return ($result.ExitCode -eq 0)
+}
+
+function Test-EnvironmentSatisfied {
+    param(
+        [string]$EnvName,
+        [string]$ReqFile,
+        [string]$SegmentPath
+    )
+
+    if (-not (Test-PythonVersion -EnvName $EnvName)) { return $false }
+    if (-not (Test-PyTorchCUDA128 -EnvName $EnvName)) { return $false }
+    if (-not (Test-RequirementsSatisfied -EnvName $EnvName -ReqFile $ReqFile)) { return $false }
+    if ((Test-Path $SegmentPath -PathType Container) -and -not (Test-SegmentAnythingInstalled -EnvName $EnvName)) {
+        return $false
+    }
+    return $true
 }
 
 function Install-PyTorchCUDA128 {
@@ -73,6 +127,96 @@ function Install-PyTorchCUDA128 {
     Write-Host ($verify.Output | Out-String)
 }
 
+function Install-Requirements {
+    param(
+        [string]$EnvName,
+        [string]$ReqFile
+    )
+
+    Write-Host "Running pip install -r requirements.txt (gpytorch and other deps)..."
+    conda run -n $EnvName python -m pip install -r $ReqFile --upgrade
+    Assert-LastExitCode "requirements install"
+    Write-Status OK "pip dependencies installed/updated"
+}
+
+function Install-SegmentAnything {
+    param(
+        [string]$EnvName,
+        [string]$SegmentPath
+    )
+
+    if (-not (Test-Path $SegmentPath -PathType Container)) { return }
+    if (Test-SegmentAnythingInstalled -EnvName $EnvName) {
+        Write-Status OK "segment-anything already installed, skipping"
+        return
+    }
+
+    Write-Host "Found third-party submodule segment-anything, attempting editable install..."
+    conda run -n $EnvName python -m pip install -e $SegmentPath 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Status OK "segment-anything installed"
+    } else {
+        Write-Status WARNING "segment-anything install failed (ignored)"
+    }
+}
+
+function Set-EnvironmentHooks {
+    param([string]$EnvPath)
+
+    if (-not $EnvPath) {
+        Write-Status WARNING "Could not locate environment path. Skipping env var hook setup."
+        return
+    }
+
+    Write-Host ""
+    Write-Host "Configuring environment variables (OpenMP conflict workaround)..."
+
+    $activateDir = Join-Path $EnvPath "etc\conda\activate.d"
+    $deactivateDir = Join-Path $EnvPath "etc\conda\deactivate.d"
+
+    New-Item -ItemType Directory -Path $activateDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $deactivateDir -Force | Out-Null
+
+    $activateScript = Join-Path $activateDir "env_vars.ps1"
+    $activateContent = @'
+$env:KMP_DUPLICATE_LIB_OK = "TRUE"
+if ($env:FIREBALL_PROJECT_ROOT) {
+    $projectSource = Join-Path $env:FIREBALL_PROJECT_ROOT "source"
+    if ($env:PYTHONPATH) {
+        $env:PYTHONPATH = "$projectSource;$($env:PYTHONPATH)"
+    } else {
+        $env:PYTHONPATH = $projectSource
+    }
+}
+'@
+
+    $deactivateScript = Join-Path $deactivateDir "env_vars.ps1"
+    $deactivateContent = @'
+if (Test-Path Env:KMP_DUPLICATE_LIB_OK) {
+    Remove-Item Env:KMP_DUPLICATE_LIB_OK
+}
+'@
+
+    Set-Content -Path $activateScript -Value $activateContent -Encoding UTF8
+    Set-Content -Path $deactivateScript -Value $deactivateContent -Encoding UTF8
+
+    Write-Status OK "Environment variables configured"
+    Write-Host "  - KMP_DUPLICATE_LIB_OK=TRUE is set on activate and removed on deactivate"
+}
+
+function Get-CondaEnvPath {
+    param([string]$EnvName)
+
+    $existingEnvs = conda env list --json | ConvertFrom-Json
+    foreach ($env in $existingEnvs.envs) {
+        $envNameOnly = Split-Path -Leaf $env
+        if ($envNameOnly -eq $EnvName) {
+            return $env
+        }
+    }
+    return $null
+}
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -83,6 +227,7 @@ Set-Location $ScriptDir
 $EnvName = "fireball_calculator"
 $PythonVersion = "3.10"
 $ReqFile = Join-Path $ScriptDir "requirements.txt"
+$SegmentPath = Join-Path $ScriptDir "third_party/segment-anything"
 
 Write-Host "=========================================="
 Write-Host "Fireball Calculator - Environment Setup (Windows / pip)"
@@ -119,108 +264,38 @@ foreach ($channel in $channels) {
     }
 }
 
-$existingEnvs = conda env list --json | ConvertFrom-Json
-$envExists = $false
-$envPath = $null
-
-foreach ($env in $existingEnvs.envs) {
-    $envNameOnly = Split-Path -Leaf $env
-    if ($envNameOnly -eq $EnvName) {
-        $envExists = $true
-        $envPath = $env
-        break
-    }
-}
+$envPath = Get-CondaEnvPath -EnvName $EnvName
+$envExists = [bool]$envPath
 
 if ($envExists) {
-    Write-Status OK "Environment exists: $EnvName. Syncing via pip and requirements.txt..."
+    Write-Status OK "Environment exists: $EnvName"
 } else {
     Write-Host "Creating environment: $EnvName (Python $PythonVersion, base packages + pip only)..."
     conda create -n $EnvName -c defaults --override-channels "python=$PythonVersion" pip -y
     Assert-LastExitCode "conda environment create"
     Write-Status OK "Environment created"
-
-    $existingEnvs = conda env list --json | ConvertFrom-Json
-    foreach ($env in $existingEnvs.envs) {
-        $envNameOnly = Split-Path -Leaf $env
-        if ($envNameOnly -eq $EnvName) {
-            $envPath = $env
-            break
-        }
-    }
+    $envPath = Get-CondaEnvPath -EnvName $EnvName
 }
 
-conda run -n $EnvName python -m pip install --upgrade pip
-Assert-LastExitCode "pip upgrade"
+if (Test-EnvironmentSatisfied -EnvName $EnvName -ReqFile $ReqFile -SegmentPath $SegmentPath) {
+    Write-Status OK "Environment $EnvName already satisfies Python $PythonVersion, PyTorch CUDA 12.8, and requirements.txt; skipping pip install"
+    Set-EnvironmentHooks -EnvPath $envPath
+} else {
+    Write-Host "Syncing dependencies (missing or outdated packages)..."
+    conda run -n $EnvName python -m pip install --upgrade pip
+    Assert-LastExitCode "pip upgrade"
 
-Install-PyTorchCUDA128 -EnvName $EnvName
+    Install-PyTorchCUDA128 -EnvName $EnvName
 
-Write-Host "Running pip install -r requirements.txt (gpytorch and other deps)..."
-conda run -n $EnvName python -m pip install -r $ReqFile --upgrade
-Assert-LastExitCode "requirements install"
-Write-Status OK "pip dependencies installed/updated"
-
-$segmentAnythingPath = Join-Path $ScriptDir "third_party/segment-anything"
-if (Test-Path $segmentAnythingPath -PathType Container) {
-    Write-Host "Found third-party submodule segment-anything, attempting editable install..."
-    conda run -n $EnvName python -m pip install -e $segmentAnythingPath 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Status OK "segment-anything installed"
+    if (Test-RequirementsSatisfied -EnvName $EnvName -ReqFile $ReqFile) {
+        Write-Status OK "requirements.txt already satisfied, skipping"
     } else {
-        Write-Status WARNING "segment-anything install failed (ignored)"
+        Install-Requirements -EnvName $EnvName -ReqFile $ReqFile
     }
+
+    Install-SegmentAnything -EnvName $EnvName -SegmentPath $SegmentPath
+    Set-EnvironmentHooks -EnvPath $envPath
 }
-
-if (-not $envPath) {
-    $existingEnvs = conda env list --json | ConvertFrom-Json
-    foreach ($env in $existingEnvs.envs) {
-        $envNameOnly = Split-Path -Leaf $env
-        if ($envNameOnly -eq $EnvName) {
-            $envPath = $env
-            break
-        }
-    }
-}
-
-if (-not $envPath) {
-    Write-Status WARNING "Could not locate environment path. Skipping env var hook setup."
-    exit 0
-}
-
-Write-Host ""
-Write-Host "Configuring environment variables (OpenMP conflict workaround)..."
-
-$activateDir = Join-Path $envPath "etc\conda\activate.d"
-$deactivateDir = Join-Path $envPath "etc\conda\deactivate.d"
-
-New-Item -ItemType Directory -Path $activateDir -Force | Out-Null
-New-Item -ItemType Directory -Path $deactivateDir -Force | Out-Null
-
-$activateScript = Join-Path $activateDir "env_vars.ps1"
-$activateContent = @'
-$env:KMP_DUPLICATE_LIB_OK = "TRUE"
-if ($env:FIREBALL_PROJECT_ROOT) {
-    $projectSource = Join-Path $env:FIREBALL_PROJECT_ROOT "source"
-    if ($env:PYTHONPATH) {
-        $env:PYTHONPATH = "$projectSource;$($env:PYTHONPATH)"
-    } else {
-        $env:PYTHONPATH = $projectSource
-    }
-}
-'@
-
-$deactivateScript = Join-Path $deactivateDir "env_vars.ps1"
-$deactivateContent = @'
-if (Test-Path Env:KMP_DUPLICATE_LIB_OK) {
-    Remove-Item Env:KMP_DUPLICATE_LIB_OK
-}
-'@
-
-Set-Content -Path $activateScript -Value $activateContent -Encoding UTF8
-Set-Content -Path $deactivateScript -Value $deactivateContent -Encoding UTF8
-
-Write-Status OK "Environment variables configured"
-Write-Host "  - KMP_DUPLICATE_LIB_OK=TRUE is set on activate and removed on deactivate"
 
 Write-Host ""
 Write-Host "=========================================="
