@@ -272,7 +272,7 @@ class FireballAnalysisApp(QMainWindow):
 
         self.tab_widget.addTab(self.extract_tab, "机器视觉")
         self.tab_widget.addTab(self.training_tab, "机器学习")
-        self.tab_widget.addTab(self.model_tab, "工程计算")
+        self.tab_widget.addTab(self.model_tab, "参数预测")
         
         main_layout.addWidget(self.tab_widget)
         
@@ -385,7 +385,7 @@ class FireballAnalysisApp(QMainWindow):
             self.sidebar.set_sidebar_content(self.extract_tab.get_sidebar_widget())
         elif index == 1:  # 机器学习（训练侧栏）
             self.sidebar.set_sidebar_content(self.training_tab.get_sidebar_widget())
-        elif index == 2:  # 工程计算
+        elif index == 2:  # 参数预测
             self.sidebar.set_sidebar_content(self.model_tab.get_sidebar_widget())
 
     def _load_all_sidebars(self):

@@ -82,16 +82,23 @@ def build_simulation_log_lines(
 
     lines: List[str] = []
     lines.append("【仿真参数】")
-    lines.append(
-        f"  当量 { _fmt_g(prediction_data['equivalent']) } kg TNT｜"
-        f"含铝 { _fmt_g(al_percent) } %｜"
-        f"材料 {prediction_data.get('material_name', '—')}"
-    )
-    lines.append(
-        f"  时长 { _fmt_g(prediction_data.get('duration', t_ms[-1])) } ms｜"
-        f"步长采样 {t_ms.size} 点｜"
-        f"当量比 M={ _fmt_g(prediction_data.get('equivalent_ratio', 1.0)) }"
-    )
+    if prediction_data.get("simulation_mode") == "parameter":
+        lines.append(
+            f"  模式：参数仿真（拖曳曲线 K/B/C）｜"
+            f"时长 { _fmt_g(prediction_data.get('duration', t_ms[-1])) } ms｜"
+            f"步长采样 {t_ms.size} 点"
+        )
+    else:
+        lines.append(
+            f"  当量 { _fmt_g(prediction_data['equivalent']) } kg TNT｜"
+            f"含铝 { _fmt_g(al_percent) } %｜"
+            f"材料 {prediction_data.get('material_name', '—')}"
+        )
+        lines.append(
+            f"  时长 { _fmt_g(prediction_data.get('duration', t_ms[-1])) } ms｜"
+            f"步长采样 {t_ms.size} 点｜"
+            f"当量比 M={ _fmt_g(prediction_data.get('equivalent_ratio', 1.0)) }"
+        )
     lines.append(
         f"  环境：T={ _fmt_g(prediction_data.get('env_temp', 0)) } °C，"
         f"RH={ _fmt_g(prediction_data.get('env_humidity', 0)) } %，"
