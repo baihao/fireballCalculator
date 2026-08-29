@@ -69,6 +69,39 @@ def default_simulation_duration_ms(equivalent_kg: float) -> float:
     return REFERENCE_DURATION_MS * equivalent_time_scale(equivalent_kg)
 
 
+def expansion_velocity_series(t_ms: np.ndarray, diameter_m: np.ndarray) -> np.ndarray:
+    """火球膨胀速度 v(t) = dD/dt，对直径时序数值求导（单位 m/ms）。"""
+    t = np.asarray(t_ms, dtype=np.float64)
+    d = np.asarray(diameter_m, dtype=np.float64)
+    if t.size < 2:
+        return np.zeros_like(d)
+    return np.gradient(d, t)
+
+
+def expansion_velocity_drag_analytic(
+    t_ms: np.ndarray,
+    k_diameter_m: float,
+    b: float,
+    c_material: float,
+) -> np.ndarray:
+    """
+    拖曳曲线 D(t)=K(1−B·exp(−C_eff·t_s²)) 对时间的解析导数（m/ms）。
+
+    t_s = t_ms/1000，C_eff = C × 10⁶（与 ``diameter_drag_series`` 一致）。
+    """
+    t_s = np.asarray(t_ms, dtype=np.float64) / 1000.0
+    c_eff = float(c_material) * 1e6
+    return (
+        float(k_diameter_m)
+        * float(b)
+        * c_eff
+        * 2.0
+        * t_s
+        * np.exp(-c_eff * np.square(t_s))
+        / 1000.0
+    )
+
+
 def diameter_drag_series(
     t_ms: np.ndarray,
     k_diameter_m: float,
@@ -233,6 +266,7 @@ def build_prediction_bundle(
     x_rad, h_rad = cumulative_radiation_kjm2(
         t_ms, t_k, d_m, env_temp, env_humidity, env_pressure
     )
+    v_ms = expansion_velocity_series(t_ms, d_m)
 
     return {
         "time_ms": t_ms,
@@ -245,6 +279,7 @@ def build_prediction_bundle(
         "env_humidity": env_humidity,
         "env_pressure": env_pressure,
         "diameter_data": d_m,
+        "expansion_velocity_data": v_ms,
         "temperature_data": t_k,
         "heat_flux_data": heat_store,
         "heat_radiation_data": {"distances": x_rad, "heat_radiation": h_rad},

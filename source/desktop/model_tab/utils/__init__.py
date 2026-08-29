@@ -6,6 +6,8 @@ from .calculator import (
     diameter_drag_series,
     default_temperature_series,
     equivalent_time_scale,
+    expansion_velocity_series,
+    expansion_velocity_drag_analytic,
 )
 
 __all__ = [
@@ -14,4 +16,6 @@ __all__ = [
     "diameter_drag_series",
     "default_temperature_series",
     "equivalent_time_scale",
+    "expansion_velocity_series",
+    "expansion_velocity_drag_analytic",
 ]

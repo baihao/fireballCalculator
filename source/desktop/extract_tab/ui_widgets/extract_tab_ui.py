@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt
 from framework import MatplotlibWidget, ImagePreviewWidget
 from .checkbar import create_checkbar
-from chart_widgets.temperature_chart import TemperatureChart
 from chart_widgets.diameter_chart import DiameterChart
 from chart_widgets.diameter_velocity_chart import DiameterVelocityChart
 from .interactive_image_widget import create_interactive_image_widget
@@ -64,7 +63,6 @@ class ExtractTabUI:
         # 数据源按钮
         self.ui_components['sequence_btn'] = QPushButton("导入爆炸序列文件")
         self.ui_components['image_folder_btn'] = QPushButton("导入火球图像序列")
-        self.ui_components['temp_btn'] = QPushButton("导入火球温度时间序列")
         
         # Prompt相关组件
         self.ui_components['prompt_btn'] = QPushButton("开始选择参考点")
@@ -323,9 +321,8 @@ class ExtractTabUI:
         right_layout.setSpacing(6)
         right_layout.setContentsMargins(6, 6, 6, 6)
         
-        # 温度图表组
-        temp_group = self._create_temperature_chart_group()
-        right_layout.addWidget(temp_group)
+        metrics_group = self._create_key_metrics_group()
+        right_layout.addWidget(metrics_group)
         
         # 直径图表组
         diam_group = self._create_diameter_chart_group()
@@ -335,32 +332,42 @@ class ExtractTabUI:
         diam_vel_group = self._create_diameter_velocity_chart_group()
         right_layout.addWidget(diam_vel_group)
         
-        # 使用stretch factor让三个图表等分空间
-        right_layout.setStretchFactor(temp_group, 1)
+        right_layout.setStretchFactor(metrics_group, 1)
         right_layout.setStretchFactor(diam_group, 1)
         right_layout.setStretchFactor(diam_vel_group, 1)
         
         right_widget.setLayout(right_layout)
         return right_widget
     
-    def _create_temperature_chart_group(self) -> QGroupBox:
-        """创建温度图表组"""
-        temp_group = QGroupBox("火球温度随时间变化")
-        temp_group.setStyleSheet(self._get_chart_group_style())
-        
-        temp_layout = QVBoxLayout()
-        temp_layout.setAlignment(Qt.AlignTop)
-        # 收紧组内边距
-        temp_layout.setContentsMargins(6, 4, 6, 6)
-        temp_layout.setSpacing(4)
-        
-        # 使用较大的高度，通过stretch factor等分空间
-        self.ui_components['temp_chart'] = TemperatureChart(width=4, height=3.0)
-        temp_layout.addWidget(self.ui_components['temp_chart'])
-        
-        temp_group.setLayout(temp_layout)
-        return temp_group
-    
+    def _create_key_metrics_group(self) -> QGroupBox:
+        """创建关键参数数值面板（替代原温度图）。"""
+        metrics_group = QGroupBox("关键参数")
+        metrics_group.setStyleSheet(self._get_chart_group_style())
+
+        metrics_layout = QVBoxLayout()
+        metrics_layout.setContentsMargins(6, 4, 6, 6)
+        metrics_layout.setSpacing(4)
+
+        self.ui_components["key_metrics_panel"] = QPlainTextEdit()
+        self.ui_components["key_metrics_panel"].setReadOnly(True)
+        self.ui_components["key_metrics_panel"].setPlaceholderText(
+            "分割与拖曳拟合完成后，将在此显示标定、分割质量、直径统计与 K/B/C 等关键数值…"
+        )
+        self.ui_components["key_metrics_panel"].setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #0b1220;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                color: #cbd5e1;
+                font-family: ui-monospace, 'Courier New', monospace;
+                font-size: 11px;
+                padding: 8px;
+            }
+        """)
+        metrics_layout.addWidget(self.ui_components["key_metrics_panel"])
+        metrics_group.setLayout(metrics_layout)
+        return metrics_group
+
     def _create_diameter_chart_group(self) -> QGroupBox:
         """创建直径图表组"""
         diam_group = QGroupBox("火球直径随时间变化")
@@ -455,8 +462,6 @@ class ExtractTabUI:
         data_layout.addWidget(self.ui_components['sequence_btn'])
         data_layout.addWidget(QLabel("导入火球图像序列（选择文件夹）"))
         data_layout.addWidget(self.ui_components['image_folder_btn'])
-        data_layout.addWidget(QLabel("可选：温度时间序列（CSV/JSON）"))
-        data_layout.addWidget(self.ui_components['temp_btn'])
         data_group.setLayout(data_layout)
         layout.addWidget(data_group)
         
@@ -580,15 +585,6 @@ class ExtractTabUI:
                 color: #38bdf8;
             }
         """
-    
-    def init_temperature_chart(self):
-        """初始化温度图表"""
-        try:
-            temp_chart: TemperatureChart = self.ui_components['temp_chart']
-            temp_chart.reset()
-            
-        except Exception as e:
-            print(f"初始化温度图表失败: {e}")
     
     def init_diameter_chart(self):
         """初始化直径图表"""
