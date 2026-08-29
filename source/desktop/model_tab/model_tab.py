@@ -95,7 +95,6 @@ class ModelTab(QWidget):
                 duration=self._collect_sidebar_float("p_duration"),
                 kbc_source=self.model_ctrl.last_kbc_source,
                 standard_equivalent=std_eq,
-                has_training_temperature=self.model_ctrl.training_temperature_data is not None,
             )
         self.formula_reference.setPlainText(text)
 
@@ -431,7 +430,7 @@ class ModelTab(QWidget):
         env_pressure: float = 2987.87,
         explicit_kbc: Optional[Tuple[float, float, float]] = None,
     ):
-        """使用 ``ModelController`` 解析 K/B/C，``utils.calculator`` 组装直径、温度、热通量与累积辐射。"""
+        """使用 ``ModelController`` 解析 K/B/C，``utils.calculator`` 组装直径、膨胀速度、热通量与累积辐射。"""
         print(f"生成 {material_name} 材料的预测曲线...")
         time_points = int(duration / 1.0) + 1
         t_ms = np.linspace(0, duration, time_points)
@@ -465,15 +464,14 @@ class ModelTab(QWidget):
         self.prediction_data = bundle
 
         self.chart_controller.update_diameter(self.prediction_data["time_ms"], self.prediction_data["diameter_data"])
-        self.chart_controller.update_temperature(self.prediction_data["time_ms"], self.prediction_data["temperature_data"])
+        self.chart_controller.update_expansion_velocity(
+            self.prediction_data["time_ms"], self.prediction_data["diameter_data"]
+        )
         self.chart_controller.update_heat_flux(self.prediction_data["time_ms"], heat_series)
         rad = self.prediction_data["heat_radiation_data"]
         self.chart_controller.update_heat_radiation(rad["distances"], rad["heat_radiation"])
         if explicit_kbc is not None:
             self.prediction_data["simulation_mode"] = "parameter"
-        self.prediction_data["has_training_temperature"] = (
-            self.model_ctrl.training_temperature_data is not None
-        )
         self._refresh_formula_reference()
         print("✅ 所有预测曲线生成完成！")
 
@@ -580,19 +578,21 @@ class ModelTab(QWidget):
                 
                 # 写入时间序列数据
                 writer.writerow(['# 时间序列数据'])
-                writer.writerow(['时间(ms)', '时间(s)', '火球直径(m)', '火球温度(K)'])
+                writer.writerow(['时间(ms)', '时间(s)', '火球直径(m)', '膨胀速度(m/ms)'])
                 
                 t_ms = self.prediction_data['time_ms']
                 t_s = self.prediction_data['time_s']
                 diameter = self.prediction_data['diameter_data']
-                temperature = self.prediction_data['temperature_data']
+                velocity = self.prediction_data.get('expansion_velocity_data')
+                if velocity is None:
+                    velocity = np.gradient(diameter, t_ms)
                 
                 for i in range(len(t_ms)):
                     writer.writerow([
                         f"{t_ms[i]:.3f}",
                         f"{t_s[i]:.6f}",
                         f"{diameter[i]:.6f}",
-                        f"{temperature[i]:.2f}"
+                        f"{velocity[i]:.6f}"
                     ])
                 
                 writer.writerow([''])

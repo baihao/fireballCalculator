@@ -27,7 +27,7 @@ from PySide6.QtCore import Qt
 
 from chart_widgets import (
     DiameterChart,
-    TemperatureChart,
+    DiameterVelocityChart,
     HeatFluxChart,
     RadiationChart,
 )
@@ -73,8 +73,14 @@ class ModelTabUI:
         self.ui_components["diam_chart"] = DiameterChart(width=5, height=3)
         charts_layout.addWidget(self.ui_components["diam_chart"], 0, 0)
 
-        self.ui_components["temp_chart"] = TemperatureChart(width=5, height=3)
-        charts_layout.addWidget(self.ui_components["temp_chart"], 0, 1)
+        self.ui_components["velocity_chart"] = DiameterVelocityChart(
+            width=5,
+            height=3,
+            title="火球膨胀速度随时间变化",
+            y_label="膨胀速度 (m/ms)",
+            raw_label="膨胀速度",
+        )
+        charts_layout.addWidget(self.ui_components["velocity_chart"], 0, 1)
 
         self.ui_components["heat_flux_chart"] = HeatFluxChart(width=5, height=3)
         charts_layout.addWidget(self.ui_components["heat_flux_chart"], 1, 0)
@@ -100,7 +106,7 @@ class ModelTabUI:
         self.ui_components["simulation_log"].setSizePolicy(expanding_policy)
         self.ui_components["simulation_log"].setMinimumHeight(160)
         self.ui_components["simulation_log"].setPlaceholderText(
-            "[计算] 完成一次「开始计算」后将输出火球直径、温度、热通量与累积热辐射等关键指标…"
+            "[计算] 完成一次「开始计算」后将输出火球直径、膨胀速度、热通量与累积热辐射等关键指标…"
         )
         self.ui_components["simulation_log"].setStyleSheet(self._monospace_panel_style())
         log_column.addWidget(self.ui_components["simulation_log"], 1)
@@ -116,7 +122,7 @@ class ModelTabUI:
         self.ui_components["formula_reference"].setSizePolicy(expanding_policy)
         self.ui_components["formula_reference"].setMinimumHeight(160)
         self.ui_components["formula_reference"].setPlaceholderText(
-            "显示火球直径拖曳式、当量缩放、温度、热通量、大气透射率与累积热辐射等公式及当前参数值…"
+            "显示火球直径拖曳式、当量缩放、膨胀速度、热通量、大气透射率与累积热辐射等公式及当前参数值…"
         )
         self.ui_components["formula_reference"].setStyleSheet(self._monospace_panel_style())
         formula_column.addWidget(self.ui_components["formula_reference"], 1)

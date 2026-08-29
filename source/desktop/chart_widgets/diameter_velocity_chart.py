@@ -29,11 +29,20 @@ COLOR_CUTOFF = 'orange'           # 截断线颜色
 class DiameterVelocityChart(BaseChart):
     """直径变化速率图表。"""
 
-    def __init__(self, width: float = 4, height: float = 2.5, dpi: int = 100):
+    def __init__(
+        self,
+        width: float = 4,
+        height: float = 2.5,
+        dpi: int = 100,
+        *,
+        title: str = "火球直径变化速率随时间变化",
+        y_label: str = "直径变化速率 (m/ms)",
+        raw_label: str = "原始速率",
+    ):
         super().__init__(
             x_label="时间 (ms)",
-            y_label="直径变化速率 (m/ms)",
-            title="火球直径变化速率随时间变化",
+            y_label=y_label,
+            title=title,
             xlim=(0, 140),
             ylim=(0, 0.05),
             placeholder_text="提取完成后显示",
@@ -44,6 +53,7 @@ class DiameterVelocityChart(BaseChart):
         )
         self._raw_color = COLOR_RAW
         self._fit_color = COLOR_FIT
+        self._raw_label = raw_label
         self._placeholder_text = "提取完成后显示"
 
     # --------------------------- 公共API --------------------------- #
@@ -103,7 +113,7 @@ class DiameterVelocityChart(BaseChart):
             d = np.array(diameter_m, dtype=float)
             if len(t) >= 2 and len(d) == len(t):
                 ddt_raw = np.gradient(d, t)
-                ax.plot(time_ms, ddt_raw, color=self._raw_color, linewidth=LINE_WIDTH, label='原始速率')
+                ax.plot(time_ms, ddt_raw, color=self._raw_color, linewidth=LINE_WIDTH, label=self._raw_label)
                 return ddt_raw
         except Exception:
             return None
@@ -203,7 +213,7 @@ class DiameterVelocityChart(BaseChart):
         
         # 分别绘制
         if ddt_raw is not None:
-            ax.plot(time_ms, ddt_raw, color=self._raw_color, linewidth=LINE_WIDTH, label='原始速率')
+            ax.plot(time_ms, ddt_raw, color=self._raw_color, linewidth=LINE_WIDTH, label=self._raw_label)
         if ddt_fit is not None:
             try:
                 t_min = float(np.min(time_ms))

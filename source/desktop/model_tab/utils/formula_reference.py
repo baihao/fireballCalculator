@@ -11,8 +11,6 @@ from fireball_heat_radiation_calculator import EPSILON, SIGMA
 from .calculator import (
     DEFAULT_HEAT_FLUX_DISTANCES_M,
     DEFAULT_RADIATION_X,
-    REFERENCE_EQUIVALENT_KG,
-    REFERENCE_DURATION_MS,
 )
 
 _KBC_SOURCE_LABELS = {
@@ -49,8 +47,6 @@ def build_formula_reference_text(
     standard_equivalent: Optional[float] = None,
     equivalent_ratio: Optional[float] = None,
     kbc_display: Optional[Tuple[float, float, float]] = None,
-    temperature_time_scale: Optional[float] = None,
-    has_training_temperature: bool = False,
     heat_flux_distances: Sequence[float] = DEFAULT_HEAT_FLUX_DISTANCES_M,
 ) -> str:
     """生成公式说明文本；未计算时根据侧栏输入展示当前参数。"""
@@ -106,28 +102,23 @@ def build_formula_reference_text(
         lines.append("  参数仿真模式下直径直接使用输入 K,B,C，不经过当量缩放。")
         lines.append("")
 
-    lines.append("【3. 火球温度时序】")
-    if has_training_temperature:
-        lines.append("  T(t)：由导入模型中的实验温度序列线性插值得到")
+    lines.append("【3. 膨胀速度（直径时序导数）】")
+    lines.append("  v(t) = dD/dt")
+    lines.append("  数值计算：v(t_i) ≈ np.gradient(D, t_ms)，单位 m/ms")
+    lines.append("  拖曳曲线解析式（t_s = t_ms/1000，C_eff = C × 10⁶）：")
+    lines.append("  v(t) = K × B × C_eff × 2 × t_s × exp(−C_eff × t_s²) / 1000")
+    if kd is not None and b_val is not None and c_val is not None:
+        c_eff = float(c_val) * 1e6
+        lines.append(f"  · K = {_fmt(kd)} m，B = {_fmt(b_val)}，C = {_fmt(c_val)}，C_eff = {_fmt(c_eff)}")
     else:
-        lines.append("  参考曲线：100 kg TNT 标定温度剖面 T_ref(t_ref)")
-        lines.append("  t_ref = t / scale，scale = (m / 100)^(2/3)")
-        lines.append(f"  · 标定当量 m_ref = {_fmt(REFERENCE_EQUIVALENT_KG)} kg TNT")
-        lines.append(f"  · 标定参考时长 ≈ {_fmt(REFERENCE_DURATION_MS)} ms")
-        if temperature_time_scale is not None:
-            lines.append(f"  · scale = {_fmt(temperature_time_scale)}")
-        elif equivalent is not None:
-            scale = (float(equivalent) / REFERENCE_EQUIVALENT_KG) ** (2.0 / 3.0)
-            lines.append(f"  · scale = (m/100)^(2/3) = {_fmt(scale)}")
-        else:
-            lines.append("  · scale：—")
+        lines.append("  · K, B, C：—（由直径曲线求导或待输入）")
     lines.append("")
 
     ta_k = (float(env_temp) + 273.15) if env_temp is not None else None
     dist_text = ", ".join(f"{d:g}" for d in heat_flux_distances)
 
     lines.append("【4. 热通量】")
-    lines.append("  E(t) = ε × σ × T(t)⁴")
+    lines.append("  E(t) = ε × σ × T(t)⁴   （T 由内部温度模型计算，不单独出图）")
     lines.append("  F(x, t) = (1/4) × [D(t) / x]²")
     lines.append("  q(x, t) = E(t) × F(x, t) × τ(x)")
     lines.append(f"  · ε = {_fmt(EPSILON)}，σ = {_fmt(SIGMA, 3)} W/(m²·K⁴)")
@@ -196,6 +187,4 @@ def build_formula_reference_from_prediction(
         standard_equivalent=std_eq,
         equivalent_ratio=prediction_data.get("equivalent_ratio"),
         kbc_display=prediction_data.get("kbc_display"),
-        temperature_time_scale=prediction_data.get("temperature_time_scale"),
-        has_training_temperature=prediction_data.get("has_training_temperature", False),
     )

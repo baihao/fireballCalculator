@@ -56,7 +56,10 @@ def build_simulation_log_lines(
     """
     t_ms = np.asarray(prediction_data["time_ms"], dtype=np.float64)
     d_m = np.asarray(prediction_data["diameter_data"], dtype=np.float64)
-    t_k = np.asarray(prediction_data["temperature_data"], dtype=np.float64)
+    v_ms = np.asarray(
+        prediction_data.get("expansion_velocity_data", np.gradient(d_m, t_ms)),
+        dtype=np.float64,
+    )
 
     i_dmax = int(np.argmax(d_m))
     d_max = float(d_m[i_dmax])
@@ -65,10 +68,11 @@ def build_simulation_log_lines(
     t_last_max = float(t_ms[int(np.flatnonzero(at_max)[-1])])
     t_near, d_near = _time_to_fraction_of_max(t_ms, d_m, NEAR_MAX_DIAMETER_FRACTION)
 
-    i_tmax = int(np.argmax(t_k))
-    t_peak = float(t_ms[i_tmax])
-    T_peak = float(t_k[i_tmax])
-    T_end = float(t_k[-1])
+    i_vmax = int(np.argmax(v_ms))
+    t_vpeak = float(t_ms[i_vmax])
+    v_peak = float(v_ms[i_vmax])
+    v_end = float(v_ms[-1])
+    v_start = float(v_ms[0])
 
     kbc = prediction_data.get("kbc_display") or (0.0, 0.0, 0.0)
     src = kbc_source_label or str(prediction_data.get("kbc_source", ""))
@@ -130,9 +134,14 @@ def build_simulation_log_lines(
         )
 
     lines.append("")
-    lines.append("【火球温度】")
-    lines.append(f"  峰值温度 { _fmt_g(T_peak, 4) } K（t={ _fmt_g(t_peak, 4) } ms）")
-    lines.append(f"  末时刻温度 { _fmt_g(T_end, 4) } K")
+    lines.append("【膨胀速度】")
+    lines.append(f"  峰值膨胀速度 { _fmt_g(v_peak, 4) } m/ms（t={ _fmt_g(t_vpeak, 4) } ms）")
+    lines.append(f"  初始 { _fmt_g(v_start, 4) } m/ms → 末时刻 { _fmt_g(v_end, 4) } m/ms")
+    t_vnear, v_near = _time_to_fraction_of_max(t_ms, v_ms, NEAR_MAX_DIAMETER_FRACTION)
+    lines.append(
+        f"  达到峰值速度 {int(NEAR_MAX_DIAMETER_FRACTION * 100)}% 的时刻 "
+        f"t={ _fmt_g(t_vnear, 4) } ms（v={ _fmt_g(v_near, 4) } m/ms）"
+    )
 
     heat_store: Dict[str, np.ndarray] = prediction_data.get("heat_flux_data") or {}
     if heat_store:

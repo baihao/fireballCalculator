@@ -37,10 +37,6 @@ def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
     act_import_sequence.triggered.connect(extract_tab.select_sequence_folder)
     file_menu.addAction(act_import_sequence)
 
-    act_import_temp = QAction("导入火球温度序列", main_window)
-    act_import_temp.triggered.connect(extract_tab.select_temperature_sequence)
-    file_menu.addAction(act_import_temp)
-
     act_import_training_data = QAction("输入数据", main_window)
     act_import_training_data.triggered.connect(training_tab.input_training_data)
     file_menu.addAction(act_import_training_data)
@@ -53,7 +49,6 @@ def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
         mv = index == TAB_INDEX_MACHINE_VISION
         act_import_images.setVisible(mv)
         act_import_sequence.setVisible(mv)
-        act_import_temp.setVisible(mv)
         act_import_training_data.setVisible(index == TAB_INDEX_MACHINE_LEARNING)
         act_import_train.setVisible(index == TAB_INDEX_ENGINEERING)
 

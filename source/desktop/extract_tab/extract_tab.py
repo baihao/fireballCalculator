@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-机器视觉模块标签页（原特征提取 + 原输入侧能力：序列/图像文件夹/温度、参数与日志）
+机器视觉模块标签页（原特征提取 + 原输入侧能力：序列/图像文件夹、参数与日志）
 """
 
 import json
@@ -20,6 +20,7 @@ from .utils.sequence_manager import SequenceManager
 from .sequence_model import SequenceModel
 from .ui_widgets.extract_tab_ui import ExtractTabUI
 from .utils.info_builder import build_segmentation_info_text
+from .utils.key_metrics import build_key_metrics_text
 from .controllers.prompt_controller import PromptController
 from .controllers.chart_controller import ChartController
 from .controllers.mv_parameters_controller import MvParametersController
@@ -70,6 +71,7 @@ class ExtractTab(QWidget):
         
         self.setup_connections()
         self.init_charts()
+        self._refresh_key_metrics_panel()
         # 连接异步信号
         self.log_received.connect(self._on_segmentation_log)
         self.seg_finished.connect(self._on_segmentation_finished)
@@ -100,7 +102,6 @@ class ExtractTab(QWidget):
         # 按钮控件引用（仍在使用）
         self.sequence_btn = self.ui_components['sequence_btn']
         self.image_folder_btn = self.ui_components['image_folder_btn']
-        self.temp_btn = self.ui_components['temp_btn']
         self.extract_btn = self.ui_components['extract_btn']
         self.reextract_btn = self.ui_components['reextract_btn']
         self.save_button = self.ui_components['save_button']
@@ -117,9 +118,12 @@ class ExtractTab(QWidget):
         # 信息显示控件（仍在使用）
         self.prompt_info_text = self.ui_components['prompt_info_text']
         
+        if "key_metrics_panel" in self.ui_components:
+            self.key_metrics_panel = self.ui_components["key_metrics_panel"]
+        
         # 以下控件已由各自的控制器管理，不再需要直接引用：
         # - extract_preview, extract_slider, extract_time_label: 由 SequencyDisplayController 管理
-        # - temp_chart, diam_chart: 由 ChartController 管理
+        # - diam_chart, diam_vel_chart: 由 ChartController 管理
         # - prompt_btn, point_type_group, positive_radio, negative_radio, ignition_radio: 由 PromptController 管理
         # - check_bar: 由 SequencyDisplayController 管理
     
@@ -130,9 +134,15 @@ class ExtractTab(QWidget):
         # 侧边栏按钮（PromptController 相关的信号已在控制器内部连接）
         self.sequence_btn.clicked.connect(self.select_sequence_folder)
         self.image_folder_btn.clicked.connect(self.select_image_sequence_folder)
-        self.temp_btn.clicked.connect(self.select_temperature_sequence)
         self.extract_btn.clicked.connect(self.start_feature_extraction)
         self.reextract_btn.clicked.connect(self.start_reextraction)
+        slider = self.ui_components.get("extract_slider")
+        if slider is not None:
+            slider.valueChanged.connect(lambda _v: self._refresh_key_metrics_panel())
+        for name in ("mv_equivalent", "mv_al_percent", "mv_frame_rate_fps", "mv_field_of_view_m"):
+            widget = self.ui_components.get(name)
+            if widget is not None and hasattr(widget, "textChanged"):
+                widget.textChanged.connect(lambda _t: self._refresh_key_metrics_panel())
         # cancel_prompt_btn 的信号连接已由 PromptController 处理
         
         # 图像导航（由 SequencyDisplayController 内部处理）
@@ -244,39 +254,39 @@ class ExtractTab(QWidget):
             QMessageBox.critical(self, "错误", f"导入图像序列失败:\n{str(e)}")
             print(e)
 
-    def select_temperature_sequence(self):
-        """导入温度时间序列并立即写入当前序列 JSON。"""
-        self.flush_parameters_before_action()
-        if not self.sequence_model.current_path:
-            QMessageBox.warning(self, "警告", "请先导入爆炸序列或图像序列。")
+    def _refresh_key_metrics_panel(self) -> None:
+        panel = getattr(self, "key_metrics_panel", None)
+        if panel is None:
             return
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择火球温度时间序列文件",
-            "",
-            "CSV文件 (*.csv);;JSON文件 (*.json);;文本文件 (*.txt);;所有文件 (*)",
-        )
-        if not file_path:
-            return
-        t_data, T_data = self.sequence_manager.load_temperature_data_file(file_path)
-        if not t_data or not T_data:
-            QMessageBox.warning(self, "警告", "无法读取温度数据文件。")
-            return
-        pairs = [[float(t), float(T)] for t, T in zip(t_data, T_data)]
-        self.sequence_model.set_temperature_pairs(pairs)
-        ok, err = self.sequence_model.flush_sequence_json_to_disk()
-        if not ok:
-            QMessageBox.critical(self, "错误", f"写入温度数据失败:\n{err}")
-            return
-        self.update_temperature_chart(t_data, T_data)
-        self.append_run_log(f"✓ 已导入温度序列: {os.path.basename(file_path)} ({len(pairs)} 点)")
+        try:
+            seg_summary = None
+            current_frame = None
+            if self.sequence_model.has_segmentation_data():
+                seg_summary = self.sequence_model.get_segmentation_summary()
+                results = self.sequence_model.get_segmentation_results()
+                idx = self.display_controller.get_current_index()
+                if results and 0 <= idx < len(results):
+                    current_frame = results[idx]
+            text = build_key_metrics_text(
+                parameters=dict(self.sequence_model.parameters or {}),
+                pixel_length=float(self.sequence_model.pixel_length or 0) or None,
+                explosion_duration_ms=float(self.sequence_model.explosion_duration_ms or 0) or None,
+                image_count=len(self.sequence_model.image_paths or []),
+                seg_summary=seg_summary,
+                current_frame_index=self.display_controller.get_current_index(),
+                current_frame_result=current_frame,
+                diameter_series=self.chart_controller.get_cached_diameter(),
+                drag_fit=self.chart_controller.get_cached_drag_fit(),
+            )
+            panel.setPlainText(text)
+        except Exception as e:
+            print(f"刷新关键参数面板失败: {e}")
 
     def _segmentation_lock_widgets(self):
         """分割进行中需禁用的控件（预览与时间轴除外）。"""
         widgets = [
             self.sequence_btn,
             self.image_folder_btn,
-            self.temp_btn,
             self.extract_btn,
             self.reextract_btn,
             self.save_button,
@@ -336,6 +346,7 @@ class ExtractTab(QWidget):
                 self.chart_controller.reset()
             except Exception as e:
                 print(f"⚠️ 重置图表时出错: {e}")
+            self._refresh_key_metrics_panel()
             
             # 4) 重置状态文本与按钮
             try:
@@ -367,11 +378,6 @@ class ExtractTab(QWidget):
             # 应用序列显示（设置时间轴、显示第一张图像等）
             self.display_controller.apply_sequence()
 
-            # 加载温度数据
-            time_data, temp_data = self.sequence_model.get_temperature_series()
-            if time_data and temp_data:
-                self.update_temperature_chart(time_data, temp_data)
-
             # 分割结果优先
             if self.sequence_model.has_segmentation_data():
                 segmentation_results = self.sequence_model.get_segmentation_results()
@@ -397,14 +403,13 @@ class ExtractTab(QWidget):
             # 序列摘要与状态
             summary = self.sequence_model.get_sequence_summary()
             status_msg = f"已加载序列: {summary['image_count']} 个文件，时长: {summary['explosion_duration']}ms"
-            if summary['has_temperature_data']:
-                status_msg += f"，温度数据: {summary['temperature_points']} 点"
             if summary['has_prompt_data']:
                 status_msg += f"，参考点数据: {summary['total_prompt_points']} 点"
             if summary['has_ignition_point']:
                 status_msg += f"，起爆点: {summary['ignition_point']}"
             self.mv_params_controller.sync_ui_from_model()
             self.append_run_log(status_msg)
+            self._refresh_key_metrics_panel()
             return self.sequence_model.has_segmentation_data()
 
         except Exception as e:
@@ -447,18 +452,6 @@ class ExtractTab(QWidget):
     def init_charts(self):
         """初始化图表"""
         self.chart_controller.reset()
-    
-    def update_temperature_chart(self, time_data, temp_data):
-        """更新温度图表"""
-        try:
-            print(f"开始更新温度图表: {len(time_data)} 个数据点")
-            self.chart_controller.update_temperature(time_data, temp_data)
-            print("✅ 温度图表更新完成")
-            
-        except Exception as e:
-            print(f"❌ 更新温度图表失败: {e}")
-            import traceback
-            traceback.print_exc()
     
     def update_diameter_chart(self, time_data, diameter_data):
         """更新直径图表（提取完成后调用）"""
@@ -693,6 +686,7 @@ class ExtractTab(QWidget):
             if not series:
                 # 清空图表
                 self.chart_controller.clear_diameter()
+                self._refresh_key_metrics_panel()
                 return
             time_data = [t for t, _ in series]
             diameter_data = [d for _, d in series]
@@ -723,6 +717,8 @@ class ExtractTab(QWidget):
             except Exception as e:
                 print(f"⚠️ 调用直径图更新接口失败，退回简单绘制: {e}")
                 self.chart_controller.update_diameter_raw(time_data, diameter_data)
+            self._refresh_key_metrics_panel()
+            self._update_save_button_state()
         except Exception as e:
             print(f"❌ 更新直径图表失败: {e}")
             import traceback
