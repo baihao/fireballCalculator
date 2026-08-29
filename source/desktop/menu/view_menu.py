@@ -36,7 +36,7 @@ def setup_view_menu(main_window: QMainWindow, view_menu: QMenu) -> None:
     group.addAction(act_ml)
     view_menu.addAction(act_ml)
 
-    act_eng = QAction("工程计算", main_window)
+    act_eng = QAction("参数预测", main_window)
     act_eng.setCheckable(True)
     act_eng.setChecked(tab_widget.currentIndex() == TAB_INDEX_ENGINEERING)
     group.addAction(act_eng)
