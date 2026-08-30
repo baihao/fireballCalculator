@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -208,13 +209,20 @@ class TrainingTabUI:
         grid.addWidget(self.ui_components["scatter_init_chart"], 0, 1)
         grid.addWidget(self.ui_components["scatter_tau_chart"], 0, 2)
 
-        vl.addLayout(grid)
+        vl.addLayout(grid, 2)
 
+        expanding_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+
+        log_column = QVBoxLayout()
+        log_column.setContentsMargins(0, 0, 0, 0)
         log_l = QLabel("训练日志")
         log_l.setStyleSheet("color:#38bdf8;font-size:12px;font-weight:bold;")
-        vl.addWidget(log_l)
+        log_column.addWidget(log_l)
         self.ui_components["train_log"] = QPlainTextEdit()
         self.ui_components["train_log"].setReadOnly(True)
+        self.ui_components["train_log"].setSizePolicy(expanding_policy)
         self.ui_components["train_log"].setMinimumHeight(100)
         self.ui_components["train_log"].setPlaceholderText("[训练] 数据导入、训练与评估输出…")
         self.ui_components["train_log"].setStyleSheet("""
@@ -228,7 +236,40 @@ class TrainingTabUI:
                 padding: 8px;
             }
         """)
-        vl.addWidget(self.ui_components["train_log"])
+        log_column.addWidget(self.ui_components["train_log"], 1)
+
+        summary_column = QVBoxLayout()
+        summary_column.setContentsMargins(0, 0, 0, 0)
+        summary_l = QLabel("训练摘要")
+        summary_l.setStyleSheet("color:#38bdf8;font-size:12px;font-weight:bold;")
+        summary_column.addWidget(summary_l)
+        self.ui_components["train_summary"] = QPlainTextEdit()
+        self.ui_components["train_summary"].setReadOnly(True)
+        self.ui_components["train_summary"].setSizePolicy(expanding_policy)
+        self.ui_components["train_summary"].setMinimumHeight(100)
+        self.ui_components["train_summary"].setPlaceholderText(
+            "完成训练后将显示 LOOCV 精度、超参与预测网格概要…"
+        )
+        self.ui_components["train_summary"].setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #0b1220;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                color: #cbd5e1;
+                font-family: ui-monospace, 'Courier New', monospace;
+                font-size: 12px;
+                padding: 8px;
+            }
+        """)
+        summary_column.addWidget(self.ui_components["train_summary"], 1)
+
+        bottom_row.addLayout(log_column, 1)
+        bottom_row.addLayout(summary_column, 1)
+
+        bottom_widget = QWidget()
+        bottom_widget.setLayout(bottom_row)
+        bottom_widget.setSizePolicy(expanding_policy)
+        vl.addWidget(bottom_widget, 1)
 
         return w
 
