@@ -353,9 +353,17 @@ class SegmentationOutputManager:
             # 添加分割结果到JSON数据中
             data["image_sequence_segmentation"] = segmentation_results
             
-            # 生成新的导出文件名：原文件名 + "_segmented"
-            p = Path(json_path)
-            export_path = p.with_name(f"{p.stem}_segmented{p.suffix}")
+            # 导出文件名：{序列stem}_{当量}_{含铝}_segmented.json（与训练数据命名一致）
+            try:
+                from export_naming import segmented_sequence_filename_from_data
+            except ImportError:
+                import sys
+                _src = Path(__file__).resolve().parent.parent
+                if str(_src) not in sys.path:
+                    sys.path.insert(0, str(_src))
+                from export_naming import segmented_sequence_filename_from_data
+
+            export_path = segmented_sequence_filename_from_data(json_path, data)
             
             # 保存为新文件，避免覆盖原始序列文件
             with open(export_path, 'w', encoding='utf-8') as f:

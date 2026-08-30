@@ -16,10 +16,13 @@ from .training_dataset_model import TrainingDatasetModel
 from .ui_widgets.training_tab_ui import TrainingTabUI
 from .utils.dataset_io import import_training_folder
 from .utils.krr_workflow import (
+    KrrPredictGrid,
+    KrrTrainingSummary,
     krr_prediction_log_lines,
     krr_training_log_lines,
     run_train_and_predict,
 )
+from .utils.training_summary import build_training_summary_text
 
 # UI「数据合规」阈值：少于该条数仍可导入，但不进入可训练状态，且弹窗提示
 MIN_SAMPLES_UI_READY = 5
@@ -40,6 +43,9 @@ class TrainingTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._model = TrainingDatasetModel()
+        self._last_train_summary: KrrTrainingSummary | None = None
+        self._last_predict_grid: KrrPredictGrid | None = None
+        self._training_summary_status = "未训练"
         self._ui_state = TrainingUiState.INITIAL
         self._ui_builder = TrainingTabUI()
         # 先确保侧边栏控件已创建（与图表共用 ui_components）
@@ -51,6 +57,7 @@ class TrainingTab(QWidget):
 
         self._wire_signals()
         self._refresh_summary()
+        self._refresh_training_summary_panel()
         self._sync_import_status()
         self._sync_data_hint()
         self._apply_training_action_ui()
@@ -74,6 +81,18 @@ class TrainingTab(QWidget):
 
     def _refresh_summary(self) -> None:
         self.ui_components["train_dataset_summary"].setPlainText(self._model.summary_text())
+
+    def _refresh_training_summary_panel(self) -> None:
+        text = build_training_summary_text(
+            status=self._training_summary_status,
+            n_samples=self._model.total_samples,
+            split_strategy=self._model.split_strategy,
+            data_folder=self._model.data_folder,
+            artifact_root=self._model.last_krr_artifact_root,
+            train_summary=self._last_train_summary,
+            predict_grid=self._last_predict_grid,
+        )
+        self.ui_components["train_summary"].setPlainText(text)
 
     def _sync_import_status(self) -> None:
         lab = self.ui_components["train_input_status"]
@@ -145,6 +164,9 @@ class TrainingTab(QWidget):
 
         n = len(result.records)
         self._model.set_loaded_training_folder(result.folder_resolved, result.records)
+        self._last_train_summary = None
+        self._last_predict_grid = None
+        self._training_summary_status = "未训练"
 
         self._set_ui_state_after_import(n)
         if 0 < n < MIN_SAMPLES_UI_READY:
@@ -156,6 +178,7 @@ class TrainingTab(QWidget):
             )
 
         self._refresh_summary()
+        self._refresh_training_summary_panel()
         self._sync_import_status()
         self._sync_data_hint()
         self._chart_controller.redraw_scatters_from_training_model()
@@ -192,7 +215,11 @@ class TrainingTab(QWidget):
         btn = self.ui_components["train_start_btn"]
         btn.setEnabled(False)
         self._model.last_krr_artifact_root = None
+        self._last_train_summary = None
+        self._last_predict_grid = None
+        self._training_summary_status = "训练中"
         self._refresh_summary()
+        self._refresh_training_summary_panel()
 
         self._append_train_log("[模型训练] 执行中：依次进行「模型训练（LOOCV）」与「预测网格」…")
         try:
@@ -204,6 +231,8 @@ class TrainingTab(QWidget):
                 "训练失败",
                 f"无法加载 kernel_regression（请从 source/desktop 启动并确保依赖已安装）：\n{e}",
             )
+            self._training_summary_status = "训练失败"
+            self._refresh_training_summary_panel()
             self._ui_state = (
                 TrainingUiState.DATA_PREPARED
                 if self._model.total_samples >= MIN_SAMPLES_UI_READY
@@ -214,6 +243,8 @@ class TrainingTab(QWidget):
         except Exception as e:
             self._append_train_log(f"[模型训练] 训练失败：{e}")
             QMessageBox.critical(self, "训练失败", str(e))
+            self._training_summary_status = "训练失败"
+            self._refresh_training_summary_panel()
             self._ui_state = (
                 TrainingUiState.DATA_PREPARED
                 if self._model.total_samples >= MIN_SAMPLES_UI_READY
@@ -223,8 +254,12 @@ class TrainingTab(QWidget):
             return
 
         self._model.last_krr_artifact_root = str(saved_root.resolve())
+        self._last_train_summary = train_summary
+        self._last_predict_grid = grid
+        self._training_summary_status = "训练成功"
         self._ui_state = TrainingUiState.TRAINING_DONE
         self._refresh_summary()
+        self._refresh_training_summary_panel()
 
         for line in krr_training_log_lines(train_summary):
             self._append_train_log(line)

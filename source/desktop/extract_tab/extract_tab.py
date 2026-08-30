@@ -646,17 +646,17 @@ class ExtractTab(QWidget):
     def reload_sequence_with_segmentation_results(self):
         """重新加载序列文件并显示分割结果"""
         try:
-            # 重新加载分割后的序列文件（原文件名 + "_segmented"）
-            from pathlib import Path
+            from export_naming import find_existing_segmented_sequence_path
             current_path = self.sequence_model.current_path
             if not current_path:
                 print("⚠️ 当前无序列文件路径，无法重新加载分割结果")
                 return False
-            original_path = Path(current_path)
-            segmented_path = original_path.with_name(f"{original_path.stem}_segmented{original_path.suffix}")
-
-            if not segmented_path.exists():
-                print(f"⚠️ 分割后的序列文件不存在: {segmented_path}")
+            segmented_path = find_existing_segmented_sequence_path(
+                current_path,
+                self.sequence_model.sequence_data,
+            )
+            if segmented_path is None:
+                print(f"⚠️ 分割后的序列文件不存在（已查找新旧命名）: {current_path}")
                 return False
 
             success, sequence_data, message = self.sequence_manager.load_sequence_file(str(segmented_path))
@@ -788,10 +788,21 @@ class ExtractTab(QWidget):
                 QMessageBox.warning(self, "警告", "没有拖曳曲线拟合参数可保存！")
                 return
             
-            # 选择保存文件（文件名反映保存内容）
+            from export_naming import fireball_diameter_fit_filename
+            params = dict(self.sequence_model.parameters or {})
+            default_dir = os.path.dirname(self.sequence_model.current_path or "") or ""
+            try:
+                default_name = fireball_diameter_fit_filename(
+                    params.get("equivalent", "0"),
+                    params.get("al_percent", "0"),
+                    directory=default_dir or None,
+                )
+            except (TypeError, ValueError):
+                default_name = fireball_diameter_fit_filename(0, 0, directory=default_dir or None)
+
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "保存直径与拟合结果",
-                "fireball_diameter_fit.json",
+                default_name,
                 "JSON文件 (*.json);;所有文件 (*)"
             )
             
