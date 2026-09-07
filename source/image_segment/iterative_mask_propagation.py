@@ -43,6 +43,10 @@ except ImportError:
 
 class IterativeMaskPropagationSegmenter:
     """迭代掩码传播分割器"""
+
+    POSITIVE_POINTS_PER_MASK = 10
+    NEGATIVE_POINTS_PER_MASK = 6
+    PROPAGATION_CHAIN_LENGTH = 5
     
     def __init__(self, model_type: str = "vit_b", 
                  checkpoint_path: Optional[str] = None,
@@ -196,6 +200,7 @@ class IterativeMaskPropagationSegmenter:
     
     def _init_sampling_data(self, image_paths: List[str]):
         """初始化采样点数据结构"""
+        self.positive_mask_point_cache: Dict[int, List[Tuple[int, int]]] = {}
         self.propagation_details = {}
         for i in range(len(image_paths)):
             self.propagation_details[i] = {
@@ -203,19 +208,84 @@ class IterativeMaskPropagationSegmenter:
                 'mapped_points': None,          # 映射到目标图片的点
                 'filtered_points': None,        # 筛选后的点
                 'next_iteration_points': None,  # 为下次迭代准备的采样点
+                'cached_positive_points': None, # 掩码正点采样缓存（与 positive_mask_point_cache 同步）
                 'reference_image_idx': None,    # 参考图片索引
                 'iteration': None,              # 传播迭代次数
                 'mask_quality': None,           # 掩码质量
                 'status': 'unprocessed'         # 处理状态
             }
-    
-    
+
+    def _cache_positive_mask_points(self, idx: int, mask: np.ndarray) -> List[Tuple[int, int]]:
+        """从 mask 采样正点并写入缓存；每张图只采样一次。"""
+        points = self.prompt_generator.sample_points_from_mask(
+            mask, self.POSITIVE_POINTS_PER_MASK, inside_mask=True
+        )
+        self.positive_mask_point_cache[idx] = points
+        if idx in self.propagation_details:
+            self.propagation_details[idx]['cached_positive_points'] = points
+        return points
+
+    def _get_cached_positive_mask_points(
+        self, idx: int, mask: Optional[np.ndarray] = None
+    ) -> List[Tuple[int, int]]:
+        """获取已缓存的正点；若无缓存且提供了 mask 则采样并缓存。"""
+        cached = self.positive_mask_point_cache.get(idx)
+        if cached is not None:
+            return cached
+        if mask is None and idx < len(self.all_masks):
+            mask = self.all_masks[idx]
+        if mask is None:
+            return []
+        return self._cache_positive_mask_points(idx, mask)
+
+    def _get_propagation_chain_refs(
+        self, ref_idx: int, target_idx: int, k: Optional[int] = None
+    ) -> List[int]:
+        """
+        以 ref 为链尾，沿传播来源方向（与 ref→target 相反）取最多 k 张已处理图。
+
+        例：ref=7, target=8  → 来源方向 index 递减 → [3,4,5,6,7]
+            ref=9, target=8  → 来源方向 index 递增 → [9,10,11,12,13]
+        """
+        if k is None:
+            k = self.PROPAGATION_CHAIN_LENGTH
+        if ref_idx not in self.processed_indices or self.all_masks[ref_idx] is None:
+            return []
+
+        if target_idx == ref_idx:
+            return [ref_idx]
+
+        # 传播方向 ref→target；来源方向与之相反
+        step = -1 if target_idx > ref_idx else 1
+        chain: List[int] = []
+        cur = ref_idx
+        n_images = len(self.image_paths)
+
+        while len(chain) < k:
+            if cur < 0 or cur >= n_images:
+                break
+            if cur not in self.processed_indices or self.all_masks[cur] is None:
+                if cur != ref_idx:
+                    break
+            else:
+                chain.append(cur)
+            nxt = cur + step
+            if nxt < 0 or nxt >= n_images:
+                break
+            if nxt not in self.processed_indices or self.all_masks[nxt] is None:
+                break
+            cur = nxt
+
+        return sorted(chain)
+
     def _save_prompted_image_details(self, idx: int, mask: np.ndarray, prompt_info: Dict[str, Any]):
         """保存有prompt点图片的详情"""
         try:
-            # 生成下次迭代的采样点
-            next_positive_points = self.prompt_generator.sample_points_from_mask(mask, 10, True)
-            next_negative_points = self.prompt_generator.sample_points_from_mask(mask, 6, False)
+            # 正点写入缓存；负点仍按 mask 采样供下轮传播
+            next_positive_points = self._cache_positive_mask_points(idx, mask)
+            next_negative_points = self.prompt_generator.sample_points_from_mask(
+                mask, self.NEGATIVE_POINTS_PER_MASK, inside_mask=False
+            )
             
             # 提取prompt点
             points = prompt_info.get('points', [])
@@ -243,37 +313,34 @@ class IterativeMaskPropagationSegmenter:
         except Exception as e:
             print(f"    ⚠️ 保存prompt图片详情失败: {e}")
     
-    def _save_propagated_image_details(self, target_idx: int, reference_image_path: str, debug_info: Dict[str, Any]):
+    def _save_propagated_image_details(
+        self, target_idx: int, ref_indices: List[int], debug_info: Dict[str, Any]
+    ):
         """保存传播图片的初始详情（不包含最终结果）"""
         try:
-            # 获取参考图片索引
-            ref_idx = None
-            for i, path in enumerate(self.image_paths):
-                if path == reference_image_path:
-                    ref_idx = i
-                    break
-            
-            # 保存传播详情（不包含最终结果，将在分割成功后由_complete_propagated_image_details完成）
+            primary_idx = debug_info.get('primary_ref_idx')
+            if primary_idx is None and ref_indices:
+                primary_idx = ref_indices[-1]
             self.propagation_details[target_idx] = {
                 'reference_points': {
-                    'positive': debug_info['reference_positive'],
-                    'negative': debug_info['reference_negative']
+                    'positive': debug_info.get('reference_positive', []),
+                    'negative': debug_info.get('reference_negative', []),
                 },
                 'mapped_points': {
-                    'positive': debug_info['mapped_positive'],
-                    'negative': debug_info['mapped_negative']
+                    'positive': debug_info.get('mapped_positive', []),
+                    'negative': debug_info.get('mapped_negative', []),
                 },
                 'filtered_points': {
-                    'positive': debug_info['filtered_positive'],
-                    'negative': debug_info['filtered_negative']
+                    'positive': debug_info.get('final_positive', debug_info.get('filtered_positive', [])),
+                    'negative': debug_info.get('final_negative', debug_info.get('filtered_negative', [])),
                 },
-                'next_iteration_points': None,  # 将在_complete_propagated_image_details中填充
-                'reference_image_idx': ref_idx,
+                'next_iteration_points': None,
+                'reference_image_idx': primary_idx,
+                'reference_chain_indices': list(ref_indices),
                 'iteration': self.current_iteration,
-                'mask_quality': None,  # 将在_complete_propagated_image_details中填充
-                'status': 'processing'
+                'mask_quality': None,
+                'status': 'processing',
             }
-            
         except Exception as e:
             print(f"    ⚠️ 保存传播图片详情失败: {e}")
     
@@ -281,8 +348,10 @@ class IterativeMaskPropagationSegmenter:
         """完成传播图片详情（添加最终结果）"""
         try:
             if target_idx in self.propagation_details:
-                next_positive_points = self.prompt_generator.sample_points_from_mask(mask, 10, True)
-                next_negative_points = self.prompt_generator.sample_points_from_mask(mask, 6, False)
+                next_positive_points = self._cache_positive_mask_points(target_idx, mask)
+                next_negative_points = self.prompt_generator.sample_points_from_mask(
+                    mask, self.NEGATIVE_POINTS_PER_MASK, inside_mask=False
+                )
                 
                 self.propagation_details[target_idx]['next_iteration_points'] = {
                     'positive': next_positive_points,
@@ -397,20 +466,18 @@ class IterativeMaskPropagationSegmenter:
                     # 记录开始时间
                     start_time = time.time()
                     
-                    # 获取预定义的采样点
-                    predefined_points = None
-                    if (processed_idx in self.propagation_details and 
-                        'next_iteration_points' in self.propagation_details[processed_idx]):
-                        predefined_points = self.propagation_details[processed_idx]['next_iteration_points']
-                        print(f"      使用预定义的采样点")
-                    
-                    # 使用掩码传播进行分割
+                    chain_refs = self._get_propagation_chain_refs(processed_idx, unprocessed_idx)
+                    if not chain_refs:
+                        print(f"      ❌ 无法构建传播链，跳过")
+                        continue
+                    chain_display = [i + 1 for i in chain_refs]
+                    print(f"      传播链（来源方向）: {chain_display}")
+
                     mask = self._propagate_mask_from_reference(
-                        image_paths[unprocessed_idx], 
-                        image_paths[processed_idx],
-                        reference_mask,
+                        image_paths[unprocessed_idx],
+                        chain_refs,
+                        processed_idx,
                         unprocessed_idx,
-                        predefined_points
                     )
                     
                     # 计算处理时间
@@ -527,35 +594,63 @@ class IterativeMaskPropagationSegmenter:
             print(f"    ⚠️ 分割失败: {e}")
             return None
     
-    def _propagate_mask_from_reference(self, target_image_path: str, reference_image_path: str, 
-                                     reference_mask: np.ndarray, target_idx: int, 
-                                     predefined_reference_points: Optional[Dict[str, List[Tuple[int, int]]]] = None) -> Optional[np.ndarray]:
-        """从参考图片传播掩码到目标图片"""
+    def _propagate_mask_from_reference(
+        self,
+        target_image_path: str,
+        ref_indices: List[int],
+        primary_ref_idx: int,
+        target_idx: int,
+    ) -> Optional[np.ndarray]:
+        """从传播链上多张参考图传播掩码到目标图。"""
         try:
-            # 读取目标图片
             target_image = imread_unicode(target_image_path, cv2.IMREAD_COLOR)
             if target_image is None:
                 print(f"    ⚠️ 无法读取目标图片: {target_image_path}")
                 return None
-            
+
             target_image_rgb = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
-            
-            # 读取参考图片
-            reference_image = imread_unicode(reference_image_path, cv2.IMREAD_COLOR)
-            if reference_image is None:
-                print(f"    ⚠️ 无法读取参考图片: {reference_image_path}")
+
+            reference_entries: List[Dict[str, Any]] = []
+            for ref_idx in ref_indices:
+                ref_path = self.image_paths[ref_idx]
+                ref_image = imread_unicode(ref_path, cv2.IMREAD_COLOR)
+                if ref_image is None:
+                    print(f"    ⚠️ 无法读取参考图片: {ref_path}")
+                    continue
+                ref_mask = self.all_masks[ref_idx]
+                if ref_mask is None:
+                    continue
+                positive_points = self._get_cached_positive_mask_points(ref_idx, ref_mask)
+                reference_entries.append(
+                    {
+                        'idx': ref_idx,
+                        'image_rgb': cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB),
+                        'mask': ref_mask,
+                        'positive_points': positive_points,
+                    }
+                )
+
+            if not reference_entries:
+                print(f"    ⚠️ 无有效参考图条目")
                 return None
-            
-            reference_image_rgb = cv2.cvtColor(reference_image, cv2.COLOR_BGR2RGB)
-            
-            # 使用基于RGB相似性的点映射和筛选
-            target_points, target_labels, debug_info = self.prompt_generator.generate_points_with_rgb_similarity(
-                reference_image_rgb, reference_mask, target_image_rgb,
-                return_debug_info=True, predefined_reference_points=predefined_reference_points
+
+            primary_entry = next(
+                (e for e in reference_entries if e['idx'] == primary_ref_idx),
+                reference_entries[-1],
             )
-            
-            # 保存传播详情（不包含最终结果）
-            self._save_propagated_image_details(target_idx, reference_image_path, debug_info)
+
+            target_points, target_labels, debug_info = (
+                self.prompt_generator.generate_points_multi_reference(
+                    reference_entries=reference_entries,
+                    primary_entry=primary_entry,
+                    target_image=target_image_rgb,
+                    num_positive=self.POSITIVE_POINTS_PER_MASK,
+                    num_negative=self.NEGATIVE_POINTS_PER_MASK,
+                    return_debug_info=True,
+                )
+            )
+
+            self._save_propagated_image_details(target_idx, ref_indices, debug_info)
             
             # 记录点生成信息
             positive_count = sum(target_labels)

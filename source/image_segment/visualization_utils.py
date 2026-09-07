@@ -158,14 +158,23 @@ class SegmentationVisualizer:
         if mask is not None:
             # 使用保存的下次迭代采样点
             if (hasattr(segmenter, 'propagation_details') and 
-                idx in segmenter.propagation_details and 
-                'next_iteration_points' in segmenter.propagation_details[idx]):
-                
-                next_pos_points = segmenter.propagation_details[idx]['next_iteration_points']['positive']
-                next_neg_points = segmenter.propagation_details[idx]['next_iteration_points']['negative']
-                print(f"     使用保存的下次迭代采样点")
+                idx in segmenter.propagation_details):
+                details = segmenter.propagation_details[idx]
+                cached_pos = details.get('cached_positive_points')
+                next_pts = details.get('next_iteration_points')
+                if cached_pos is not None:
+                    next_pos_points = cached_pos
+                    next_neg_points = (next_pts or {}).get('negative') or []
+                    print(f"     使用缓存的正点 mask 采样")
+                elif next_pts:
+                    next_pos_points = next_pts['positive']
+                    next_neg_points = next_pts['negative']
+                    print(f"     使用保存的下次迭代采样点")
+                else:
+                    next_pos_points = segmenter._get_cached_positive_mask_points(idx, mask)
+                    next_neg_points = segmenter.prompt_generator.sample_points_from_mask(mask, 6, False)
+                    print(f"     回退采样（正点写入缓存）")
             else:
-                # 回退：重新采样
                 next_pos_points = segmenter.prompt_generator.sample_points_from_mask(mask, 10, True)
                 next_neg_points = segmenter.prompt_generator.sample_points_from_mask(mask, 6, False)
                 print(f"     重新采样下次迭代点")

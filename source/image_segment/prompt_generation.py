@@ -7,7 +7,7 @@ Prompt点生成模块
 
 import cv2
 import numpy as np
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
 
 
 class PromptPointGenerator:
@@ -39,11 +39,22 @@ class PromptPointGenerator:
             Tuple[List[Tuple[int, int]], List[int]]: (点坐标列表, 点标签列表)
         """
         try:
-            # 1. 使用预定义的采样点或重新采样
+            # 1. 使用预定义的采样点或重新采样（正点优先走缓存，避免重复 mask 采样）
             if predefined_reference_points is not None:
-                positive_candidates = predefined_reference_points['positive']
-                negative_candidates = predefined_reference_points['negative']
-                print(f"    使用预定义的参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}")
+                positive_candidates = predefined_reference_points.get('positive') or []
+                negative_candidates = predefined_reference_points.get('negative') or []
+                if positive_candidates or negative_candidates:
+                    print(
+                        f"    使用预定义的参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}"
+                    )
+                else:
+                    positive_candidates = self.sample_points_from_mask(
+                        reference_mask, num_points=10, inside_mask=True
+                    )
+                    negative_candidates = self.sample_points_from_mask(
+                        reference_mask, num_points=6, inside_mask=False
+                    )
+                    print(f"    重新采样参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}")
             else:
                 # 从参考图片的掩码内部选取10个正点候选
                 positive_candidates = self.sample_points_from_mask(reference_mask, num_points=10, inside_mask=True)
@@ -89,7 +100,145 @@ class PromptPointGenerator:
             
         except Exception as e:
             print(f"    ⚠️ 点生成失败: {e}")
+            if return_debug_info:
+                return [], [], {}
             return [], []
+
+    def generate_points_multi_reference(
+        self,
+        reference_entries: List[Dict[str, Any]],
+        primary_entry: Dict[str, Any],
+        target_image: np.ndarray,
+        num_positive: int = 10,
+        num_negative: int = 6,
+        return_debug_info: bool = False,
+    ):
+        """
+        多参考图传播：正点来自各 ref 缓存正点映射合并；负点来自多帧背景 mask 交集。
+        """
+        try:
+            h, w = target_image.shape[:2]
+            mapped_positive: List[Tuple[int, int]] = []
+            reference_positive: List[Tuple[int, int]] = []
+            reference_positive_rgbs: List[np.ndarray] = []
+            seen_pos: set = set()
+
+            for entry in reference_entries:
+                ref_image = entry['image_rgb']
+                pos_pts = entry.get('positive_points') or []
+                reference_positive.extend(pos_pts)
+                for x, y in pos_pts:
+                    reference_positive_rgbs.append(ref_image[y, x])
+                for pt in self.map_points_to_target(ref_image, pos_pts, target_image):
+                    if pt not in seen_pos:
+                        seen_pos.add(pt)
+                        mapped_positive.append(pt)
+
+            filtered_positive = self.filter_positive_points(
+                mapped_positive, target_image, reference_positive_rgbs
+            )
+            final_positive = self.uniform_sample_points(
+                filtered_positive, num_positive, w, h
+            )
+
+            ref_masks = [e['mask'] for e in reference_entries]
+            primary_image = primary_entry['image_rgb']
+            primary_shape = primary_image.shape[:2]
+            bg_intersection = self.compute_background_mask_intersection(ref_masks, primary_shape)
+            intersection_pixels = int(np.sum(bg_intersection))
+            negative_candidates = self.sample_points_from_background_mask(
+                bg_intersection, num_negative * 2
+            )
+            if len(negative_candidates) < num_negative:
+                fallback_mask = (primary_entry['mask'] == 0)
+                extra = self.sample_points_from_background_mask(fallback_mask, num_negative * 2)
+                for pt in extra:
+                    if pt not in negative_candidates:
+                        negative_candidates.append(pt)
+
+            mapped_negative = self.map_points_to_target(
+                primary_image, negative_candidates, target_image
+            )
+            filtered_negative = self.filter_negative_points(
+                mapped_negative, target_image, reference_positive_rgbs
+            )
+            final_negative = self.uniform_sample_points(
+                filtered_negative, num_negative, w, h
+            )
+
+            final_points = final_positive + final_negative
+            final_labels = [1] * len(final_positive) + [0] * len(final_negative)
+
+            chain_ids = [e['idx'] for e in reference_entries]
+            print(
+                f"    多参考传播链 {chain_ids}: "
+                f"映射正{len(mapped_positive)}→滤{len(filtered_positive)}→匀{len(final_positive)}，"
+                f"背景交集像素={intersection_pixels}，"
+                f"负点滤{len(filtered_negative)}→匀{len(final_negative)}"
+            )
+
+            if return_debug_info:
+                debug = {
+                    'reference_positive': reference_positive,
+                    'reference_negative': negative_candidates,
+                    'mapped_positive': mapped_positive,
+                    'mapped_negative': mapped_negative,
+                    'filtered_positive': filtered_positive,
+                    'filtered_negative': filtered_negative,
+                    'final_positive': final_positive,
+                    'final_negative': final_negative,
+                    'primary_ref_idx': primary_entry['idx'],
+                    'background_intersection_pixels': intersection_pixels,
+                }
+                return final_points, final_labels, debug
+            return final_points, final_labels
+
+        except Exception as e:
+            print(f"    ⚠️ 多参考点生成失败: {e}")
+            if return_debug_info:
+                return [], [], {}
+            return [], []
+
+    @staticmethod
+    def compute_background_mask_intersection(
+        masks: List[np.ndarray], shape: Tuple[int, int]
+    ) -> np.ndarray:
+        """多帧前景 mask 的背景区域交集（True 表示稳定背景）。"""
+        h, w = shape
+        intersection = np.ones((h, w), dtype=bool)
+        for mask in masks:
+            if mask.shape[:2] != (h, w):
+                aligned = cv2.resize(
+                    mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST
+                )
+            else:
+                aligned = mask.astype(np.uint8)
+            intersection &= (aligned == 0)
+        return intersection
+
+    def sample_points_from_background_mask(
+        self, background: np.ndarray, num_points: int
+    ) -> List[Tuple[int, int]]:
+        """在背景 bool mask（True=背景）上采样负点。"""
+        if not np.any(background):
+            return []
+        foreground = (~background).astype(np.uint8)
+        return self._sample_negative_points(foreground, num_points)
+
+    def uniform_sample_points(
+        self,
+        points: List[Tuple[int, int]],
+        num_points: int,
+        w: int,
+        h: int,
+    ) -> List[Tuple[int, int]]:
+        """对目标侧已筛选点做空间均匀采样。"""
+        if not points:
+            return []
+        if len(points) <= num_points:
+            return list(points)
+        candidates = np.array(points, dtype=np.int32)
+        return self._grid_sample_from_candidates(candidates, num_points, w, h)
     
     def sample_points_from_mask(self, mask: np.ndarray, num_points: int, inside_mask: bool) -> List[Tuple[int, int]]:
         """从掩码内部或外部采样点，优化分布策略"""
