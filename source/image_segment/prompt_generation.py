@@ -9,6 +9,12 @@ import cv2
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 
+# 单 ref / 多 ref 传播默认正负点数量（正负对称，便于 SAM prompt）
+DEFAULT_POSITIVE_POINT_COUNT = 10
+DEFAULT_NEGATIVE_POINT_COUNT = 10
+# 负点候选池相对最终数量的倍数（filter / 均匀采样前多采一些）
+NEGATIVE_CANDIDATE_POOL_FACTOR = 2
+
 
 class PromptPointGenerator:
     """Prompt点生成器"""
@@ -23,6 +29,44 @@ class PromptPointGenerator:
         """
         self.very_similar_threshold = very_similar_threshold
         self.similar_threshold = similar_threshold
+
+    def _sample_reference_point_candidates(
+        self,
+        reference_mask: np.ndarray,
+        num_positive: int = DEFAULT_POSITIVE_POINT_COUNT,
+        num_negative: int = DEFAULT_NEGATIVE_POINT_COUNT,
+    ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+        """从参考 mask 内/外采样正负点候选（单 ref 路径共用）。"""
+        positive_candidates = self.sample_points_from_mask(
+            reference_mask, num_points=num_positive, inside_mask=True
+        )
+        negative_candidates = self.sample_points_from_mask(
+            reference_mask, num_points=num_negative, inside_mask=False
+        )
+        return positive_candidates, negative_candidates
+
+    def _resolve_reference_candidates(
+        self,
+        reference_mask: np.ndarray,
+        predefined_reference_points: Optional[Dict[str, List[Tuple[int, int]]]],
+        num_positive: int = DEFAULT_POSITIVE_POINT_COUNT,
+        num_negative: int = DEFAULT_NEGATIVE_POINT_COUNT,
+    ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]], bool]:
+        """
+        预定义点或从 mask 重新采样。
+
+        Returns:
+            (positive_candidates, negative_candidates, used_predefined)
+        """
+        if predefined_reference_points is not None:
+            positive_candidates = predefined_reference_points.get('positive') or []
+            negative_candidates = predefined_reference_points.get('negative') or []
+            if positive_candidates or negative_candidates:
+                return positive_candidates, negative_candidates, True
+        positive_candidates, negative_candidates = self._sample_reference_point_candidates(
+            reference_mask, num_positive, num_negative
+        )
+        return positive_candidates, negative_candidates, False
     
     def generate_points_with_rgb_similarity(self, reference_image: np.ndarray, reference_mask: np.ndarray, 
                                           target_image: np.ndarray, return_debug_info: bool = False,
@@ -39,31 +83,21 @@ class PromptPointGenerator:
             Tuple[List[Tuple[int, int]], List[int]]: (点坐标列表, 点标签列表)
         """
         try:
-            # 1. 使用预定义的采样点或重新采样（正点优先走缓存，避免重复 mask 采样）
-            if predefined_reference_points is not None:
-                positive_candidates = predefined_reference_points.get('positive') or []
-                negative_candidates = predefined_reference_points.get('negative') or []
-                if positive_candidates or negative_candidates:
-                    print(
-                        f"    使用预定义的参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}"
-                    )
-                else:
-                    positive_candidates = self.sample_points_from_mask(
-                        reference_mask, num_points=10, inside_mask=True
-                    )
-                    negative_candidates = self.sample_points_from_mask(
-                        reference_mask, num_points=6, inside_mask=False
-                    )
-                    print(f"    重新采样参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}")
+            positive_candidates, negative_candidates, used_predefined = (
+                self._resolve_reference_candidates(
+                    reference_mask, predefined_reference_points
+                )
+            )
+            if used_predefined:
+                print(
+                    f"    使用预定义的参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}"
+                )
             else:
-                # 从参考图片的掩码内部选取10个正点候选
-                positive_candidates = self.sample_points_from_mask(reference_mask, num_points=10, inside_mask=True)
-                
-                # 从参考图片的掩码外部选取6个负点候选
-                negative_candidates = self.sample_points_from_mask(reference_mask, num_points=6, inside_mask=False)
-                print(f"    重新采样参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}")
-            
-            # 3. 将候选点映射到目标图片上
+                print(
+                    f"    重新采样参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}"
+                )
+
+            # 将候选点映射到目标图片上
             target_positive_candidates = self.map_points_to_target(reference_image, positive_candidates, target_image)
             target_negative_candidates = self.map_points_to_target(reference_image, negative_candidates, target_image)
             
@@ -109,8 +143,8 @@ class PromptPointGenerator:
         reference_entries: List[Dict[str, Any]],
         primary_entry: Dict[str, Any],
         target_image: np.ndarray,
-        num_positive: int = 10,
-        num_negative: int = 6,
+        num_positive: int = DEFAULT_POSITIVE_POINT_COUNT,
+        num_negative: int = DEFAULT_NEGATIVE_POINT_COUNT,
         return_debug_info: bool = False,
     ):
         """
@@ -146,12 +180,13 @@ class PromptPointGenerator:
             primary_shape = primary_image.shape[:2]
             bg_intersection = self.compute_background_mask_intersection(ref_masks, primary_shape)
             intersection_pixels = int(np.sum(bg_intersection))
+            pool_n = num_negative * NEGATIVE_CANDIDATE_POOL_FACTOR
             negative_candidates = self.sample_points_from_background_mask(
-                bg_intersection, num_negative * 2
+                bg_intersection, pool_n
             )
             if len(negative_candidates) < num_negative:
                 fallback_mask = (primary_entry['mask'] == 0)
-                extra = self.sample_points_from_background_mask(fallback_mask, num_negative * 2)
+                extra = self.sample_points_from_background_mask(fallback_mask, pool_n)
                 for pt in extra:
                     if pt not in negative_candidates:
                         negative_candidates.append(pt)

@@ -26,14 +26,22 @@ except ImportError:
     from sam_initialization import create_sam_manager, check_sam_availability
 
 try:
-    from .prompt_generation import create_prompt_generator
+    from .prompt_generation import (
+        create_prompt_generator,
+        DEFAULT_POSITIVE_POINT_COUNT,
+        DEFAULT_NEGATIVE_POINT_COUNT,
+    )
     from .adjacent_group_finder import create_adjacent_group_finder
     from .mask_utils import create_mask_analyzer
     from .failure_analyzer import create_failure_analyzer
     from .mask_postprocessing import create_contour_processor
     from .output_manager import create_output_manager
 except ImportError:
-    from prompt_generation import create_prompt_generator
+    from prompt_generation import (
+        create_prompt_generator,
+        DEFAULT_POSITIVE_POINT_COUNT,
+        DEFAULT_NEGATIVE_POINT_COUNT,
+    )
     from adjacent_group_finder import create_adjacent_group_finder
     from mask_utils import create_mask_analyzer
     from failure_analyzer import create_failure_analyzer
@@ -44,8 +52,8 @@ except ImportError:
 class IterativeMaskPropagationSegmenter:
     """迭代掩码传播分割器"""
 
-    POSITIVE_POINTS_PER_MASK = 10
-    NEGATIVE_POINTS_PER_MASK = 6
+    POSITIVE_POINTS_PER_MASK = DEFAULT_POSITIVE_POINT_COUNT
+    NEGATIVE_POINTS_PER_MASK = DEFAULT_NEGATIVE_POINT_COUNT
     PROPAGATION_CHAIN_LENGTH = 5
     
     def __init__(self, model_type: str = "vit_b", 

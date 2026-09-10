@@ -13,8 +13,16 @@ from typing import List, Dict, Any, Optional
 
 try:
     from .image_io import imread_unicode
+    from .prompt_generation import (
+        DEFAULT_POSITIVE_POINT_COUNT,
+        DEFAULT_NEGATIVE_POINT_COUNT,
+    )
 except ImportError:
     from image_io import imread_unicode
+    from prompt_generation import (
+        DEFAULT_POSITIVE_POINT_COUNT,
+        DEFAULT_NEGATIVE_POINT_COUNT,
+    )
 
 
 class SegmentationVisualizer:
@@ -172,11 +180,17 @@ class SegmentationVisualizer:
                     print(f"     使用保存的下次迭代采样点")
                 else:
                     next_pos_points = segmenter._get_cached_positive_mask_points(idx, mask)
-                    next_neg_points = segmenter.prompt_generator.sample_points_from_mask(mask, 6, False)
+                    next_neg_points = segmenter.prompt_generator.sample_points_from_mask(
+                        mask, DEFAULT_NEGATIVE_POINT_COUNT, False
+                    )
                     print(f"     回退采样（正点写入缓存）")
             else:
-                next_pos_points = segmenter.prompt_generator.sample_points_from_mask(mask, 10, True)
-                next_neg_points = segmenter.prompt_generator.sample_points_from_mask(mask, 6, False)
+                next_pos_points = segmenter.prompt_generator.sample_points_from_mask(
+                    mask, DEFAULT_POSITIVE_POINT_COUNT, True
+                )
+                next_neg_points = segmenter.prompt_generator.sample_points_from_mask(
+                    mask, DEFAULT_NEGATIVE_POINT_COUNT, False
+                )
                 print(f"     重新采样下次迭代点")
             
             self._draw_points(axes[2], next_pos_points, next_neg_points)
