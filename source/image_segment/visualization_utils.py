@@ -27,6 +27,10 @@ except ImportError:
 
 class SegmentationVisualizer:
     """分割可视化器"""
+
+    DEBUG_CELL_MAX_WIDTH = 640
+    DEBUG_TITLE_HEIGHT = 44
+    DEBUG_POINT_RADIUS = 5
     
     def __init__(self):
         """初始化可视化器"""
@@ -105,20 +109,18 @@ class SegmentationVisualizer:
             for i, image_path in enumerate(image_paths):
                 print(f"   为图片 {i+1} 生成合并debug可视化...")
                 
-                # 读取目标图片
-                image = imread_unicode(image_path, cv2.IMREAD_COLOR)
-                if image is None:
+                image_bgr = imread_unicode(image_path, cv2.IMREAD_COLOR)
+                if image_bgr is None:
                     continue
-                image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                
-                # 根据是否为prompt图片创建不同的布局
+                image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
                 if i in prompt_data:
                     self._create_prompted_image_visualization(
                         i, image_rgb, masks[i], prompt_data[i], segmenter, image_paths, output_dir
                     )
                 else:
                     self._create_propagated_image_visualization(
-                        i, image_rgb, masks[i], segmenter, image_paths, output_dir
+                        i, image_bgr, masks[i], segmenter, image_paths, output_dir
                     )
                 
         except Exception as e:
@@ -129,264 +131,250 @@ class SegmentationVisualizer:
     def _create_prompted_image_visualization(self, idx: int, image_rgb: np.ndarray, 
                                            mask: Optional[np.ndarray], prompt_info: Dict[str, Any],
                                            segmenter, image_paths: List[str], output_dir: str):
-        """创建有prompt点图片的可视化（1x3布局）"""
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-        
-        # 1. prompt points (显示prompt点)
+        """创建有 prompt 点图片的可视化（1x3，OpenCV 拼图）。"""
+        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
         points = prompt_info['points']
         labels = prompt_info['labels']
         pos_points = [p for p, l in zip(points, labels) if l == 1]
         neg_points = [p for p, l in zip(points, labels) if l == 0]
-        
-        axes[0].imshow(image_rgb)
-        self._draw_points(axes[0], pos_points, neg_points)
-        axes[0].set_title(f"Prompt Points\nImage {idx+1}\nPos: {len(pos_points)}, Neg: {len(neg_points)}")
-        axes[0].axis('off')
-        
-        # 2. segmentation result (显示分割结果)
-        axes[1].imshow(image_rgb)
+
+        p0 = self._draw_points_bgr(image_bgr.copy(), pos_points, neg_points)
+        p0 = self._labeled_panel(
+            p0, f"Prompt Points | Img {idx + 1} | Pos {len(pos_points)} Neg {len(neg_points)}"
+        )
+
+        p1 = image_bgr.copy()
         if mask is not None:
-            axes[1].imshow(mask, alpha=0.5, cmap='Reds')
-            mask_area = int(np.sum(mask))
-            mask_quality = 0.0  # 不再显示自定义质量分数
-            
-            # 绘制质心和半径
-            cx, cy, radius = self._draw_centroid_and_radius(axes[1], mask, color='yellow')
-            if cx is not None:
-                axes[1].set_title(f"Segmentation Result\nImage {idx+1}\nArea: {mask_area}, Centroid: ({cx:.1f}, {cy:.1f}), Radius: {radius:.1f}")
-            else:
-                axes[1].set_title(f"Segmentation Result\nImage {idx+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}")
+            p1 = self._blend_mask_bgr(p1, mask, (0, 0, 255), 0.45)
+            area = int(np.sum(mask))
+            p1 = self._labeled_panel(p1, f"Segmentation | Img {idx + 1} | Area {area}")
         else:
-            axes[1].text(0.5, 0.5, "Segmentation Failed", ha='center', va='center', transform=axes[1].transAxes)
-            axes[1].set_title(f"Segmentation Result\nImage {idx+1}\nFailed")
-        axes[1].axis('off')
-        
-        # 3. sampling points for next iteration (为下次迭代选定的采样点)
-        axes[2].imshow(image_rgb)
+            p1 = self._labeled_panel(p1, f"Segmentation Failed | Img {idx + 1}")
+
+        p2 = image_bgr.copy()
         if mask is not None:
-            # 使用保存的下次迭代采样点
-            if (hasattr(segmenter, 'propagation_details') and 
-                idx in segmenter.propagation_details):
-                details = segmenter.propagation_details[idx]
-                cached_pos = details.get('cached_positive_points')
-                next_pts = details.get('next_iteration_points')
-                if cached_pos is not None:
-                    next_pos_points = cached_pos
-                    next_neg_points = (next_pts or {}).get('negative') or []
-                    print(f"     使用缓存的正点 mask 采样")
-                elif next_pts:
-                    next_pos_points = next_pts['positive']
-                    next_neg_points = next_pts['negative']
-                    print(f"     使用保存的下次迭代采样点")
-                else:
-                    next_pos_points = segmenter._get_cached_positive_mask_points(idx, mask)
-                    next_neg_points = segmenter.prompt_generator.sample_points_from_mask(
-                        mask, DEFAULT_NEGATIVE_POINT_COUNT, False
-                    )
-                    print(f"     回退采样（正点写入缓存）")
-            else:
-                next_pos_points = segmenter.prompt_generator.sample_points_from_mask(
-                    mask, DEFAULT_POSITIVE_POINT_COUNT, True
-                )
-                next_neg_points = segmenter.prompt_generator.sample_points_from_mask(
+            next_pos, next_neg = self._next_iteration_sample_points(segmenter, idx, mask)
+            p2 = self._draw_points_bgr(p2, next_pos, next_neg)
+            p2 = self._labeled_panel(
+                p2,
+                f"Next Iter Sampling | Img {idx + 1} | Pos {len(next_pos)} Neg {len(next_neg)}",
+            )
+        else:
+            p2 = self._labeled_panel(p2, f"No mask for sampling | Img {idx + 1}")
+
+        grid = self._assemble_grid([p0, p1, p2], rows=1, cols=3)
+        self._save_cv2_debug_image(grid, image_paths[idx], output_dir, "merged_debug")
+
+    def _next_iteration_sample_points(self, segmenter, idx: int, mask: np.ndarray):
+        if hasattr(segmenter, 'propagation_details') and idx in segmenter.propagation_details:
+            details = segmenter.propagation_details[idx]
+            cached_pos = details.get('cached_positive_points')
+            next_pts = details.get('next_iteration_points')
+            if cached_pos is not None:
+                return cached_pos, (next_pts or {}).get('negative') or []
+            if next_pts:
+                return next_pts['positive'], next_pts['negative']
+            return (
+                segmenter._get_cached_positive_mask_points(idx, mask),
+                segmenter.prompt_generator.sample_points_from_mask(
                     mask, DEFAULT_NEGATIVE_POINT_COUNT, False
-                )
-                print(f"     重新采样下次迭代点")
-            
-            self._draw_points(axes[2], next_pos_points, next_neg_points)
-            axes[2].set_title(f"Next Iteration Sampling\nImage {idx+1}\nPos: {len(next_pos_points)}, Neg: {len(next_neg_points)}")
-        else:
-            axes[2].text(0.5, 0.5, "No mask for sampling", ha='center', va='center', transform=axes[2].transAxes)
-            axes[2].set_title(f"Next Iteration Sampling\nImage {idx+1}\nNo mask")
-        axes[2].axis('off')
-        
-        # 保存图片
-        self._save_debug_image(fig, image_paths[idx], output_dir, "merged_debug")
+                ),
+            )
+        return (
+            segmenter.prompt_generator.sample_points_from_mask(
+                mask, DEFAULT_POSITIVE_POINT_COUNT, True
+            ),
+            segmenter.prompt_generator.sample_points_from_mask(
+                mask, DEFAULT_NEGATIVE_POINT_COUNT, False
+            ),
+        )
     
-    def _create_propagated_image_visualization(self, idx: int, image_rgb: np.ndarray,
+    def _create_propagated_image_visualization(self, idx: int, image_bgr: np.ndarray,
                                              mask: Optional[np.ndarray], segmenter,
                                              image_paths: List[str], output_dir: str):
-        """创建传播图片的可视化（2x4布局，包含后处理对比）"""
+        """传播 debug：2x3 OpenCV 拼图（无 Debug Information 文本面板）。"""
         if not hasattr(segmenter, 'propagation_details') or idx not in segmenter.propagation_details:
             return
         debug_data = segmenter.propagation_details[idx]
         if debug_data['status'] == 'unprocessed':
             return
-        
-        fig, axes = plt.subplots(2, 4, figsize=(24, 12))
-        
-        # 1. reference_segmentation (参考图片分割结果)
+
+        target_bgr = image_bgr
         ref_idx = debug_data['reference_image_idx']
+        ref_bgr = None
         if ref_idx is not None and 0 <= ref_idx < len(image_paths):
-            ref_image = imread_unicode(image_paths[ref_idx], cv2.IMREAD_COLOR)
-            if ref_image is not None:
-                ref_image_rgb = cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB)
-                axes[0, 0].imshow(ref_image_rgb)
-                if ref_idx < len(segmenter.all_masks) and segmenter.all_masks[ref_idx] is not None:
-                    axes[0, 0].imshow(segmenter.all_masks[ref_idx], alpha=0.5, cmap='Reds')
-                axes[0, 0].set_title(f"Reference Segmentation\nImage {ref_idx+1}")
-            else:
-                axes[0, 0].text(0.5, 0.5, "Failed to load ref image", ha='center', va='center', transform=axes[0, 0].transAxes)
-                axes[0, 0].set_title("Reference Segmentation")
+            ref_bgr = imread_unicode(image_paths[ref_idx], cv2.IMREAD_COLOR)
+
+        ref_pos = (debug_data.get('reference_points') or {}).get('positive') or []
+        ref_neg = (debug_data.get('reference_points') or {}).get('negative') or []
+        mapped_pos = (debug_data.get('mapped_points') or {}).get('positive') or []
+        mapped_neg = (debug_data.get('mapped_points') or {}).get('negative') or []
+        filtered_pos = (debug_data.get('filtered_points') or {}).get('positive') or []
+        filtered_neg = (debug_data.get('filtered_points') or {}).get('negative') or []
+        stats = debug_data.get('postprocessing_stats') or {}
+
+        # Row 1: reference seg | reference points | mapped points
+        if ref_bgr is not None:
+            p_ref_seg = ref_bgr.copy()
+            if ref_idx is not None and ref_idx < len(segmenter.all_masks):
+                ref_mask = segmenter.all_masks[ref_idx]
+                if ref_mask is not None:
+                    p_ref_seg = self._blend_mask_bgr(p_ref_seg, ref_mask, (0, 0, 255), 0.45)
+            p_ref_seg = self._labeled_panel(p_ref_seg, f"Reference Seg | Img {ref_idx + 1}")
+
+            p_ref_pts = self._draw_points_bgr(ref_bgr.copy(), ref_pos, ref_neg)
+            p_ref_pts = self._labeled_panel(
+                p_ref_pts,
+                f"Reference Points | Img {ref_idx + 1} | Pos {len(ref_pos)} Neg {len(ref_neg)}",
+            )
         else:
-            axes[0, 0].text(0.5, 0.5, "No reference image", ha='center', va='center', transform=axes[0, 0].transAxes)
-            axes[0, 0].set_title("Reference Segmentation")
-        axes[0, 0].axis('off')
-        
-        # 2. reference_points (参考图片的采样点)
-        if ref_idx is not None and 0 <= ref_idx < len(image_paths):
-            ref_image = imread_unicode(image_paths[ref_idx], cv2.IMREAD_COLOR)
-            if ref_image is not None:
-                ref_image_rgb = cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB)
-                axes[0, 1].imshow(ref_image_rgb)
-                
-                ref_pos = debug_data['reference_points']['positive']
-                ref_neg = debug_data['reference_points']['negative']
-                self._draw_points(axes[0, 1], ref_pos, ref_neg)
-                axes[0, 1].set_title(f"Reference Points\nImage {ref_idx+1}\nPos: {len(ref_pos)}, Neg: {len(ref_neg)}")
-            else:
-                axes[0, 1].text(0.5, 0.5, "Failed to load ref image", ha='center', va='center', transform=axes[0, 1].transAxes)
-                axes[0, 1].set_title("Reference Points")
+            blank = np.zeros_like(target_bgr)
+            p_ref_seg = self._labeled_panel(blank, "No reference image")
+            p_ref_pts = self._labeled_panel(blank.copy(), "No reference image")
+
+        p_mapped = self._draw_points_bgr(target_bgr.copy(), mapped_pos, mapped_neg)
+        p_mapped = self._labeled_panel(
+            p_mapped,
+            f"Mapped Points | Img {idx + 1} | Pos {len(mapped_pos)} Neg {len(mapped_neg)}",
+        )
+
+        # Row 2: filtered points | SAM mask | EMA processed display mask
+        p_filtered = self._draw_points_bgr(target_bgr.copy(), filtered_pos, filtered_neg)
+        p_filtered = self._labeled_panel(
+            p_filtered,
+            f"Filtered Points | Img {idx + 1} | Pos {len(filtered_pos)} Neg {len(filtered_neg)}",
+        )
+
+        p_sam = target_bgr.copy()
+        original_mask = debug_data.get('original_mask')
+        if original_mask is not None:
+            p_sam = self._blend_mask_bgr(p_sam, original_mask, (0, 140, 255), 0.45)
+            sam_area = int(np.sum(original_mask))
+            sam_q = float(stats.get('sam_quality', 0.0))
+            p_sam = self._labeled_panel(
+                p_sam, f"Original Mask (SAM) | Img {idx + 1} | Area {sam_area} Q {sam_q:.3f}"
+            )
         else:
-            axes[0, 1].text(0.5, 0.5, "No reference image", ha='center', va='center', transform=axes[0, 1].transAxes)
-            axes[0, 1].set_title("Reference Points")
-        axes[0, 1].axis('off')
-        
-        # 3. mapped_points (映射到目标图片的点)
-        axes[0, 2].imshow(image_rgb)
-        mapped_pos = debug_data['mapped_points']['positive']
-        mapped_neg = debug_data['mapped_points']['negative']
-        self._draw_points(axes[0, 2], mapped_pos, mapped_neg)
-        axes[0, 2].set_title(f"Mapped Points\nImage {idx+1}\nPos: {len(mapped_pos)}, Neg: {len(mapped_neg)}")
-        axes[0, 2].axis('off')
-        
-        # 4. filtered_points (筛选后的点)
-        axes[1, 0].imshow(image_rgb)
-        filtered_pos = debug_data['filtered_points']['positive']
-        filtered_neg = debug_data['filtered_points']['negative']
-        self._draw_points(axes[1, 0], filtered_pos, filtered_neg)
-        axes[1, 0].set_title(f"Filtered Points\nImage {idx+1}\nPos: {len(filtered_pos)}, Neg: {len(filtered_neg)}")
-        axes[1, 0].axis('off')
-        
-        # 5. original_mask (后处理前的原始掩码)
-        axes[1, 1].imshow(image_rgb)
-        if 'original_mask' in debug_data and debug_data['original_mask'] is not None:
-            original_mask = debug_data['original_mask']
-            axes[1, 1].imshow(original_mask, alpha=0.5, cmap='Oranges')
-            original_area = int(np.sum(original_mask))
-            original_quality = debug_data.get('postprocessing_stats', {}).get('original_quality', 0.0)
-            axes[1, 1].set_title(f"Original Mask\nImage {idx+1}\nArea: {original_area}, Quality: {original_quality:.3f}")
-        else:
-            axes[1, 1].text(0.5, 0.5, "No Original Mask", ha='center', va='center', transform=axes[1, 1].transAxes)
-            axes[1, 1].set_title(f"Original Mask\nImage {idx+1}")
-        axes[1, 1].axis('off')
-        
-        # 6. cleaned_mask (后处理后的清理掩码)
-        axes[1, 2].imshow(image_rgb)
+            p_sam = self._labeled_panel(p_sam, f"Original Mask (SAM) | Img {idx + 1} | N/A")
+
+        p_ema = target_bgr.copy()
         if mask is not None:
-            axes[1, 2].imshow(mask, alpha=0.5, cmap='Greens')
-            mask_area = int(np.sum(mask))
-            mask_quality = debug_data.get('mask_quality', 0.0) or 0.0
-            
-            # 绘制质心和半径
-            cx, cy, radius = self._draw_centroid_and_radius(axes[1, 2], mask, color='cyan')
-            
-            # 显示保留率信息，根据是否实际进行了后处理调整标题
-            retention = debug_data.get('postprocessing_stats', {}).get('area_retention', 1.0)
-            if cx is not None:
-                if retention < 1.0:
-                    axes[1, 2].set_title(f"Cleaned Mask\nImage {idx+1}\nArea: {mask_area}, Centroid: ({cx:.1f}, {cy:.1f}), Radius: {radius:.1f}\nRetention: {retention:.3f}")
-                else:
-                    axes[1, 2].set_title(f"Final Mask (No Processing)\nImage {idx+1}\nArea: {mask_area}, Centroid: ({cx:.1f}, {cy:.1f}), Radius: {radius:.1f}")
-            else:
-                if retention < 1.0:
-                    axes[1, 2].set_title(f"Cleaned Mask\nImage {idx+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}\nRetention: {retention:.3f}")
-                else:
-                    axes[1, 2].set_title(f"Final Mask (No Processing)\nImage {idx+1}\nArea: {mask_area}, Quality: {mask_quality:.3f}")
+            p_ema = self._blend_mask_bgr(p_ema, mask, (0, 255, 0), 0.45)
+            ema_area = int(np.sum(mask))
+            alpha = stats.get('fusion_alpha')
+            sigma = stats.get('display_sigma')
+            thr = stats.get('display_threshold')
+            alpha_s = f"{alpha:.2f}" if alpha is not None else "—"
+            meta = f"a={alpha_s}"
+            if sigma is not None and thr is not None:
+                meta += f" sigma={sigma} thr={thr}"
+            p_ema = self._draw_centroid_cross_bgr(p_ema, mask)
+            p_ema = self._labeled_panel(
+                p_ema,
+                f"Processed (Weights EMA) | Img {idx + 1} | Area {ema_area} | {meta}",
+            )
         else:
-            axes[1, 2].text(0.5, 0.5, "Processing Failed", ha='center', va='center', transform=axes[1, 2].transAxes)
-            axes[1, 2].set_title(f"Final Mask\nImage {idx+1}\nFailed")
-        axes[1, 2].axis('off')
-        
-        # 7. debug信息文字
-        debug_text = self._format_debug_text_with_postprocessing(debug_data, filtered_pos, filtered_neg)
-        axes[1, 3].text(0.05, 0.95, debug_text, transform=axes[1, 3].transAxes, 
-                       fontsize=9, verticalalignment='top', fontfamily='monospace')
-        axes[1, 3].set_title("Debug Information")
-        axes[1, 3].axis('off')
-        
-        # 保存图片
-        self._save_debug_image(fig, image_paths[idx], output_dir, "merged_debug")
-    
-    def _draw_points(self, ax, positive_points: List, negative_points: List):
-        """在图像上绘制正负点"""
+            p_ema = self._labeled_panel(p_ema, f"Processed (Weights EMA) | Img {idx + 1} | Failed")
+
+        grid = self._assemble_grid(
+            [p_ref_seg, p_ref_pts, p_mapped, p_filtered, p_sam, p_ema],
+            rows=2,
+            cols=3,
+        )
+        self._save_cv2_debug_image(grid, image_paths[idx], output_dir, "merged_debug")
+
+    def _resize_panel(self, image_bgr: np.ndarray) -> np.ndarray:
+        h, w = image_bgr.shape[:2]
+        max_w = self.DEBUG_CELL_MAX_WIDTH
+        if w <= max_w:
+            return image_bgr
+        scale = max_w / float(w)
+        return cv2.resize(
+            image_bgr,
+            (max_w, max(1, int(h * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    def _labeled_panel(self, image_bgr: np.ndarray, title: str) -> np.ndarray:
+        img = self._resize_panel(image_bgr)
+        bar = np.zeros((self.DEBUG_TITLE_HEIGHT, img.shape[1], 3), dtype=np.uint8)
+        bar[:] = (32, 32, 32)
+        cv2.putText(
+            bar,
+            title[:120],
+            (8, 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (240, 240, 240),
+            1,
+            cv2.LINE_AA,
+        )
+        return np.vstack([bar, img])
+
+    def _blend_mask_bgr(
+        self,
+        image_bgr: np.ndarray,
+        mask: np.ndarray,
+        color_bgr: tuple,
+        alpha: float,
+    ) -> np.ndarray:
+        out = image_bgr.astype(np.float32)
+        m = mask.astype(bool)
+        if not np.any(m):
+            return image_bgr
+        color = np.array(color_bgr, dtype=np.float32)
+        out[m] = (1.0 - alpha) * out[m] + alpha * color
+        return np.clip(out, 0, 255).astype(np.uint8)
+
+    def _draw_points_bgr(
+        self,
+        image_bgr: np.ndarray,
+        positive_points: List,
+        negative_points: List,
+    ) -> np.ndarray:
+        r = self.DEBUG_POINT_RADIUS
         for x, y in positive_points:
-            ax.scatter(x, y, c='red', s=50, marker='o', edgecolors='white', linewidth=2)
+            cv2.circle(image_bgr, (int(x), int(y)), r, (0, 0, 255), -1, lineType=cv2.LINE_AA)
+            cv2.circle(image_bgr, (int(x), int(y)), r + 1, (255, 255, 255), 1, lineType=cv2.LINE_AA)
         for x, y in negative_points:
-            ax.scatter(x, y, c='blue', s=50, marker='o', edgecolors='white', linewidth=2)
-    
-    def _format_debug_text(self, debug_data: Dict[str, Any], filtered_pos: List, filtered_neg: List) -> str:
-        """格式化debug信息文本"""
-        return f"""Debug Info:
-Status: {debug_data['status']}
-Iteration: {debug_data['iteration']}
-Ref Image: {debug_data['reference_image_idx'] + 1 if debug_data['reference_image_idx'] is not None else 'None'}
+            cv2.circle(image_bgr, (int(x), int(y)), r, (255, 0, 0), -1, lineType=cv2.LINE_AA)
+            cv2.circle(image_bgr, (int(x), int(y)), r + 1, (255, 255, 255), 1, lineType=cv2.LINE_AA)
+        return image_bgr
 
-Point Statistics:
-- Ref Positive: {len(debug_data['reference_points']['positive']) if debug_data['reference_points'] else 0}
-- Ref Negative: {len(debug_data['reference_points']['negative']) if debug_data['reference_points'] else 0}
-- Mapped Positive: {len(debug_data['mapped_points']['positive']) if debug_data['mapped_points'] else 0}
-- Mapped Negative: {len(debug_data['mapped_points']['negative']) if debug_data['mapped_points'] else 0}
-- Filtered Positive: {len(filtered_pos)}
-- Filtered Negative: {len(filtered_neg)}"""
-    
-    def _format_debug_text_with_postprocessing(self, debug_data: Dict[str, Any], filtered_pos: List, filtered_neg: List) -> str:
-        """格式化包含后处理信息的debug文本"""
-        base_text = f"""Debug Info:
-Status: {debug_data['status']}
-Iteration: {debug_data['iteration']}
-Ref Image: {debug_data['reference_image_idx'] + 1 if debug_data['reference_image_idx'] is not None else 'None'}
+    def _draw_centroid_cross_bgr(self, image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        try:
+            from .mask_utils import create_mask_analyzer
+        except ImportError:
+            from mask_utils import create_mask_analyzer
+        analyzer = create_mask_analyzer()
+        cx, cy = analyzer.calculate_mask_centroid(mask.astype(np.uint8))
+        if cx == 0.0 and cy == 0.0:
+            return image_bgr
+        ix, iy = int(round(cx)), int(round(cy))
+        s = 10
+        cv2.line(image_bgr, (ix - s, iy), (ix + s, iy), (255, 255, 0), 2, cv2.LINE_AA)
+        cv2.line(image_bgr, (ix, iy - s), (ix, iy + s), (255, 255, 0), 2, cv2.LINE_AA)
+        return image_bgr
 
-Point Statistics:
-- Ref Positive: {len(debug_data['reference_points']['positive']) if debug_data['reference_points'] else 0}
-- Ref Negative: {len(debug_data['reference_points']['negative']) if debug_data['reference_points'] else 0}
-- Mapped Positive: {len(debug_data['mapped_points']['positive']) if debug_data['mapped_points'] else 0}
-- Mapped Negative: {len(debug_data['mapped_points']['negative']) if debug_data['mapped_points'] else 0}
-- Filtered Positive: {len(filtered_pos)}
-- Filtered Negative: {len(filtered_neg)}"""
-        
-        # 添加后处理统计信息
-        if 'postprocessing_stats' in debug_data:
-            stats = debug_data['postprocessing_stats']
-            area_retention = stats.get('area_retention', 0)
-            if area_retention < 1.0:  # 只有在有实际后处理时才显示详细信息
-                postprocess_text = f"""
+    def _assemble_grid(self, panels: List[np.ndarray], rows: int, cols: int) -> np.ndarray:
+        cell_h = max(p.shape[0] for p in panels)
+        cell_w = max(p.shape[1] for p in panels)
+        normalized = []
+        for p in panels:
+            canvas = np.zeros((cell_h, cell_w, 3), dtype=np.uint8)
+            canvas[: p.shape[0], : p.shape[1]] = p
+            normalized.append(canvas)
+        row_imgs = []
+        for r in range(rows):
+            row_imgs.append(np.hstack(normalized[r * cols : (r + 1) * cols]))
+        return np.vstack(row_imgs)
 
-Postprocessing:
-- Original Area: {int(stats.get('original_area', 0))}
-- Cleaned Area: {int(stats.get('cleaned_area', 0))}
-- Retention: {area_retention:.3f}
-- SAM Quality: {stats.get('sam_quality', 0):.3f}"""
-            else:  # 后处理被跳过或保留率100%
-                postprocess_text = f"""
-
-Postprocessing: Skipped
-- SAM Quality: {stats.get('sam_quality', 0):.3f}"""
-            base_text += postprocess_text
-        
-        return base_text
-    
-    def _save_debug_image(self, fig, image_path: str, output_dir: str, suffix: str):
-        """保存debug图片"""
+    def _save_cv2_debug_image(self, grid_bgr: np.ndarray, image_path: str, output_dir: str, suffix: str):
         vis_dir = Path(output_dir) / "visualization"
         vis_dir.mkdir(parents=True, exist_ok=True)
         base_name = Path(image_path).stem
         debug_path = str(vis_dir / f"{base_name}_{suffix}.png")
-        
-        plt.tight_layout()
-        plt.savefig(debug_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
+        cv2.imwrite(debug_path, grid_bgr)
         print(f"     Saved merged debug image: {debug_path}")
     
     def save_contour_visualization(self, image_paths: List[str], masks: List[np.ndarray], 

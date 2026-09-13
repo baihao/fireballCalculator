@@ -36,6 +36,12 @@ try:
     from .failure_analyzer import create_failure_analyzer
     from .mask_postprocessing import create_contour_processor
     from .output_manager import create_output_manager
+    from .weighted_mask import (
+        create_weighted_mask_processor,
+        DEFAULT_MASK_FUSION_ALPHA,
+        DISPLAY_GAUSSIAN_SIGMA,
+        DISPLAY_WEIGHT_THRESHOLD,
+    )
 except ImportError:
     from prompt_generation import (
         create_prompt_generator,
@@ -47,6 +53,12 @@ except ImportError:
     from failure_analyzer import create_failure_analyzer
     from mask_postprocessing import create_contour_processor
     from output_manager import create_output_manager
+    from weighted_mask import (
+        create_weighted_mask_processor,
+        DEFAULT_MASK_FUSION_ALPHA,
+        DISPLAY_GAUSSIAN_SIGMA,
+        DISPLAY_WEIGHT_THRESHOLD,
+    )
 
 
 class IterativeMaskPropagationSegmenter:
@@ -54,13 +66,15 @@ class IterativeMaskPropagationSegmenter:
 
     POSITIVE_POINTS_PER_MASK = DEFAULT_POSITIVE_POINT_COUNT
     NEGATIVE_POINTS_PER_MASK = DEFAULT_NEGATIVE_POINT_COUNT
-    PROPAGATION_CHAIN_LENGTH = 5
     
     def __init__(self, model_type: str = "vit_b", 
                  checkpoint_path: Optional[str] = None,
                  device: str = "auto",
                  enable_postprocessing: bool = True,
-                 fast_mode: bool = True):
+                 fast_mode: bool = True,
+                 mask_fusion_alpha: float = DEFAULT_MASK_FUSION_ALPHA,
+                 display_gaussian_sigma: float = DISPLAY_GAUSSIAN_SIGMA,
+                 display_weight_threshold: float = DISPLAY_WEIGHT_THRESHOLD):
         """
         初始化分割器
         
@@ -78,6 +92,14 @@ class IterativeMaskPropagationSegmenter:
         self.sam_manager = create_sam_manager(model_type, checkpoint_path, device)
         self.enable_postprocessing = enable_postprocessing
         self.fast_mode = fast_mode
+        self.mask_fusion_alpha = mask_fusion_alpha
+        self.display_gaussian_sigma = display_gaussian_sigma
+        self.display_weight_threshold = display_weight_threshold
+        self.weighted_mask = create_weighted_mask_processor(
+            alpha=mask_fusion_alpha,
+            sigma=display_gaussian_sigma,
+            threshold=display_weight_threshold,
+        )
         
         # 保持向后兼容的属性
         self.model_type = self.sam_manager.model_type
@@ -92,8 +114,9 @@ class IterativeMaskPropagationSegmenter:
         self.contour_processor = create_contour_processor()
         self.output_manager = create_output_manager(self.mask_analyzer)
         
-        # 存储分割结果
+        # 存储分割结果（all_masks 为展示二值；all_mask_weights 为传播用 float 权重）
         self.all_masks = []
+        self.all_mask_weights: List[Optional[np.ndarray]] = []
         self.processed_indices = set()  # 成功处理的图片索引
         self.failed_indices = set()     # 处理失败的图片索引
         self.prompt_indices = set()     # 有prompt点的图片索引
@@ -145,6 +168,7 @@ class IterativeMaskPropagationSegmenter:
         
         # 初始化结果列表
         self.all_masks = [None] * len(image_paths)
+        self.all_mask_weights = [None] * len(image_paths)
         self.processed_indices = set()
         self.failed_indices = set()
         self.prompt_indices = set(prompt_data.keys())
@@ -246,46 +270,6 @@ class IterativeMaskPropagationSegmenter:
             return []
         return self._cache_positive_mask_points(idx, mask)
 
-    def _get_propagation_chain_refs(
-        self, ref_idx: int, target_idx: int, k: Optional[int] = None
-    ) -> List[int]:
-        """
-        以 ref 为链尾，沿传播来源方向（与 ref→target 相反）取最多 k 张已处理图。
-
-        例：ref=7, target=8  → 来源方向 index 递减 → [3,4,5,6,7]
-            ref=9, target=8  → 来源方向 index 递增 → [9,10,11,12,13]
-        """
-        if k is None:
-            k = self.PROPAGATION_CHAIN_LENGTH
-        if ref_idx not in self.processed_indices or self.all_masks[ref_idx] is None:
-            return []
-
-        if target_idx == ref_idx:
-            return [ref_idx]
-
-        # 传播方向 ref→target；来源方向与之相反
-        step = -1 if target_idx > ref_idx else 1
-        chain: List[int] = []
-        cur = ref_idx
-        n_images = len(self.image_paths)
-
-        while len(chain) < k:
-            if cur < 0 or cur >= n_images:
-                break
-            if cur not in self.processed_indices or self.all_masks[cur] is None:
-                if cur != ref_idx:
-                    break
-            else:
-                chain.append(cur)
-            nxt = cur + step
-            if nxt < 0 or nxt >= n_images:
-                break
-            if nxt not in self.processed_indices or self.all_masks[nxt] is None:
-                break
-            cur = nxt
-
-        return sorted(chain)
-
     def _save_prompted_image_details(self, idx: int, mask: np.ndarray, prompt_info: Dict[str, Any]):
         """保存有prompt点图片的详情"""
         try:
@@ -328,7 +312,7 @@ class IterativeMaskPropagationSegmenter:
         try:
             primary_idx = debug_info.get('primary_ref_idx')
             if primary_idx is None and ref_indices:
-                primary_idx = ref_indices[-1]
+                primary_idx = ref_indices[0]
             self.propagation_details[target_idx] = {
                 'reference_points': {
                     'positive': debug_info.get('reference_positive', []),
@@ -396,8 +380,9 @@ class IterativeMaskPropagationSegmenter:
                 original_area = int(np.sum(best_mask)) if best_mask is not None else 0
                 print(f"  📊 Prompt掩码: 面积={original_area}, SAM质量分数={sam_quality:.3f}")
                 
-                # 对直接用特征点得到的掩码执行后处理
-                final_mask = self._apply_mask_postprocessing(best_mask, original_area, sam_quality, idx)
+                final_mask = self._commit_weighted_frame_mask(
+                    best_mask, idx, sam_quality, original_area, ref_idx=None
+                )
                 
                 # 记录结果
                 self.all_masks[idx] = final_mask
@@ -474,16 +459,10 @@ class IterativeMaskPropagationSegmenter:
                     # 记录开始时间
                     start_time = time.time()
                     
-                    chain_refs = self._get_propagation_chain_refs(processed_idx, unprocessed_idx)
-                    if not chain_refs:
-                        print(f"      ❌ 无法构建传播链，跳过")
-                        continue
-                    chain_display = [i + 1 for i in chain_refs]
-                    print(f"      传播链（来源方向）: {chain_display}")
+                    print(f"      参考图片: {processed_idx + 1}")
 
                     mask = self._propagate_mask_from_reference(
                         image_paths[unprocessed_idx],
-                        chain_refs,
                         processed_idx,
                         unprocessed_idx,
                     )
@@ -605,11 +584,10 @@ class IterativeMaskPropagationSegmenter:
     def _propagate_mask_from_reference(
         self,
         target_image_path: str,
-        ref_indices: List[int],
-        primary_ref_idx: int,
+        ref_idx: int,
         target_idx: int,
     ) -> Optional[np.ndarray]:
-        """从传播链上多张参考图传播掩码到目标图。"""
+        """从单张参考图传播掩码到目标图。"""
         try:
             target_image = imread_unicode(target_image_path, cv2.IMREAD_COLOR)
             if target_image is None:
@@ -618,46 +596,37 @@ class IterativeMaskPropagationSegmenter:
 
             target_image_rgb = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
 
-            reference_entries: List[Dict[str, Any]] = []
-            for ref_idx in ref_indices:
-                ref_path = self.image_paths[ref_idx]
-                ref_image = imread_unicode(ref_path, cv2.IMREAD_COLOR)
-                if ref_image is None:
-                    print(f"    ⚠️ 无法读取参考图片: {ref_path}")
-                    continue
-                ref_mask = self.all_masks[ref_idx]
-                if ref_mask is None:
-                    continue
-                positive_points = self._get_cached_positive_mask_points(ref_idx, ref_mask)
-                reference_entries.append(
-                    {
-                        'idx': ref_idx,
-                        'image_rgb': cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB),
-                        'mask': ref_mask,
-                        'positive_points': positive_points,
-                    }
-                )
-
-            if not reference_entries:
-                print(f"    ⚠️ 无有效参考图条目")
+            ref_path = self.image_paths[ref_idx]
+            ref_image = imread_unicode(ref_path, cv2.IMREAD_COLOR)
+            if ref_image is None:
+                print(f"    ⚠️ 无法读取参考图片: {ref_path}")
                 return None
 
-            primary_entry = next(
-                (e for e in reference_entries if e['idx'] == primary_ref_idx),
-                reference_entries[-1],
-            )
+            ref_mask = self.all_masks[ref_idx]
+            if ref_mask is None:
+                print(f"    ⚠️ 参考图 {ref_idx + 1} 掩码为空")
+                return None
 
-            target_points, target_labels, debug_info = (
-                self.prompt_generator.generate_points_multi_reference(
-                    reference_entries=reference_entries,
-                    primary_entry=primary_entry,
-                    target_image=target_image_rgb,
-                    num_positive=self.POSITIVE_POINTS_PER_MASK,
-                    num_negative=self.NEGATIVE_POINTS_PER_MASK,
-                    return_debug_info=True,
-                )
+            ref_image_rgb = cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB)
+            negative_points = self.prompt_generator.sample_points_from_mask(
+                ref_mask, self.NEGATIVE_POINTS_PER_MASK, inside_mask=False
             )
+            predefined = {'negative': negative_points}
 
+            result = self.prompt_generator.generate_points_with_rgb_similarity(
+                ref_image_rgb,
+                ref_mask,
+                target_image_rgb,
+                return_debug_info=True,
+                predefined_reference_points=predefined,
+            )
+            if len(result) == 3:
+                target_points, target_labels, debug_info = result
+            else:
+                target_points, target_labels = result
+                debug_info = {}
+
+            ref_indices = [ref_idx]
             self._save_propagated_image_details(target_idx, ref_indices, debug_info)
             
             positive_count = sum(target_labels)
@@ -706,9 +675,12 @@ class IterativeMaskPropagationSegmenter:
                 original_area = np.sum(best_mask)
                 print(f"    📊 原始掩码: 面积={original_area}, SAM质量分数={sam_quality:.3f}")
                 
-                # 执行后处理
-                final_mask = self._apply_mask_postprocessing(
-                    best_mask, original_area, sam_quality, target_idx
+                final_mask = self._commit_weighted_frame_mask(
+                    best_mask,
+                    target_idx,
+                    float(sam_quality),
+                    int(original_area),
+                    ref_idx=ref_idx,
                 )
                 
                 # 完成传播详情保存（使用最终掩码）
@@ -780,74 +752,97 @@ class IterativeMaskPropagationSegmenter:
         
         return filtered_coords, filtered_labels
     
-    def _apply_mask_postprocessing(self, best_mask: np.ndarray, original_area: int, 
-                                  sam_quality: float, target_idx: int) -> np.ndarray:
+    def _reference_weights_for_fusion(self, ref_idx: int) -> Optional[np.ndarray]:
+        w = None
+        if ref_idx < len(self.all_mask_weights):
+            w = self.all_mask_weights[ref_idx]
+        if w is not None:
+            return w
+        ref_display = self.all_masks[ref_idx] if ref_idx < len(self.all_masks) else None
+        if ref_display is not None:
+            return self.weighted_mask.sam_mask_to_weights(ref_display)
+        return None
+
+    def _commit_weighted_frame_mask(
+        self,
+        sam_mask: np.ndarray,
+        target_idx: int,
+        sam_quality: float,
+        original_area: int,
+        ref_idx: Optional[int] = None,
+    ) -> np.ndarray:
         """
-        应用掩码后处理
-        
-        Args:
-            best_mask: 原始最佳掩码
-            original_area: 原始掩码面积
-            sam_quality: SAM质量分数
-            target_idx: 目标图像索引
-            
-        Returns:
-            np.ndarray: 处理后的最终掩码
+        SAM 二值掩码 → 与参考权重融合 → 存 float 权重 → 高斯+阈值得展示 mask。
         """
-        if self.enable_postprocessing:
-            # 使用双连通域评分过滤并获取细节
-            details = self.contour_processor.filter_by_dual_connected_components_with_details(best_mask)
-            cleaned_mask = details.get("mask", best_mask)
-            
-            # 记录清理后的信息
-            cleaned_area = np.sum(cleaned_mask) if cleaned_mask is not None else 0
-            area_retention = cleaned_area / original_area if original_area > 0 else 0
-            
-            print(f"    🧹 清理后掩码: 面积={cleaned_area}, 保留率={area_retention:.3f}")
-            
-            # 保存后处理对比信息到传播详情
-            if target_idx in self.propagation_details:
-                self.propagation_details[target_idx]['original_mask'] = best_mask
-                self.propagation_details[target_idx]['cleaned_mask'] = cleaned_mask
-                stats = {
-                    'original_area': original_area,
-                    'cleaned_area': cleaned_area,
-                    'area_retention': area_retention,
-                    'sam_quality': sam_quality  # SAM原生质量分数
-                }
-                # 附加后处理细节（面积、质心、得分等）
-                if isinstance(details, dict):
-                    stats.update({
-                        'pp_area': details.get('area', 0.0),
-                        'pp_centroid': details.get('centroid', (0.0, 0.0)),
-                        'pp_scores': details.get('scores', {})
-                    })
-                self.propagation_details[target_idx]['postprocessing_stats'] = stats
-                
-                # 保存后处理的详细信息供几何计算使用
-                self.propagation_details[target_idx]['postprocessing_details'] = {
-                    'area': details.get('area', 0.0),
-                    'centroid': details.get('centroid', (0.0, 0.0)),
-                    'contour': details.get('contour', None),
-                    'scores': details.get('scores', {})
-                }
-            
-            return cleaned_mask
+        wm = self.weighted_mask
+        p_sam = wm.sam_mask_to_weights(sam_mask)
+
+        if ref_idx is not None:
+            ref_w = self._reference_weights_for_fusion(ref_idx)
+            if ref_w is not None:
+                p_o = wm.resize_mask_weights(ref_w, p_sam.shape[:2])
+                weights = wm.fuse_sam_with_reference_weights(
+                    p_sam, p_o, alpha=self.mask_fusion_alpha
+                )
+                print(
+                    f"    🔗 权重融合 α={self.mask_fusion_alpha:.2f}: "
+                    f"SAM + 参考帧 {ref_idx + 1}"
+                )
+            else:
+                weights = p_sam
         else:
-            print(f"    ⚡ 跳过后处理，直接使用原始掩码")
-            
-            # 不进行后处理时的信息保存
-            if target_idx in self.propagation_details:
-                self.propagation_details[target_idx]['original_mask'] = best_mask
-                self.propagation_details[target_idx]['cleaned_mask'] = best_mask  # 与原始掩码相同
-                self.propagation_details[target_idx]['postprocessing_stats'] = {
-                    'original_area': original_area,
-                    'cleaned_area': original_area,  # 未清理，面积相同
-                    'area_retention': 1.0,  # 100%保留
-                    'sam_quality': sam_quality
-                }
-            
-            return best_mask
+            weights = p_sam
+
+        if target_idx < len(self.all_mask_weights):
+            self.all_mask_weights[target_idx] = weights
+
+        if self.enable_postprocessing:
+            display_mask, pp = wm.weights_to_display_mask_and_contour(
+                weights,
+                sigma=self.display_gaussian_sigma,
+                threshold=self.display_weight_threshold,
+            )
+        else:
+            display_mask = sam_mask.astype(bool)
+            pp = {
+                "area": float(np.sum(display_mask)),
+                "centroid": self.mask_analyzer.calculate_mask_centroid(
+                    display_mask.astype(np.uint8)
+                ),
+                "contour": None,
+            }
+
+        if display_mask is None:
+            display_mask = np.zeros(sam_mask.shape[:2], dtype=bool)
+
+        cleaned_area = int(np.sum(display_mask))
+        area_retention = cleaned_area / original_area if original_area > 0 else 0.0
+        print(
+            f"    🧹 展示掩码: 面积={cleaned_area}, 保留率={area_retention:.3f} "
+            f"(σ={self.display_gaussian_sigma}, thr={self.display_weight_threshold})"
+        )
+
+        if target_idx in self.propagation_details:
+            self.propagation_details[target_idx]['original_mask'] = sam_mask
+            self.propagation_details[target_idx]['cleaned_mask'] = display_mask
+            self.propagation_details[target_idx]['mask_weights'] = weights
+            self.propagation_details[target_idx]['postprocessing_stats'] = {
+                'original_area': original_area,
+                'cleaned_area': cleaned_area,
+                'area_retention': area_retention,
+                'sam_quality': sam_quality,
+                'fusion_alpha': self.mask_fusion_alpha,
+                'display_sigma': self.display_gaussian_sigma,
+                'display_threshold': self.display_weight_threshold,
+            }
+            self.propagation_details[target_idx]['postprocessing_details'] = {
+                'area': pp.get('area', 0.0),
+                'centroid': pp.get('centroid', (0.0, 0.0)),
+                'contour': pp.get('contour', None),
+                'scores': {},
+            }
+
+        return display_mask
     
     
 
@@ -856,7 +851,10 @@ def create_iterative_segmenter(model_type: str = "vit_b",
                                checkpoint_path: Optional[str] = None,
                                device: str = "auto",
                                enable_postprocessing: bool = True,
-                               fast_mode: bool = True) -> IterativeMaskPropagationSegmenter:
+                               fast_mode: bool = True,
+                               mask_fusion_alpha: float = DEFAULT_MASK_FUSION_ALPHA,
+                               display_gaussian_sigma: float = DISPLAY_GAUSSIAN_SIGMA,
+                               display_weight_threshold: float = DISPLAY_WEIGHT_THRESHOLD) -> IterativeMaskPropagationSegmenter:
     """
     创建迭代掩码传播分割器的便捷函数
     
@@ -870,7 +868,16 @@ def create_iterative_segmenter(model_type: str = "vit_b",
     Returns:
         IterativeMaskPropagationSegmenter: 分割器实例
     """
-    return IterativeMaskPropagationSegmenter(model_type, checkpoint_path, device, enable_postprocessing, fast_mode)
+    return IterativeMaskPropagationSegmenter(
+        model_type,
+        checkpoint_path,
+        device,
+        enable_postprocessing,
+        fast_mode,
+        mask_fusion_alpha,
+        display_gaussian_sigma,
+        display_weight_threshold,
+    )
 
 
 if __name__ == "__main__":

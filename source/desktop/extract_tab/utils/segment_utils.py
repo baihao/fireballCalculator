@@ -217,9 +217,8 @@ def run_segmentation_direct(
         image_segment_dir = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "image_segment")
         )
+        # 桌面端不写入 merged_debug / contour 等 visualization（与 --no-viz 一致）
         output_dir = os.path.join(image_segment_dir, "json_test_output")
-        if on_output_line:
-            on_output_line(f"📁 分割可视化输出目录: {output_dir}\n")
 
         # 创建日志捕获流
         original_stdout = sys.stdout
@@ -227,12 +226,11 @@ def run_segmentation_direct(
         
         # 重定向 stdout 以捕获所有 print 输出
         with redirect_stdout(log_stream):
-            # 直接调用 test_from_json（保存可视化与正负点 debug 图，启用快速模式）
             success = test_from_json(
                 json_path=sequence_file_path,
-                generate_visualization=True,  # 保存可视化结果与正负点图片供 debug
+                generate_visualization=False,
                 output_dir=output_dir,
-                fast_mode=True  # 默认启用快速模式
+                fast_mode=True,
             )
         
         return success

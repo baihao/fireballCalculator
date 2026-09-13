@@ -1,62 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""传播链选取与多参考点生成单元测试（不加载 SAM）。"""
+"""多参考点生成单元测试（不加载 SAM）。"""
 
 import unittest
 
 import numpy as np
 
 from prompt_generation import PromptPointGenerator
-
-
-class PropagationChainRefsTest(unittest.TestCase):
-    """与 IterativeMaskPropagationSegmenter._get_propagation_chain_refs 同逻辑。"""
-
-    PROPAGATION_CHAIN_LENGTH = 5
-
-    def _chain(self, ref_idx, target_idx, processed, n_images=20):
-        processed_indices = set(processed)
-        all_masks = [object() if i in processed_indices else None for i in range(n_images)]
-
-        k = self.PROPAGATION_CHAIN_LENGTH
-        if ref_idx not in processed_indices or all_masks[ref_idx] is None:
-            return []
-        if target_idx == ref_idx:
-            return [ref_idx]
-        step = -1 if target_idx > ref_idx else 1
-        chain = []
-        cur = ref_idx
-        while len(chain) < k:
-            if cur < 0 or cur >= n_images:
-                break
-            if cur not in processed_indices or all_masks[cur] is None:
-                if cur != ref_idx:
-                    break
-            else:
-                chain.append(cur)
-            nxt = cur + step
-            if nxt < 0 or nxt >= n_images:
-                break
-            if nxt not in processed_indices or all_masks[nxt] is None:
-                break
-            cur = nxt
-        return sorted(chain)
-
-    def test_forward_propagation_chain(self):
-        processed = list(range(0, 8))
-        self.assertEqual(self._chain(7, 8, processed), [3, 4, 5, 6, 7])
-
-    def test_backward_propagation_chain(self):
-        processed = list(range(0, 14))
-        self.assertEqual(self._chain(9, 8, processed), [9, 10, 11, 12, 13])
-
-    def test_short_chain(self):
-        processed = [3, 4]
-        self.assertEqual(self._chain(4, 5, processed), [3, 4])
-
-    def test_gap_stops_chain(self):
-        processed = [3, 5, 6, 7]
-        self.assertEqual(self._chain(7, 8, processed), [5, 6, 7])
 
 
 class MultiReferencePromptTest(unittest.TestCase):
