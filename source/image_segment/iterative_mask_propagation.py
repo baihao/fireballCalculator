@@ -660,14 +660,24 @@ class IterativeMaskPropagationSegmenter:
 
             self._save_propagated_image_details(target_idx, ref_indices, debug_info)
             
-            # 记录点生成信息
             positive_count = sum(target_labels)
             negative_count = len(target_labels) - positive_count
             print(f"    📍 生成了 {positive_count} 个正点和 {negative_count} 个负点")
-            
-            # 检查正点数量：没有正点无法准确定位火球
-            if positive_count == 0:
-                print(f"    ❌ 没有正点，无法准确定位火球，标记为失败")
+
+            filtered_pos = debug_info.get('filtered_positive') or []
+            filtered_neg = debug_info.get('filtered_negative') or []
+            if debug_info.get('projection_failed') or len(filtered_pos) < 2 or len(filtered_neg) < 2:
+                print(
+                    f"    ❌ 投射失败（滤后正 {len(filtered_pos)} / 负 {len(filtered_neg)}），"
+                    f"不进行 SAM 分割"
+                )
+                return None
+
+            if positive_count < 2 or negative_count < 2:
+                print(
+                    f"    ❌ 最终 prompt 正负点不足（正 {positive_count} / 负 {negative_count}），"
+                    f"标记为分割失败"
+                )
                 return None
             
             # 使用筛选后的点进行SAM分割

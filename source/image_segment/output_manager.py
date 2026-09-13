@@ -6,11 +6,29 @@
 """
 
 import os
+import shutil
 import cv2
 import json
 import numpy as np
 from pathlib import Path
 from typing import List, Optional, Set, Any, Dict, Tuple
+
+
+def clear_segmentation_output_dir(output_dir: str) -> None:
+    """
+    清空上次分割导出的 masks / visualization / contour / summary，
+    避免与本次序列混在一起（仅覆盖同名文件时无法删掉旧序列残留）。
+    """
+    root = Path(output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    for name in ("masks", "visualization", "contour_visualization"):
+        sub = root / name
+        if sub.is_dir():
+            shutil.rmtree(sub)
+    summary = root / "segmentation_summary.png"
+    if summary.is_file():
+        summary.unlink()
+    print(f"🗑️ 已清空输出目录中的旧分割产物: {root.resolve()}")
 
 
 class SegmentationOutputManager:

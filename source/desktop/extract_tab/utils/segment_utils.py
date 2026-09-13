@@ -213,17 +213,25 @@ def run_segmentation_direct(
                 on_output_line(f"❌ 序列文件不存在: {sequence_file_path}\n")
             return False
         
+        # 固定写到 image_segment/json_test_output（相对路径会随桌面端 cwd 落到 desktop/ 下）
+        image_segment_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "image_segment")
+        )
+        output_dir = os.path.join(image_segment_dir, "json_test_output")
+        if on_output_line:
+            on_output_line(f"📁 分割可视化输出目录: {output_dir}\n")
+
         # 创建日志捕获流
         original_stdout = sys.stdout
         log_stream = LogCaptureStream(on_output_line, original_stdout)
         
         # 重定向 stdout 以捕获所有 print 输出
         with redirect_stdout(log_stream):
-            # 直接调用 test_from_json（禁用可视化，启用快速模式）
+            # 直接调用 test_from_json（保存可视化与正负点 debug 图，启用快速模式）
             success = test_from_json(
                 json_path=sequence_file_path,
-                generate_visualization=False,  # 桌面应用不需要可视化
-                output_dir="json_test_output",
+                generate_visualization=True,  # 保存可视化结果与正负点图片供 debug
+                output_dir=output_dir,
                 fast_mode=True  # 默认启用快速模式
             )
         

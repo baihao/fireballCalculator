@@ -8,7 +8,7 @@
 import cv2
 import numpy as np
 from PySide6.QtWidgets import QLabel, QWidget
-from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtCore import Qt, Signal, QPoint, QSize
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QMouseEvent
 from typing import List, Tuple, Optional, Dict, Any
 from collections import OrderedDict
@@ -333,34 +333,59 @@ class InteractiveImageWidget(QLabel):
         except Exception as e:
             print(f"❌ 绘制分割结果失败: {e}")
     
+    def _scale_target_size(self) -> QSize:
+        """按当前控件内容区缩放，与 QLabel 实际绘制区域一致。"""
+        cr = self.contentsRect()
+        w = max(1, min(cr.width(), self.maximumWidth()))
+        h = max(1, min(cr.height(), self.maximumHeight()))
+        return QSize(w, h)
+
+    def _logical_pixmap_size(self) -> Tuple[int, int]:
+        if self.display_pixmap is None:
+            return 0, 0
+        pm = self.display_pixmap
+        dpr = float(pm.devicePixelRatio()) if pm.devicePixelRatio() > 0 else 1.0
+        return int(round(pm.width() / dpr)), int(round(pm.height() / dpr))
+
+    def _pixmap_layout_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        """
+        与 QLabel（AlignCenter + setPixmap）一致的 pixmap 区域，坐标相对 widget。
+        """
+        if self.display_pixmap is None:
+            return None
+        cr = self.contentsRect()
+        pm_w, pm_h = self._logical_pixmap_size()
+        if pm_w <= 0 or pm_h <= 0:
+            return None
+        x = cr.x() + max(0, (cr.width() - pm_w) // 2)
+        y = cr.y() + max(0, (cr.height() - pm_h) // 2)
+        return x, y, pm_w, pm_h
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.original_image is not None:
+            self.update_display()
+
     def _convert_and_display(self, image: np.ndarray):
         """将numpy图像转换为QPixmap并显示"""
         try:
-            # 转换为QPixmap
             h, w, ch = image.shape
             bytes_per_line = ch * w
-            qt_image = QPixmap.fromImage(
-                QLabel().grab().toImage().rgbSwapped()
-            )
-            
-            # 使用更简单的方法
-            # 将numpy数组转换为字节
             image_bytes = image.tobytes()
-            
-            # 创建QPixmap
+
             from PySide6.QtGui import QImage
             qt_image = QImage(image_bytes, w, h, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
-            
-            # 缩放以适应固定的最大尺寸
-            max_size = self.maximumSize()
+
             scaled_pixmap = pixmap.scaled(
-                max_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                self._scale_target_size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
             )
-            
+
             self.display_pixmap = scaled_pixmap
             self.setPixmap(scaled_pixmap)
-            
+
         except Exception as e:
             print(f"❌ 转换显示失败: {e}")
     
@@ -405,24 +430,18 @@ class InteractiveImageWidget(QLabel):
             if self.display_pixmap is None or self.original_image is None:
                 return None, None
             
-            # 获取显示的pixmap尺寸和位置
-            pixmap_rect = self.display_pixmap.rect()
-            widget_rect = self.rect()
-            
-            # 计算pixmap在控件中的位置（居中显示）
-            pixmap_x = (widget_rect.width() - pixmap_rect.width()) // 2
-            pixmap_y = (widget_rect.height() - pixmap_rect.height()) // 2
-            
-            # 检查点击是否在pixmap区域内
+            layout = self._pixmap_layout_rect()
+            if layout is None:
+                return None, None
+            pixmap_x, pixmap_y, pm_w, pm_h = layout
+
             relative_x = widget_x - pixmap_x
             relative_y = widget_y - pixmap_y
-            
-            if (0 <= relative_x < pixmap_rect.width() and 
-                0 <= relative_y < pixmap_rect.height()):
-                
-                # 将pixmap坐标转换为原始图像坐标
-                scale_x = self.original_image.shape[1] / pixmap_rect.width()
-                scale_y = self.original_image.shape[0] / pixmap_rect.height()
+
+            if 0 <= relative_x < pm_w and 0 <= relative_y < pm_h:
+
+                scale_x = self.original_image.shape[1] / pm_w
+                scale_y = self.original_image.shape[0] / pm_h
                 
                 image_x = int(relative_x * scale_x)
                 image_y = int(relative_y * scale_y)
