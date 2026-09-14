@@ -109,14 +109,16 @@ import warnings
 # 导入数据过滤模块（优先相对导入，其次绝对导入）
 apply_data_filter = None
 try:
-    from .data_filter import apply_data_filter  # 同包相对导入
+    from .data_filter import apply_data_filter, robust_diameter_ceiling  # 同包相对导入
 except Exception:
     try:
-        from diameter_process.data_filter import apply_data_filter  # 绝对导入
+        from diameter_process.data_filter import apply_data_filter, robust_diameter_ceiling
     except Exception:
         try:
-            from data_filter import apply_data_filter  # 退而求其次的顶层导入
+            from data_filter import apply_data_filter, robust_diameter_ceiling
         except Exception:
+            apply_data_filter = None
+            robust_diameter_ceiling = None
             print("⚠️ 无法导入 data_filter 模块，将跳过数据过滤步骤")
 
 
@@ -151,6 +153,35 @@ class DiameterDragFitter:
         """
         return K * (1 - B * np.exp(-C * t**2))
     
+    @staticmethod
+    def _early_fit_weights(t: np.ndarray, emphasis_ms: float = 200.0) -> np.ndarray:
+        """抬高序列起点附近权重，避免长平台段淹没初始尺度。"""
+        if len(t) == 0:
+            return np.array([])
+        t0 = float(t[0])
+        dt = np.maximum(np.asarray(t, dtype=float) - t0, 0.0)
+        return 1.0 + 4.0 * np.exp(-dt / emphasis_ms)
+
+    @staticmethod
+    def _B_lower_bound_from_early_diameter(
+        t: np.ndarray, D: np.ndarray, early_window_ms: float = 80.0
+    ) -> float:
+        """
+        D(0)=K*(1-B)；用过滤后早期稳健低分位约束 B 下界（不用单点 min，避免过紧）。
+        """
+        if len(t) == 0:
+            return 0.1
+        t0 = float(t[0])
+        early = t <= t0 + early_window_ms
+        if int(np.sum(early)) < 5:
+            return 0.1
+        d_lo = float(np.percentile(D[early], 20))
+        k_ref = float(np.max(D))
+        if k_ref <= d_lo:
+            return 0.1
+        b_lo = 1.0 - (d_lo / k_ref) * 0.95
+        return float(max(0.1, min(0.66, b_lo)))
+
     def _estimate_C_bounds(self, t: np.ndarray, D: np.ndarray, verbose: bool = True) -> Tuple[float, float]:
         """
         根据数据范围动态估计C参数的上下界
@@ -233,7 +264,18 @@ class DiameterDragFitter:
             
             # 2. 估计B（初始拖曳系数）
             # 基于初始直径估计：D(0) = K*(1-B)
-            initial_diameter = diameter_data[0] if len(diameter_data) > 0 else 0
+            if len(diameter_data) > 0:
+                t_arr = np.asarray(time_data, dtype=float)
+                t0 = float(t_arr[0])
+                early = t_arr <= t0 + 50.0
+                if int(np.sum(early)) >= 5:
+                    initial_diameter = float(
+                        np.percentile(np.asarray(diameter_data)[early], 20)
+                    )
+                else:
+                    initial_diameter = float(diameter_data[0])
+            else:
+                initial_diameter = 0
             if K_init > 0 and initial_diameter > 0:
                 B_init = max(0.1, min(0.99, 1 - initial_diameter / K_init))
             else:
@@ -338,20 +380,28 @@ class DiameterDragFitter:
                 original_t = t.copy()
                 original_D = D.copy()
                 
-                filtered_t, filtered_D = apply_data_filter(t.tolist(), D.tolist(), drop_threshold, window_size)
+                filtered_t, filtered_D, filter_stats = apply_data_filter(
+                    t.tolist(), D.tolist(), drop_threshold, window_size
+                )
                 t = np.array(filtered_t)
                 D = np.array(filtered_D)
-                
+
                 filtering_info = {
                     'enabled': True,
                     'drop_threshold': drop_threshold,
                     'window_size': window_size,
                     'original_data_points': len(original_t),
                     'filtered_data_points': len(t),
-                    'data_retention_rate': len(t) / len(original_t),
+                    'data_retention_rate': filter_stats.get(
+                        'data_retention_rate', len(t) / len(original_t)
+                    ),
                     'original_time_range': [float(original_t[0]), float(original_t[-1])],
-                    'filtered_time_range': [float(t[0]), float(t[-1])],
-                    'cutoff_time': float(t[-1]) if len(t) < len(original_t) else None
+                    'filtered_time_range': [float(t[0]), float(t[-1])] if len(t) else [],
+                    'cutoff_time': filter_stats.get('cutoff_time'),
+                    'outliers_removed': filter_stats.get('outliers_removed', 0),
+                    'inlier_mask': filter_stats.get('inlier_mask', []),
+                    'tail_upper_bound_m': filter_stats.get('tail_upper_bound_m'),
+                    'smoke_cutoff_applied': filter_stats.get('smoke_cutoff_applied', False),
                 }
                 
                 print(f"数据过滤完成: 保留 {len(t)}/{len(original_t)} 个数据点 ({filtering_info['data_retention_rate']:.1%})")
@@ -450,7 +500,8 @@ class DiameterDragFitter:
             # 设置参数边界（考虑毫秒时间单位）
             max_D = np.max(D)
             C_min, C_max = self._estimate_C_bounds(t, D)
-            lower_bounds = [max_D, 0.1, C_min]
+            b_lo = self._B_lower_bound_from_early_diameter(t, D)
+            lower_bounds = [max_D, b_lo, C_min]
             upper_bounds = [max_D * 2, 0.99, C_max]
             
             # 执行curve_fit
@@ -508,24 +559,33 @@ class DiameterDragFitter:
             # 阶段1：全局优化（差分进化算法）
             print("阶段1: 全局优化...")
             
+            sample_w = self._early_fit_weights(t)
+
             def objective(params):
                 K, B, C = params
                 try:
                     predicted = self.drag_function(t, K, B, C)
-                    residuals = D - predicted
+                    residuals = (D - predicted) * np.sqrt(sample_w)
                     return np.sum(residuals**2)
-                except:
-                    return 1e10  # 返回大值表示拟合失败
+                except Exception:
+                    return 1e10
             
-            # 设置参数边界（考虑毫秒时间单位）
-            max_D = np.max(D)
-            min_D = np.min(D)
+            # K 下界：过滤后序列最大值；上界用稳健天花板（避免 raw 尖峰抬高 K）
+            max_D = float(np.max(D))
+            if robust_diameter_ceiling is not None and len(t) > 0:
+                k_ceil = robust_diameter_ceiling(D.tolist(), t.tolist())
+                max_D = min(max_D, k_ceil)
             C_min, C_max = self._estimate_C_bounds(t, D)
+            b_lo = self._B_lower_bound_from_early_diameter(t, D)
             bounds = [
-                (max_D, max_D * 2),      # K: 最大直径到2倍最大直径（更严格）
-                (0.1, 0.99),             # B: 0.1到0.99（更合理范围）
-                (C_min, C_max)           # C: 根据数据范围动态估计
+                (max(max_D * 0.85, float(np.min(D))), max(max_D * 1.25, max_D + 0.5)),
+                (b_lo, 0.99),
+                (C_min, C_max),
             ]
+            if b_lo > 0.2:
+                early = t <= t[0] + 80.0
+                d_ref = float(np.percentile(D[early], 20)) if int(np.sum(early)) >= 5 else float(D[0])
+                print(f"  早期直径约束: D_p20≈{d_ref:.2f}m → B ≥ {b_lo:.3f}")
             
             # 使用差分进化算法进行全局优化
             result = differential_evolution(

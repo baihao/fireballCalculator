@@ -263,7 +263,9 @@ def test_data_filter(file_path: str, output_dir: Optional[str] = None,
             print(f"✓ 检测到烟雾干扰，截断时间: {cutoff_times[0]:.1f}ms")
             
             # 应用过滤
-            filtered_time, filtered_diameter = apply_data_filter(time_data, diameter_data, drop_threshold, window_size)
+            filtered_time, filtered_diameter, _ = apply_data_filter(
+                time_data, diameter_data, drop_threshold, window_size
+            )
             print(f"✓ 过滤后数据点: {len(filtered_time)}")
         else:
             print("✓ 未检测到烟雾干扰，保留所有数据")

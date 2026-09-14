@@ -88,7 +88,9 @@ def test_simulated_data():
         
         if cutoff_times:
             print(f"✓ 检测到烟雾干扰，截断时间: {cutoff_times[0]:.1f}ms")
-            filtered_time, filtered_diameter = apply_data_filter(time_data, diameter_data, drop_threshold, window_size)
+            filtered_time, filtered_diameter, _ = apply_data_filter(
+                time_data, diameter_data, drop_threshold, window_size
+            )
             filtered_count = len(filtered_time)
         else:
             print("✓ 未检测到烟雾干扰")

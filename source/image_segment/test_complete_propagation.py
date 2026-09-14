@@ -17,6 +17,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root / "source"))
 
 from image_segment.iterative_mask_propagation import create_iterative_segmenter
+from image_segment.output_manager import clear_segmentation_output_dir
 from image_segment.visualization_utils import create_visualizer
 
 def create_test_images():
@@ -300,6 +301,8 @@ def test_from_json(json_path: str,
         
         # 执行分割
         print("\n4. 执行迭代掩码传播分割...", flush=True)
+        if generate_visualization and output_dir:
+            clear_segmentation_output_dir(output_dir)
         masks, geometries = segmenter.segment_sequence_with_iterative_propagation(
             image_paths=image_paths,
             prompt_data=prompt_data,

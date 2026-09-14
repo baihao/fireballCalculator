@@ -5,15 +5,27 @@ Prompt点生成模块
 负责从参考图片生成目标图片的prompt点，包括采样、映射和筛选功能
 """
 
+import math
 import cv2
 import numpy as np
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
+
+# 参考 mask 上采样的正点候选数；滤后在目标图上均匀采样为 SAM 正点
+POSITIVE_REFERENCE_CANDIDATE_COUNT = 40
+DEFAULT_POSITIVE_POINT_COUNT = 10
+DEFAULT_NEGATIVE_POINT_COUNT = 10
+# 负点候选池相对最终数量的倍数（filter / 均匀采样前多采一些）
+NEGATIVE_CANDIDATE_POOL_FACTOR = 2
+# 映射+RGB 滤后至少需要的正负点数，否则视为投射失败
+MIN_PROJECTED_POINTS_PER_LABEL = 2
+# 目标像素在 RGB 池中至少相似的个数：max(2, 10%·池大小)
+POOL_SIMILAR_MATCH_FRACTION = 0.10
 
 
 class PromptPointGenerator:
     """Prompt点生成器"""
     
-    def __init__(self, very_similar_threshold: float = 8.0, similar_threshold: float = 12.0):
+    def __init__(self, very_similar_threshold: float = 16.0, similar_threshold: float = 32.0):
         """
         初始化Prompt点生成器
         
@@ -23,6 +35,59 @@ class PromptPointGenerator:
         """
         self.very_similar_threshold = very_similar_threshold
         self.similar_threshold = similar_threshold
+
+    @staticmethod
+    def _projection_has_enough_points(
+        filtered_positive: List[Tuple[int, int]],
+        filtered_negative: List[Tuple[int, int]],
+    ) -> bool:
+        return (
+            len(filtered_positive) >= MIN_PROJECTED_POINTS_PER_LABEL
+            and len(filtered_negative) >= MIN_PROJECTED_POINTS_PER_LABEL
+        )
+
+    def _sample_reference_point_candidates(
+        self,
+        reference_mask: np.ndarray,
+        num_positive: int = POSITIVE_REFERENCE_CANDIDATE_COUNT,
+        num_negative: int = DEFAULT_NEGATIVE_POINT_COUNT,
+    ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+        """从参考 mask 内/外采样正负点候选（单 ref 路径共用）。"""
+        positive_candidates = self.sample_points_from_mask(
+            reference_mask, num_points=num_positive, inside_mask=True
+        )
+        negative_candidates = self.sample_points_from_mask(
+            reference_mask, num_points=num_negative, inside_mask=False
+        )
+        return positive_candidates, negative_candidates
+
+    def _resolve_reference_candidates(
+        self,
+        reference_mask: np.ndarray,
+        predefined_reference_points: Optional[Dict[str, List[Tuple[int, int]]]],
+        num_positive: int = POSITIVE_REFERENCE_CANDIDATE_COUNT,
+        num_negative: int = DEFAULT_NEGATIVE_POINT_COUNT,
+    ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]], bool]:
+        """
+        参考正点始终从 mask 采 num_positive（默认 40）个；负点可用预定义或 mask 采样。
+
+        Returns:
+            (positive_candidates, negative_candidates, used_predefined)
+        """
+        used_predefined = False
+        positive_candidates = self.sample_points_from_mask(
+            reference_mask, num_points=num_positive, inside_mask=True
+        )
+        negative_candidates: List[Tuple[int, int]] = []
+        if predefined_reference_points is not None:
+            negative_candidates = predefined_reference_points.get('negative') or []
+            if negative_candidates:
+                used_predefined = True
+        if not negative_candidates:
+            negative_candidates = self.sample_points_from_mask(
+                reference_mask, num_points=num_negative, inside_mask=False
+            )
+        return positive_candidates, negative_candidates, used_predefined
     
     def generate_points_with_rgb_similarity(self, reference_image: np.ndarray, reference_mask: np.ndarray, 
                                           target_image: np.ndarray, return_debug_info: bool = False,
@@ -39,42 +104,106 @@ class PromptPointGenerator:
             Tuple[List[Tuple[int, int]], List[int]]: (点坐标列表, 点标签列表)
         """
         try:
-            # 1. 使用预定义的采样点或重新采样
-            if predefined_reference_points is not None:
-                positive_candidates = predefined_reference_points['positive']
-                negative_candidates = predefined_reference_points['negative']
-                print(f"    使用预定义的参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}")
+            positive_candidates, negative_candidates, used_predefined = (
+                self._resolve_reference_candidates(
+                    reference_mask, predefined_reference_points
+                )
+            )
+            if used_predefined:
+                print(
+                    f"    参考正点采样{len(positive_candidates)}个，"
+                    f"预定义负点{len(negative_candidates)}个"
+                )
             else:
-                # 从参考图片的掩码内部选取10个正点候选
-                positive_candidates = self.sample_points_from_mask(reference_mask, num_points=10, inside_mask=True)
-                
-                # 从参考图片的掩码外部选取6个负点候选
-                negative_candidates = self.sample_points_from_mask(reference_mask, num_points=6, inside_mask=False)
-                print(f"    重新采样参考点: 正{len(positive_candidates)} 负{len(negative_candidates)}")
-            
-            # 3. 将候选点映射到目标图片上
-            target_positive_candidates = self.map_points_to_target(reference_image, positive_candidates, target_image)
-            target_negative_candidates = self.map_points_to_target(reference_image, negative_candidates, target_image)
-            
-            # 4. 计算参考图片正点的RGB值
-            reference_positive_rgbs = [reference_image[y, x] for x, y in positive_candidates]
-            
-            # 5. 筛选目标图片的正点
+                print(
+                    f"    参考点采样: 正{len(positive_candidates)} 负{len(negative_candidates)}"
+                )
+
+            target_positive_candidates, projection_source_rgbs = (
+                self.map_points_to_target_with_source_rgb(
+                    reference_image, positive_candidates, target_image
+                )
+            )
+            target_negative_candidates = self.map_points_to_target(
+                reference_image, negative_candidates, target_image
+            )
+
+            reference_positive_rgbs = [
+                reference_image[y, x] for x, y in positive_candidates
+            ]
+            reference_negative_rgbs = [
+                reference_image[y, x] for x, y in negative_candidates
+            ]
+
             target_positive_points = self.filter_positive_points(
-                target_positive_candidates, target_image, reference_positive_rgbs
+                target_positive_candidates,
+                target_image,
+                reference_positive_rgbs,
+                reference_negative_rgbs,
+                projection_source_rgbs=projection_source_rgbs,
             )
-            
-            # 6. 筛选目标图片的负点
             target_negative_points = self.filter_negative_points(
-                target_negative_candidates, target_image, reference_positive_rgbs
+                target_negative_candidates,
+                target_image,
+                reference_negative_rgbs,
+                reference_positive_rgbs,
             )
-            
-            # 7. 组合最终的点坐标和标签
-            final_points = target_positive_points + target_negative_points
-            final_labels = [1] * len(target_positive_points) + [0] * len(target_negative_points)
-            
-            print(f"    生成了 {len(target_positive_points)} 个正点和 {len(target_negative_points)} 个负点")
-            
+
+            if not self._projection_has_enough_points(
+                target_positive_points, target_negative_points
+            ):
+                print(
+                    f"    ❌ 投射失败: 滤后正点 {len(target_positive_points)}、"
+                    f"负点 {len(target_negative_points)}，"
+                    f"均需 ≥ {MIN_PROJECTED_POINTS_PER_LABEL}"
+                )
+                debug = {
+                    'reference_positive': positive_candidates,
+                    'reference_negative': negative_candidates,
+                    'mapped_positive': target_positive_candidates,
+                    'mapped_negative': target_negative_candidates,
+                    'filtered_positive': target_positive_points,
+                    'filtered_negative': target_negative_points,
+                    'final_positive': [],
+                    'final_negative': target_negative_points,
+                    'projection_failed': True,
+                }
+                if return_debug_info:
+                    return [], [], debug
+                return [], []
+
+            h, w = target_image.shape[:2]
+            final_positive = self.uniform_sample_points(
+                target_positive_points, DEFAULT_POSITIVE_POINT_COUNT, w, h
+            )
+            if len(final_positive) < MIN_PROJECTED_POINTS_PER_LABEL:
+                print(
+                    f"    ❌ 投射失败: 滤后均匀采样正点 {len(final_positive)}，"
+                    f"需 ≥ {MIN_PROJECTED_POINTS_PER_LABEL}"
+                )
+                debug = {
+                    'reference_positive': positive_candidates,
+                    'reference_negative': negative_candidates,
+                    'mapped_positive': target_positive_candidates,
+                    'mapped_negative': target_negative_candidates,
+                    'filtered_positive': target_positive_points,
+                    'filtered_negative': target_negative_points,
+                    'final_positive': final_positive,
+                    'final_negative': target_negative_points,
+                    'projection_failed': True,
+                }
+                if return_debug_info:
+                    return [], [], debug
+                return [], []
+
+            final_points = final_positive + target_negative_points
+            final_labels = [1] * len(final_positive) + [0] * len(target_negative_points)
+
+            print(
+                f"    参考正{len(positive_candidates)}→滤{len(target_positive_points)}"
+                f"→匀{len(final_positive)}，负点滤后 {len(target_negative_points)} 个"
+            )
+
             if return_debug_info:
                 return final_points, final_labels, {
                     'reference_positive': positive_candidates,
@@ -82,14 +211,191 @@ class PromptPointGenerator:
                     'mapped_positive': target_positive_candidates,
                     'mapped_negative': target_negative_candidates,
                     'filtered_positive': target_positive_points,
-                    'filtered_negative': target_negative_points
+                    'filtered_negative': target_negative_points,
+                    'final_positive': final_positive,
+                    'final_negative': target_negative_points,
+                    'projection_failed': False,
                 }
-            else:
-                return final_points, final_labels
+            return final_points, final_labels
             
         except Exception as e:
             print(f"    ⚠️ 点生成失败: {e}")
+            if return_debug_info:
+                return [], [], {}
             return [], []
+
+    def generate_points_multi_reference(
+        self,
+        reference_entries: List[Dict[str, Any]],
+        primary_entry: Dict[str, Any],
+        target_image: np.ndarray,
+        num_positive: int = DEFAULT_POSITIVE_POINT_COUNT,
+        num_negative: int = DEFAULT_NEGATIVE_POINT_COUNT,
+        return_debug_info: bool = False,
+    ):
+        """
+        多参考图传播：正点来自各 ref 缓存正点映射合并；负点来自多帧背景 mask 交集。
+        """
+        try:
+            h, w = target_image.shape[:2]
+            mapped_positive: List[Tuple[int, int]] = []
+            reference_positive: List[Tuple[int, int]] = []
+            reference_positive_rgbs: List[np.ndarray] = []
+            seen_pos: set = set()
+
+            for entry in reference_entries:
+                ref_image = entry['image_rgb']
+                pos_pts = entry.get('positive_points') or []
+                reference_positive.extend(pos_pts)
+                for x, y in pos_pts:
+                    reference_positive_rgbs.append(ref_image[y, x])
+                for pt in self.map_points_to_target(ref_image, pos_pts, target_image):
+                    if pt not in seen_pos:
+                        seen_pos.add(pt)
+                        mapped_positive.append(pt)
+
+            ref_masks = [e['mask'] for e in reference_entries]
+            primary_image = primary_entry['image_rgb']
+            primary_shape = primary_image.shape[:2]
+            bg_intersection = self.compute_background_mask_intersection(ref_masks, primary_shape)
+            intersection_pixels = int(np.sum(bg_intersection))
+            pool_n = num_negative * NEGATIVE_CANDIDATE_POOL_FACTOR
+            negative_candidates = self.sample_points_from_background_mask(
+                bg_intersection, pool_n
+            )
+            if len(negative_candidates) < num_negative:
+                fallback_mask = (primary_entry['mask'] == 0)
+                extra = self.sample_points_from_background_mask(fallback_mask, pool_n)
+                for pt in extra:
+                    if pt not in negative_candidates:
+                        negative_candidates.append(pt)
+
+            reference_negative_rgbs = [
+                primary_image[y, x] for x, y in negative_candidates
+            ]
+
+            filtered_positive = self.filter_positive_points(
+                mapped_positive,
+                target_image,
+                reference_positive_rgbs,
+                reference_negative_rgbs,
+            )
+            final_positive = self.uniform_sample_points(
+                filtered_positive, num_positive, w, h
+            )
+            mapped_negative = self.map_points_to_target(
+                primary_image, negative_candidates, target_image
+            )
+            filtered_negative = self.filter_negative_points(
+                mapped_negative,
+                target_image,
+                reference_negative_rgbs,
+                reference_positive_rgbs,
+            )
+
+            if not self._projection_has_enough_points(
+                filtered_positive, filtered_negative
+            ):
+                print(
+                    f"    ❌ 投射失败: 滤后正点 {len(filtered_positive)}、"
+                    f"负点 {len(filtered_negative)}，"
+                    f"均需 ≥ {MIN_PROJECTED_POINTS_PER_LABEL}"
+                )
+                debug = {
+                    'reference_positive': reference_positive,
+                    'reference_negative': negative_candidates,
+                    'mapped_positive': mapped_positive,
+                    'mapped_negative': mapped_negative,
+                    'filtered_positive': filtered_positive,
+                    'filtered_negative': filtered_negative,
+                    'final_positive': [],
+                    'final_negative': [],
+                    'projection_failed': True,
+                    'primary_ref_idx': primary_entry['idx'],
+                    'background_intersection_pixels': intersection_pixels,
+                }
+                if return_debug_info:
+                    return [], [], debug
+                return [], []
+
+            final_negative = self.uniform_sample_points(
+                filtered_negative, num_negative, w, h
+            )
+
+            final_points = final_positive + final_negative
+            final_labels = [1] * len(final_positive) + [0] * len(final_negative)
+
+            chain_ids = [e['idx'] for e in reference_entries]
+            print(
+                f"    多参考传播链 {chain_ids}: "
+                f"映射正{len(mapped_positive)}→滤{len(filtered_positive)}→匀{len(final_positive)}，"
+                f"背景交集像素={intersection_pixels}，"
+                f"负点滤{len(filtered_negative)}→匀{len(final_negative)}"
+            )
+
+            if return_debug_info:
+                debug = {
+                    'reference_positive': reference_positive,
+                    'reference_negative': negative_candidates,
+                    'mapped_positive': mapped_positive,
+                    'mapped_negative': mapped_negative,
+                    'filtered_positive': filtered_positive,
+                    'filtered_negative': filtered_negative,
+                    'final_positive': final_positive,
+                    'final_negative': final_negative,
+                    'primary_ref_idx': primary_entry['idx'],
+                    'background_intersection_pixels': intersection_pixels,
+                    'projection_failed': False,
+                }
+                return final_points, final_labels, debug
+            return final_points, final_labels
+
+        except Exception as e:
+            print(f"    ⚠️ 多参考点生成失败: {e}")
+            if return_debug_info:
+                return [], [], {}
+            return [], []
+
+    @staticmethod
+    def compute_background_mask_intersection(
+        masks: List[np.ndarray], shape: Tuple[int, int]
+    ) -> np.ndarray:
+        """多帧前景 mask 的背景区域交集（True 表示稳定背景）。"""
+        h, w = shape
+        intersection = np.ones((h, w), dtype=bool)
+        for mask in masks:
+            if mask.shape[:2] != (h, w):
+                aligned = cv2.resize(
+                    mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST
+                )
+            else:
+                aligned = mask.astype(np.uint8)
+            intersection &= (aligned == 0)
+        return intersection
+
+    def sample_points_from_background_mask(
+        self, background: np.ndarray, num_points: int
+    ) -> List[Tuple[int, int]]:
+        """在背景 bool mask（True=背景）上采样负点。"""
+        if not np.any(background):
+            return []
+        foreground = (~background).astype(np.uint8)
+        return self._sample_negative_points(foreground, num_points)
+
+    def uniform_sample_points(
+        self,
+        points: List[Tuple[int, int]],
+        num_points: int,
+        w: int,
+        h: int,
+    ) -> List[Tuple[int, int]]:
+        """对目标侧已筛选点做空间均匀采样。"""
+        if not points:
+            return []
+        if len(points) <= num_points:
+            return list(points)
+        candidates = np.array(points, dtype=np.int32)
+        return self._grid_sample_from_candidates(candidates, num_points, w, h)
     
     def sample_points_from_mask(self, mask: np.ndarray, num_points: int, inside_mask: bool) -> List[Tuple[int, int]]:
         """从掩码内部或外部采样点，优化分布策略"""
@@ -307,69 +613,143 @@ class PromptPointGenerator:
                 mapped_points.append((new_x, new_y))
         
         return mapped_points
-    
-    def filter_positive_points(self, candidate_points: List[Tuple[int, int]], target_image: np.ndarray, 
-                              reference_positive_rgbs: List[np.ndarray]) -> List[Tuple[int, int]]:
-        """筛选正点：至少与参考图片的两个正点非常相似"""
+
+    def map_points_to_target_with_source_rgb(
+        self,
+        reference_image: np.ndarray,
+        points: List[Tuple[int, int]],
+        target_image: np.ndarray,
+    ) -> Tuple[List[Tuple[int, int]], List[np.ndarray]]:
+        """映射到目标图，并返回与每个目标点一一对应的参考图 RGB（P_o）。"""
+        ref_h, ref_w = reference_image.shape[:2]
+        target_h, target_w = target_image.shape[:2]
+        scale_x = target_w / ref_w
+        scale_y = target_h / ref_h
+
+        mapped_points: List[Tuple[int, int]] = []
+        source_rgbs: List[np.ndarray] = []
+        for x, y in points:
+            new_x = int(x * scale_x)
+            new_y = int(y * scale_y)
+            if 0 <= new_x < target_w and 0 <= new_y < target_h:
+                mapped_points.append((new_x, new_y))
+                source_rgbs.append(reference_image[y, x])
+        return mapped_points, source_rgbs
+
+    @staticmethod
+    def _required_similar_matches_in_pool(pool_size: int) -> int:
+        """同一 target 像素在 RGB 池中需相似的个数：max(2, 10%·池大小)（向上取整）。"""
+        if pool_size <= 0:
+            return MIN_PROJECTED_POINTS_PER_LABEL
+        quota = max(2.0, pool_size * POOL_SIMILAR_MATCH_FRACTION)
+        return int(math.ceil(quota - 1e-9))
+
+    @staticmethod
+    def _rgb_distance(rgb1: np.ndarray, rgb2: np.ndarray) -> float:
+        a = np.asarray(rgb1, dtype=np.float64)
+        b = np.asarray(rgb2, dtype=np.float64)
+        return float(np.sqrt(np.sum((a - b) ** 2)))
+
+    def _min_rgb_distance(self, rgb: np.ndarray, ref_rgbs: List[np.ndarray]) -> float:
+        if not ref_rgbs:
+            return float("inf")
+        return min(self._rgb_distance(rgb, ref) for ref in ref_rgbs)
+
+    def filter_positive_points(
+        self,
+        candidate_points: List[Tuple[int, int]],
+        target_image: np.ndarray,
+        reference_positive_rgbs: List[np.ndarray],
+        reference_negative_rgbs: Optional[List[np.ndarray]] = None,
+        projection_source_rgbs: Optional[List[np.ndarray]] = None,
+    ) -> List[Tuple[int, int]]:
+        """
+        正点：不像参考负点，且更接近正池；并满足下列之一：
+        - P_o（参考点）与 P_t（映射目标点）RGB 极度相似 → 直接合法；
+        - 否则 target 在正点 RGB 池中 very_similar 个数 ≥ max(2, 10%·池大小)。
+        """
+        ref_neg = reference_negative_rgbs or []
+        need = self._required_similar_matches_in_pool(len(reference_positive_rgbs))
         valid_points = []
-        
-        for x, y in candidate_points:
+        paired_source = projection_source_rgbs or []
+
+        for i, (x, y) in enumerate(candidate_points):
             target_rgb = target_image[y, x]
-            
-            # 计算与所有参考正点的相似性
-            similar_count = 0
-            for ref_rgb in reference_positive_rgbs:
-                if self.is_rgb_very_similar(target_rgb, ref_rgb):
-                    similar_count += 1
-                    # 找到两个相似点即可，直接添加并跳出
-                    if similar_count >= 2:
-                        valid_points.append((x, y))
-                        break
-        
-        return valid_points
-    
-    def filter_negative_points(self, candidate_points: List[Tuple[int, int]], target_image: np.ndarray, 
-                              reference_positive_rgbs: List[np.ndarray]) -> List[Tuple[int, int]]:
-        """筛选负点：至多与一个正点相似，但不能与任何正点非常相似"""
-        valid_points = []
-        
-        for x, y in candidate_points:
-            target_rgb = target_image[y, x]
-            
-            # 检查与参考正点的相似性
-            similar_count = 0
-            very_similar_count = 0
-            
-            for ref_rgb in reference_positive_rgbs:
-                if self.is_rgb_very_similar(target_rgb, ref_rgb):
-                    very_similar_count += 1
-                    # 发现非常相似，立即跳出（不满足负点条件）
-                    break
-                elif self.is_rgb_similar(target_rgb, ref_rgb):
-                    similar_count += 1
-                    # 发现超过1个相似点，立即跳出（不满足负点条件）
-                    if similar_count > 1:
-                        break
-            
-            # 负点条件：不能非常相似，至多与一个正点相似
-            if very_similar_count > 0 or similar_count > 1:
+
+            if ref_neg and any(
+                self.is_rgb_very_similar(target_rgb, nr) for nr in ref_neg
+            ):
                 continue
-            valid_points.append((x, y))
-        
+
+            d_pos = self._min_rgb_distance(target_rgb, reference_positive_rgbs)
+            d_neg = self._min_rgb_distance(target_rgb, ref_neg)
+            if ref_neg and d_pos >= d_neg:
+                continue
+
+            if i < len(paired_source) and self.is_rgb_very_similar(
+                target_rgb, paired_source[i]
+            ):
+                valid_points.append((x, y))
+                continue
+
+            similar_count = sum(
+                1
+                for ref_rgb in reference_positive_rgbs
+                if self.is_rgb_very_similar(target_rgb, ref_rgb)
+            )
+            if similar_count >= need:
+                valid_points.append((x, y))
+
         return valid_points
-    
+
+    def filter_negative_points(
+        self,
+        candidate_points: List[Tuple[int, int]],
+        target_image: np.ndarray,
+        reference_negative_rgbs: List[np.ndarray],
+        reference_positive_rgbs: Optional[List[np.ndarray]] = None,
+    ) -> List[Tuple[int, int]]:
+        """
+        负点：与正点对称，在参考负点 RGB 池中凑够 max(2, 10%·池大小) 个相似，
+        且不像参考正点（火球）。
+        """
+        ref_pos = reference_positive_rgbs or []
+        need = self._required_similar_matches_in_pool(len(reference_negative_rgbs))
+        valid_points = []
+
+        for x, y in candidate_points:
+            target_rgb = target_image[y, x]
+
+            if ref_pos and any(
+                self.is_rgb_very_similar(target_rgb, pr) for pr in ref_pos
+            ):
+                continue
+
+            d_neg = self._min_rgb_distance(target_rgb, reference_negative_rgbs)
+            d_pos = self._min_rgb_distance(target_rgb, ref_pos)
+            if ref_pos and d_neg >= d_pos:
+                continue
+
+            similar_count = sum(
+                1
+                for ref_rgb in reference_negative_rgbs
+                if self.is_rgb_very_similar(target_rgb, ref_rgb)
+            )
+            if similar_count >= need:
+                valid_points.append((x, y))
+
+        return valid_points
+
     def is_rgb_very_similar(self, rgb1: np.ndarray, rgb2: np.ndarray) -> bool:
-        """判断两个RGB是否非常相似（欧几里得距离）"""
-        distance = np.sqrt(np.sum((rgb1 - rgb2) ** 2))
-        return distance < self.very_similar_threshold
-    
+        """判断两个RGB是否非常相似（欧几里得距离，float 计算避免 uint8 溢出）"""
+        return self._rgb_distance(rgb1, rgb2) < self.very_similar_threshold
+
     def is_rgb_similar(self, rgb1: np.ndarray, rgb2: np.ndarray) -> bool:
         """判断两个RGB是否相似（欧几里得距离）"""
-        distance = np.sqrt(np.sum((rgb1 - rgb2) ** 2))
-        return distance < self.similar_threshold
+        return self._rgb_distance(rgb1, rgb2) < self.similar_threshold
 
 
-def create_prompt_generator(very_similar_threshold: float = 8.0, similar_threshold: float = 12.0) -> PromptPointGenerator:
+def create_prompt_generator(very_similar_threshold: float = 16.0, similar_threshold: float = 32.0) -> PromptPointGenerator:
     """
     创建Prompt点生成器的便捷函数
     
