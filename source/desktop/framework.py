@@ -24,6 +24,8 @@ matplotlib.use('Qt5Agg')
 matplotlib.rcParams["font.serif"] = [
     "SimSun",
     "NSimSun",
+    "宋体",
+    "Microsoft YaHei",
     "Songti SC",
     "STSong",
     "Noto Serif CJK SC",
@@ -62,6 +64,10 @@ class MatplotlibWidget(QWidget):
         
     def clear(self):
         self.figure.clear()
+        try:
+            self.figure.set_constrained_layout(True)
+        except Exception:
+            pass
         self.canvas.draw()
         
     def plot_line(self, x_data, y_data, title="", xlabel="", ylabel="", color='#38bdf8'):
@@ -265,14 +271,17 @@ class FireballAnalysisApp(QMainWindow):
         from extract_tab.extract_tab import ExtractTab
         from model_tab.model_tab import ModelTab
         from training_tab import TrainingTab
+        from engineering_tab import EngineeringTab
 
         self.extract_tab = ExtractTab()
         self.training_tab = TrainingTab()
         self.model_tab = ModelTab()
+        self.engineering_tab = EngineeringTab()
 
         self.tab_widget.addTab(self.extract_tab, "机器视觉")
         self.tab_widget.addTab(self.training_tab, "机器学习")
         self.tab_widget.addTab(self.model_tab, "参数预测")
+        self.tab_widget.addTab(self.engineering_tab, "工程计算")
         
         main_layout.addWidget(self.tab_widget)
         
@@ -387,15 +396,18 @@ class FireballAnalysisApp(QMainWindow):
             self.sidebar.set_sidebar_content(self.training_tab.get_sidebar_widget())
         elif index == 2:  # 参数预测
             self.sidebar.set_sidebar_content(self.model_tab.get_sidebar_widget())
+        elif index == 3:  # 工程计算
+            self.sidebar.set_sidebar_content(self.engineering_tab.get_sidebar_widget())
 
     def _load_all_sidebars(self):
         """预加载所有侧边栏内容（与全局左栏同款容器内叠放）。"""
         extract_sidebar = self.extract_tab.get_sidebar_widget()
         training_sidebar = self.training_tab.get_sidebar_widget()
         model_sidebar = self.model_tab.get_sidebar_widget()
+        engineering_sidebar = self.engineering_tab.get_sidebar_widget()
 
         layout = QVBoxLayout()
-        for w in (extract_sidebar, training_sidebar, model_sidebar):
+        for w in (extract_sidebar, training_sidebar, model_sidebar, engineering_sidebar):
             layout.addWidget(w)
             w.hide()
 

@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import threading
+import time
 from collections import deque
 from typing import Optional
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -36,7 +37,7 @@ class ExtractTab(QWidget):
     """机器视觉模块标签页"""
     # 异步分割：日志与完成信号
     log_received = Signal(str)
-    seg_finished = Signal(bool)
+    seg_finished = Signal(bool, float)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -277,6 +278,7 @@ class ExtractTab(QWidget):
                 current_frame_result=current_frame,
                 diameter_series=self.chart_controller.get_cached_diameter(),
                 drag_fit=self.chart_controller.get_cached_drag_fit(),
+                segmentation_avg_ms_per_image=self.sequence_model.segmentation_avg_ms_per_image,
             )
             panel.setPlainText(text)
         except Exception as e:
@@ -368,6 +370,10 @@ class ExtractTab(QWidget):
         try:
             # 刷新模型缓存
             self.sequence_model.apply_sequence_dict(sequence_data, sequence_file_path)
+
+            rebind_msg = getattr(self.sequence_model, "last_image_path_rebind_message", "")
+            if rebind_msg:
+                self.append_run_log(rebind_msg)
 
             image_paths = self.sequence_model.image_paths
             if not image_paths:
@@ -571,8 +577,10 @@ class ExtractTab(QWidget):
         def worker():
             def on_line(line: str):
                 self.log_received.emit(line)
+            t0 = time.perf_counter()
             ok = run_segmentation_direct(sequence_file_path, on_output_line=on_line)
-            self.seg_finished.emit(ok)
+            elapsed_s = time.perf_counter() - t0
+            self.seg_finished.emit(ok, elapsed_s)
 
         threading.Thread(target=worker, daemon=True).start()
         return True
@@ -593,7 +601,7 @@ class ExtractTab(QWidget):
                 self._trim_plain_text_top(w, excess)
         self._scroll_run_log_to_bottom()
 
-    def _on_segmentation_finished(self, ok: bool):
+    def _on_segmentation_finished(self, ok: bool, elapsed_s: float = 0.0):
         # 恢复控件（参考点启用状态由 _apply_sequence_data 根据是否已分割决定）
         try:
             self._set_segmentation_ui_locked(False)
@@ -603,8 +611,16 @@ class ExtractTab(QWidget):
         if ok:
             self.append_run_log("分割完成，正在加载分割结果…")
             self.reload_sequence_with_segmentation_results()
+            n_frames = len(self.sequence_model.image_paths or [])
+            if n_frames > 0 and elapsed_s > 0:
+                avg_ms = 1000.0 * float(elapsed_s) / n_frames
+                self.sequence_model.set_segmentation_avg_ms_per_image(avg_ms)
+                ok_flush, err = self.sequence_model.flush_sequence_json_to_disk()
+                if not ok_flush and err:
+                    print(f"⚠️ 写入分割耗时统计失败: {err}")
             self.append_run_log("特征提取完成")
             self._update_save_button_state()
+            self._refresh_key_metrics_panel()
         else:
             self.append_run_log("分割脚本执行失败")
             try:

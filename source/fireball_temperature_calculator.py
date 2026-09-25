@@ -9,6 +9,14 @@
    使用单调保形分段三次插值（PCHIP）在全时间轴上贴合数据；可选用 ``reference_csv_path`` 替换文件。
 
 2) ``legacy``：原先「手工数字化 6 点 + 左侧三次多项式 + 右侧指数拖曳 + blend/c1」的解析近似。
+
+工程仿真缩放（``temperature_baseline_scaled``）：
+
+- **形状**：同目录 ``fireball_temperature_reference_curve.csv``（PCHIP，时间列仅作归一化参数
+  ``u = t_ref / T_span``，0→1；**不**决定物理时长与峰值温度）。
+- **物理时长**：``t_d``（ms）由 ``engineering_tab`` 火球持续时间公式（当量 W）。
+- **峰值温度**：``1.3·T_eq``（``T_eq`` 由 ``engineering_tab`` 当量、含铝率、环境等计算）。
+- 映射：``t_ref = (t / t_d) · T_csv,span``，再对 CSV 形状做幅值缩放至目标峰值。
 """
 
 from __future__ import annotations
@@ -16,13 +24,59 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import PchipInterpolator
 
 TEMP_OFFSET = 273.15
+
+# 默认温度 CSV 标定当量（kg TNT）
+REFERENCE_EQUIVALENT_KG = 100.0
+# 温度曲线峰值相对 T_eq 的倍数
+PEAK_TEMPERATURE_T_EQ_FACTOR = 1.3
+
+
+def equivalent_time_scale(equivalent_kg: float, reference_kg: float = REFERENCE_EQUIVALENT_KG) -> float:
+    """相对标定当量的时间缩放：``(W / W_ref)^(2/3)``。"""
+    w = float(equivalent_kg)
+    if w <= 0:
+        raise ValueError("当量必须大于 0")
+    ref = float(reference_kg)
+    if ref <= 0:
+        raise ValueError("reference_kg 必须大于 0")
+    return float((w / ref) ** (2.0 / 3.0))
+
+
+def fireball_total_duration_s(equivalent_kg: float) -> float:
+    """火球总持续时间 t_d ≈ 0.30·W^(1/3) (s)，与 engineering_tab 公式一致。"""
+    w = float(equivalent_kg)
+    if w <= 0:
+        raise ValueError("当量 W 必须大于 0")
+    return 0.30 * (w ** (1.0 / 3.0))
+
+
+def fireball_total_duration_ms(equivalent_kg: float) -> float:
+    return fireball_total_duration_s(equivalent_kg) * 1000.0
+
+
+def reference_curve_duration_ms(csv_path: Optional[str | Path] = None) -> float:
+    """``fireball_temperature_reference_curve.csv`` 时间轴末点 (ms)，默认 2000。"""
+    path = Path(csv_path) if csv_path is not None else default_temperature_curve_csv_path()
+    if not path.is_file():
+        return 2000.0
+    t_ms, _ = _load_reference_curve_csv(path)
+    return float(t_ms[-1])
+
+
+def reference_baseline_simulation_duration_ms(
+    equivalent_kg: float,
+    csv_path: Optional[str | Path] = None,
+) -> float:
+    """与 CSV 基准一致的温度过程时长：``T_csv,span × (W/100)^(2/3)``。"""
+    span = reference_curve_duration_ms(csv_path)
+    return span * equivalent_time_scale(equivalent_kg)
 
 
 def default_temperature_curve_csv_path() -> Path:
@@ -237,6 +291,115 @@ class FireballTemperatureCalculator:
                 dTdr = self.decay_model.dT(t)
                 S, dSdt = self._blend_S_and_Sdot(t)
                 dT = (1 - S) * dTup + S * dTdr + dSdt * (Tdr - Tup)
+        return float(dT) if scalar else dT
+
+    def _reference_curve_span_ms(self) -> float:
+        """CSV 基准时间跨度 (ms)。"""
+        if (
+            self.profile == "reference_csv"
+            and getattr(self, "t_ms_reference", None) is not None
+            and len(self.t_ms_reference) > 0
+        ):
+            return float(self.t_ms_reference[-1])
+        return 140.0
+
+    def _reference_peak_k_from_csv(self) -> float:
+        """CSV 基准全局峰值温度 (K)，用于幅值缩放分母。"""
+        if getattr(self, "T_K_reference", None) is not None and len(self.T_K_reference) > 0:
+            return float(np.max(self.T_K_reference))
+        return float(self.temperature_modified(self.t0_reference_peak_ms))
+
+    def _simulation_to_reference_time_ms(
+        self,
+        t_ms: Union[np.ndarray, float],
+        duration_ms: float,
+    ) -> np.ndarray:
+        """
+        物理时刻 → CSV 形状参数轴：``t_ref = (t / t_d) · T_csv,span``（``t_d = duration_ms``）。
+        """
+        t = np.asarray(t_ms, dtype=np.float64)
+        dur = float(duration_ms)
+        if dur <= 0:
+            return np.zeros_like(t, dtype=np.float64)
+        span = self._reference_curve_span_ms()
+        return (t / dur) * span
+
+    def temperature_baseline_scaled(
+        self,
+        t_ms: Union[np.ndarray, float],
+        *,
+        equivalent_kg: float,
+        duration_ms: float,
+        peak_temperature_k: float,
+        ambient_k: float = 297.15,
+        reference_equivalent_kg: float = REFERENCE_EQUIVALENT_KG,
+    ) -> Union[np.ndarray, float]:
+        """
+        基准参考曲线时间缩放 + 峰值对齐。
+
+        Args:
+            t_ms: 仿真时刻 (ms)
+            equivalent_kg: 保留兼容；时长与峰值由 ``duration_ms`` / ``peak_temperature_k`` 传入
+            duration_ms: 火球温度过程时长 ``t_d`` (ms)，来自工程公式
+            peak_temperature_k: 目标峰值 (K)，通常为 ``1.3·T_eq``（工程公式）
+            ambient_k: 环境温度 (K)，幅值缩放基准
+        """
+        del equivalent_kg, reference_equivalent_kg
+        scalar = np.isscalar(t_ms)
+        t = np.asarray(t_ms, dtype=np.float64)
+        t_ref = self._simulation_to_reference_time_ms(t, duration_ms)
+        T_ref = np.asarray(self.temperature_modified(t_ref), dtype=np.float64)
+
+        T_ref_peak = self._reference_peak_k_from_csv()
+        denom = T_ref_peak - float(ambient_k)
+        if denom <= 1e-6:
+            T_out = np.full_like(t, float(peak_temperature_k), dtype=np.float64)
+        else:
+            factor = (float(peak_temperature_k) - float(ambient_k)) / denom
+            T_out = float(ambient_k) + (T_ref - float(ambient_k)) * factor
+
+        return float(T_out) if scalar else T_out
+
+    def temperature_from_reference_shape(
+        self,
+        t_ms: Union[np.ndarray, float],
+        duration_ms: float,
+    ) -> Union[np.ndarray, float]:
+        """
+        仅按仿真时长拉伸 CSV 形状：``t_ref = (t/t_d)·T_csv,span``，不做工程峰值缩放。
+        用于参数仿真（无当量/含铝输入）。
+        """
+        scalar = np.isscalar(t_ms)
+        t = np.asarray(t_ms, dtype=np.float64)
+        t_ref = self._simulation_to_reference_time_ms(t, duration_ms)
+        T_K = np.asarray(self.temperature_modified(t_ref), dtype=np.float64)
+        return float(T_K) if scalar else T_K
+
+    def rate_baseline_scaled(
+        self,
+        t_ms: Union[np.ndarray, float],
+        *,
+        equivalent_kg: float,
+        duration_ms: float,
+        peak_temperature_k: float,
+        ambient_k: float = 297.15,
+        reference_equivalent_kg: float = REFERENCE_EQUIVALENT_KG,
+    ) -> Union[np.ndarray, float]:
+        """``temperature_baseline_scaled`` 对时间的导数 (K/ms)。"""
+        del equivalent_kg, reference_equivalent_kg
+        scalar = np.isscalar(t_ms)
+        t = np.asarray(t_ms, dtype=np.float64)
+        T_ref_peak = self._reference_peak_k_from_csv()
+        denom = T_ref_peak - float(ambient_k)
+        dur = float(duration_ms)
+        span = self._reference_curve_span_ms()
+        if denom <= 1e-6 or dur <= 0:
+            dT = np.zeros_like(t, dtype=np.float64)
+        else:
+            factor = (float(peak_temperature_k) - float(ambient_k)) / denom
+            t_ref = self._simulation_to_reference_time_ms(t, duration_ms)
+            dT_ref = np.asarray(self.rate_modified(t_ref), dtype=np.float64)
+            dT = factor * dT_ref * (span / dur)
         return float(dT) if scalar else dT
 
     def print_parameters(self) -> None:

@@ -7,7 +7,7 @@
 显示不同距离下的热通量随时间变化。
 """
 
-from .base_chart import BaseChart, FONT_SIZE_BODY, FONT_FAMILY
+from .base_chart import BaseChart, FONT_SIZE_BODY, chart_font_family
 from typing import Optional, Tuple, List
 import numpy as np
 from matplotlib.lines import Line2D
@@ -170,7 +170,7 @@ class HeatFluxChart(BaseChart):
                 for text in legend.get_texts():
                     text.set_color('white')
                     text.set_fontsize(FONT_SIZE_BODY)
-                    text.set_fontfamily(FONT_FAMILY)
+                    text.set_fontfamily(chart_font_family())
             except Exception:
                 pass
         self.canvas.draw()

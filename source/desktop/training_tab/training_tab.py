@@ -25,7 +25,7 @@ from .utils.krr_workflow import (
 from .utils.training_summary import build_training_summary_text
 
 # UI「数据合规」阈值：少于该条数仍可导入，但不进入可训练状态，且弹窗提示
-MIN_SAMPLES_UI_READY = 5
+MIN_SAMPLES_UI_READY = 4
 
 
 class TrainingUiState(Enum):
@@ -114,7 +114,7 @@ class TrainingTab(QWidget):
             )
         else:
             hint.setText(
-                "请先通过侧栏「输入数据」导入训练文件夹；需多于 5 条样本更有利于训练效果。"
+                "请先通过侧栏「输入数据」导入训练文件夹；需不少于 4 条样本更有利于训练效果。"
             )
 
     def _apply_training_action_ui(self) -> None:

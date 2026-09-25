@@ -41,6 +41,8 @@ class SequenceModel:
 
         self._segmentation_results: List[Dict[str, Any]] = []
         self._has_segmentation_data: bool = False
+        self._segmentation_avg_ms_per_image: Optional[float] = None
+        self._last_image_path_rebind_message: str = ""
 
     @property
     def current_path(self) -> Optional[str]:
@@ -67,8 +69,29 @@ class SequenceModel:
         return float(self._explosion_duration_ms)
 
     @property
+    def segmentation_avg_ms_per_image(self) -> Optional[float]:
+        return self._segmentation_avg_ms_per_image
+
+    def set_segmentation_avg_ms_per_image(self, ms: Optional[float]) -> None:
+        """记录整段分割 wall time / 帧数；并写入 sequence_data 便于下次加载。"""
+        if ms is None:
+            self._segmentation_avg_ms_per_image = None
+            if isinstance(self._sequence_data, dict) and "segmentation_run_stats" in self._sequence_data:
+                self._sequence_data.pop("segmentation_run_stats", None)
+            return
+        self._segmentation_avg_ms_per_image = float(ms)
+        if isinstance(self._sequence_data, dict):
+            self._sequence_data.setdefault("segmentation_run_stats", {})[
+                "avg_time_per_image_ms"
+            ] = self._segmentation_avg_ms_per_image
+
+    @property
     def group_count(self) -> int:
         return self._group_count
+
+    @property
+    def last_image_path_rebind_message(self) -> str:
+        return self._last_image_path_rebind_message
 
     # ------------------------------------------------------------------ #
     # 加载 & 应用
@@ -92,7 +115,19 @@ class SequenceModel:
         if file_path:
             self._current_path = file_path
 
+        self._last_image_path_rebind_message = ""
         self._image_paths = self._manager.get_image_paths_from_sequence(self._sequence_data)
+        if file_path:
+            self._image_paths, rebind_msg = self._manager.rebind_image_paths_for_sequence(
+                file_path, self._image_paths
+            )
+            self._last_image_path_rebind_message = rebind_msg or ""
+            if rebind_msg:
+                print(rebind_msg)
+            if self._image_paths:
+                self._manager.set_image_paths_in_sequence_data(
+                    self._sequence_data, self._image_paths
+                )
         self._parameters = self._manager.get_parameters_from_sequence(self._sequence_data) or {}
         self._pixel_length = float(self._parameters.get("pixel_length", 1.0))
         self._explosion_duration_ms = float(self._parameters.get("explosion_duration", 140.0))
@@ -100,6 +135,7 @@ class SequenceModel:
 
         self._load_prompt_artifacts_from_sequence()
         self._load_segmentation_from_sequence()
+        self._load_segmentation_run_stats()
 
     # ------------------------------------------------------------------ #
     # Prompt / Ignition
@@ -207,6 +243,7 @@ class SequenceModel:
         if success:
             self._segmentation_results = []
             self._has_segmentation_data = False
+            self.set_segmentation_avg_ms_per_image(None)
             if isinstance(self._sequence_data, dict) and 'image_sequence_segmentation' in self._sequence_data:
                 del self._sequence_data['image_sequence_segmentation']
         return success, message
@@ -385,6 +422,16 @@ class SequenceModel:
         else:
             self._segmentation_results = []
             self._has_segmentation_data = False
+
+    def _load_segmentation_run_stats(self) -> None:
+        stats = (self._sequence_data or {}).get("segmentation_run_stats") or {}
+        raw = stats.get("avg_time_per_image_ms")
+        try:
+            self._segmentation_avg_ms_per_image = (
+                float(raw) if raw is not None else None
+            )
+        except (TypeError, ValueError):
+            self._segmentation_avg_ms_per_image = None
 
     def _refresh_annotated_indices(self) -> None:
         self._annotated_indices = {

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QMainWindow, QMenu
 
 TAB_INDEX_MACHINE_VISION = 0
 TAB_INDEX_MACHINE_LEARNING = 1
-TAB_INDEX_ENGINEERING = 2
+TAB_INDEX_PARAMETER_PREDICTION = 2
 
 
 def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
@@ -22,7 +22,7 @@ def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
 
     - 当前为「机器视觉」标签时：显示三个导入项（与侧边栏「数据源」按钮一致）。
     - 当前为「机器学习」标签时：显示「输入数据」（与侧栏「输入数据」一致）。
-    - 当前为「工程计算」标签时：显示「选择模型目录」（与侧栏「选择模型」一致）。
+    - 当前为「参数预测」标签时：显示「选择模型目录」（与侧栏「选择模型」一致）。
     """
     extract_tab = main_window.extract_tab
     training_tab = main_window.training_tab
@@ -50,7 +50,7 @@ def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
         act_import_images.setVisible(mv)
         act_import_sequence.setVisible(mv)
         act_import_training_data.setVisible(index == TAB_INDEX_MACHINE_LEARNING)
-        act_import_train.setVisible(index == TAB_INDEX_ENGINEERING)
+        act_import_train.setVisible(index == TAB_INDEX_PARAMETER_PREDICTION)
 
     tab_widget.currentChanged.connect(update_import_visibility)
     update_import_visibility(tab_widget.currentIndex())

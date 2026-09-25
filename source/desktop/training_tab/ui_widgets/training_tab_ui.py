@@ -111,7 +111,7 @@ class TrainingTabUI:
         gv.setSpacing(8)
         gv.addWidget(self.ui_components["train_input_btn"])
         hint1 = QLabel(
-            "加载包含多组实验数据的文件夹，数据需大于5条，否则无法获得较好的训练效果"
+            "加载包含多组实验数据的文件夹，数据需不少于4条，否则无法获得较好的训练效果"
         )
         hint1.setWordWrap(True)
         gv.addWidget(hint1)
@@ -150,7 +150,7 @@ class TrainingTabUI:
         sv.setSpacing(8)
         sv.addWidget(QLabel("数据与划分概要"))
         sv.addWidget(self.ui_components["train_dataset_summary"])
-        sh = QLabel("只读概要；需多于 5 条样本时更有利于模型训练。")
+        sh = QLabel("只读概要；需不少于 4 条样本时更有利于模型训练。")
         sh.setWordWrap(True)
         sv.addWidget(sh)
         gb_sum.setLayout(sv)

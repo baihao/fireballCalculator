@@ -113,7 +113,7 @@ class ModelTabUI:
 
         formula_column = QVBoxLayout()
         formula_column.setContentsMargins(0, 0, 0, 0)
-        formula_label = QLabel("计算公式")
+        formula_label = QLabel("仿真结果")
         formula_label.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: bold;")
         formula_column.addWidget(formula_label)
 
@@ -122,7 +122,7 @@ class ModelTabUI:
         self.ui_components["formula_reference"].setSizePolicy(expanding_policy)
         self.ui_components["formula_reference"].setMinimumHeight(160)
         self.ui_components["formula_reference"].setPlaceholderText(
-            "显示火球直径拖曳式、当量缩放、膨胀速度、热通量、大气透射率与累积热辐射等公式及当前参数值…"
+            "完成「开始计算」后显示最大温度、90%最大半径平均膨胀速度、直径与热辐射等仿真结果…"
         )
         self.ui_components["formula_reference"].setStyleSheet(self._monospace_panel_style())
         formula_column.addWidget(self.ui_components["formula_reference"], 1)
@@ -222,7 +222,7 @@ class ModelTabUI:
         params_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         params_form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self.ui_components["p_eq"] = QLineEdit("10")
+        self.ui_components["p_eq"] = QLineEdit("2000")
         eq_label = QLabel("当量 (kg TNT)")
         params_form.addRow(eq_label, self.ui_components["p_eq"])
 
@@ -265,7 +265,7 @@ class ModelTabUI:
         self.ui_components["p_step"] = QLineEdit("1")
         params_form.addRow("仿真步长 (ms)", self.ui_components["p_step"])
 
-        self.ui_components["p_duration"] = QLineEdit("140")
+        self.ui_components["p_duration"] = QLineEdit("2000")
         params_form.addRow("仿真时长 (ms)", self.ui_components["p_duration"])
 
         params_container.setLayout(params_form)

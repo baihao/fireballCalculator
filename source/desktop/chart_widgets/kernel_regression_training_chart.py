@@ -13,7 +13,7 @@ from typing import Iterable, Optional
 
 import numpy as np
 
-from .base_chart import BaseChart, apply_dark_chart_style, FONT_SIZE_BODY, FONT_FAMILY
+from .base_chart import BaseChart, apply_dark_chart_style, FONT_SIZE_BODY, chart_font_family
 
 
 SIGMA_MIN = 0.01
@@ -131,7 +131,7 @@ class KernelRegressionTrainingCurveChart(BaseChart):
         try:
             leg = ax.legend(
                 fontsize=FONT_SIZE_BODY,
-                prop={'family': FONT_FAMILY},
+                prop={'family': chart_font_family()},
                 loc='upper right',
                 framealpha=0.9,
                 facecolor='#1f2937',

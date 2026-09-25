@@ -10,15 +10,20 @@
 from typing import Optional, Tuple, Iterable
 import matplotlib
 from framework import MatplotlibWidget
+from ui_fonts import matplotlib_font_family
 
-# 中文字体由 framework 在导入 matplotlib 时配置为简体宋体系 serif 回退栈
+# 中文字体：app 启动后 configure_matplotlib_cjk() 写入具体族名（SimSun/宋体等）
 
 # 字体大小常量
 FONT_SIZE_BODY = 6.5  # 正文字体大小（用于轴标签、刻度标签、占位文本等）
 FONT_SIZE_TITLE = 7   # 标题字体大小
 
-# 字体族常量（与 framework 中 rcParams["font.family"] 一致）
-FONT_FAMILY = "serif"
+def chart_font_family() -> str:
+    """Matplotlib 中文族名（启动后 configure_matplotlib_cjk 生效）。"""
+    return matplotlib_font_family()
+
+
+FONT_FAMILY = "serif"  # 已废弃：图例/轴请用 chart_font_family()
 
 # 颜色常量
 COLOR_BACKGROUND = '#111827'      # 背景色
@@ -71,9 +76,10 @@ def apply_dark_chart_style(ax, x_label: str, y_label: str, title: str,
         ax.spines[spine].set_color(COLOR_BORDER)
 
     # 轴标签与标题（使用常量）
-    ax.set_xlabel(x_label, color=COLOR_TEXT, fontsize=FONT_SIZE_BODY, fontfamily=FONT_FAMILY)
-    ax.set_ylabel(y_label, color=COLOR_TEXT, fontsize=FONT_SIZE_BODY, fontfamily=FONT_FAMILY)
-    ax.set_title(title, color=COLOR_TITLE, fontsize=FONT_SIZE_TITLE, fontweight='bold', fontfamily=FONT_FAMILY)
+    ff = chart_font_family()
+    ax.set_xlabel(x_label, color=COLOR_TEXT, fontsize=FONT_SIZE_BODY, fontfamily=ff)
+    ax.set_ylabel(y_label, color=COLOR_TEXT, fontsize=FONT_SIZE_BODY, fontfamily=ff)
+    ax.set_title(title, color=COLOR_TITLE, fontsize=FONT_SIZE_TITLE, fontweight='bold', fontfamily=ff)
 
     # 轴范围
     if xlim is not None:
@@ -88,7 +94,7 @@ def apply_dark_chart_style(ax, x_label: str, y_label: str, title: str,
     if placeholder_text and placeholder_xy:
         ax.text(placeholder_xy[0], placeholder_xy[1], placeholder_text,
                 ha='center', va='center',
-                color=COLOR_PLACEHOLDER, fontsize=FONT_SIZE_BODY, fontfamily=FONT_FAMILY,
+                color=COLOR_PLACEHOLDER, fontsize=FONT_SIZE_BODY, fontfamily=chart_font_family(),
                 bbox=dict(boxstyle=f"{PLACEHOLDER_BBOX_STYLE},pad={PLACEHOLDER_BBOX_PAD}",
                          facecolor=COLOR_PLACEHOLDER_BG, alpha=ALPHA_PLACEHOLDER_BG))
 

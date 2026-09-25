@@ -351,7 +351,7 @@ class ExtractTabUI:
         self.ui_components["key_metrics_panel"] = QPlainTextEdit()
         self.ui_components["key_metrics_panel"].setReadOnly(True)
         self.ui_components["key_metrics_panel"].setPlaceholderText(
-            "分割与拖曳拟合完成后，将在此显示标定、分割质量、直径统计与 K/B/C 等关键数值…"
+            "分割与拖曳拟合完成后，将在此显示关键指标、标定、分割质量、直径统计与 K/B/C 等…"
         )
         self.ui_components["key_metrics_panel"].setStyleSheet("""
             QPlainTextEdit {

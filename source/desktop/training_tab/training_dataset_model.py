@@ -74,8 +74,8 @@ class TrainingDatasetModel:
             ]
         )
         if self.total_samples > 0:
-            if self.total_samples <= 5:
-                lines.append("提示：样本数 ≤5 时，难以获得较好的训练效果，建议扩充数据。")
+            if self.total_samples < 4:
+                lines.append("提示：样本数少于 4 条时，难以获得较好的训练效果，建议扩充数据。")
         if self.total_samples > 0 and self.b_mean is not None:
             lines.append(f"拟合参数 B 的样本均值（辅助信息）：{self.b_mean:g}")
             lines.append("纵轴约定：最大直径 ← K；初始状态常数 ← B（拖曳拟合）；时间常数 ← C。")
