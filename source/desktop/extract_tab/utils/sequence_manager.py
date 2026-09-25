@@ -50,6 +50,160 @@ class SequenceManager:
         except Exception as e:
             return False, {}, f"读取文件失败: {str(e)}"
     
+    @staticmethod
+    def _folder_names_from_sequence_stem(stem: str) -> List[str]:
+        """由序列 JSON 文件名推断可能的图像文件夹名（与 ``*_fireball_sequence.json`` 约定互逆）。"""
+        names: List[str] = []
+        suffix = "_fireball_sequence"
+        if stem.endswith(suffix) and len(stem) > len(suffix):
+            names.append(stem[: -len(suffix)])
+        if stem and stem not in names:
+            names.append(stem)
+        return names
+
+    def discover_image_search_roots(
+        self,
+        sequence_json_path: str,
+        sample_paths: Optional[List[str]] = None,
+    ) -> List[str]:
+        """
+        在序列 JSON 同级目录下收集候选图像根目录：
+        1) 与序列文件名对应的文件夹；
+        2) JSON 内路径里出现、且与 JSON 同级的子文件夹名；
+        3) JSON 所在目录本身。
+        """
+        parent = os.path.dirname(os.path.abspath(sequence_json_path))
+        stem = os.path.splitext(os.path.basename(sequence_json_path))[0]
+        ordered: List[str] = []
+        seen: set = set()
+
+        def add_dir(path: str) -> None:
+            ap = os.path.abspath(path)
+            if ap in seen or not os.path.isdir(ap):
+                return
+            seen.add(ap)
+            ordered.append(ap)
+
+        for folder_name in self._folder_names_from_sequence_stem(stem):
+            add_dir(os.path.join(parent, folder_name))
+
+        for stored in sample_paths or []:
+            if not stored:
+                continue
+            norm = stored.replace("\\", "/")
+            parts = [p for p in norm.split("/") if p and p not in (".", "..")]
+            for folder_name in parts[-3:-1]:
+                add_dir(os.path.join(parent, folder_name))
+
+        add_dir(parent)
+        return ordered
+
+    @staticmethod
+    def _find_file_case_insensitive(directory: str, filename: str) -> Optional[str]:
+        direct = os.path.join(directory, filename)
+        if os.path.isfile(direct):
+            return os.path.abspath(direct)
+        if not filename or not os.path.isdir(directory):
+            return None
+        target = filename.lower()
+        try:
+            for name in os.listdir(directory):
+                if name.lower() == target:
+                    candidate = os.path.join(directory, name)
+                    if os.path.isfile(candidate):
+                        return os.path.abspath(candidate)
+        except OSError:
+            return None
+        return None
+
+    def _resolve_one_image_path(self, stored: str, search_roots: List[str]) -> Optional[str]:
+        if stored and os.path.isfile(stored):
+            return os.path.abspath(stored)
+
+        basename = os.path.basename(stored) if stored else ""
+        if not basename:
+            return None
+
+        norm = (stored or "").replace("\\", "/")
+        parts = [p for p in norm.split("/") if p and p not in (".", "..")]
+        tail_candidates: List[str] = [basename]
+        if len(parts) >= 2:
+            tail_candidates.append(os.path.join(parts[-2], parts[-1]))
+        if len(parts) >= 3:
+            tail_candidates.append(os.path.join(parts[-3], parts[-2], parts[-1]))
+
+        seen_tails: set = set()
+        for root in search_roots:
+            for tail in tail_candidates:
+                if tail in seen_tails:
+                    continue
+                seen_tails.add(tail)
+                name = os.path.basename(tail)
+                sub = os.path.dirname(tail.replace("\\", "/"))
+                if sub:
+                    found = self._find_file_case_insensitive(os.path.join(root, sub), name)
+                    if found:
+                        return found
+                found = self._find_file_case_insensitive(root, name)
+                if found:
+                    return found
+        return None
+
+    def rebind_image_paths_for_sequence(
+        self,
+        sequence_json_path: str,
+        image_paths: List[str],
+    ) -> Tuple[List[str], str]:
+        """
+        将 JSON 中的绝对/失效路径重绑定到本机同级图像目录。
+
+        Returns:
+            (重绑定后的路径列表, 日志摘要；无变更时摘要为空字符串)
+        """
+        if not sequence_json_path or not image_paths:
+            return list(image_paths or []), ""
+
+        roots = self.discover_image_search_roots(sequence_json_path, image_paths)
+        rebound: List[str] = []
+        rebound_count = 0
+        missing = 0
+
+        for stored in image_paths:
+            resolved = self._resolve_one_image_path(stored, roots)
+            if resolved:
+                rebound.append(resolved)
+                if stored and os.path.normcase(resolved) != os.path.normcase(stored):
+                    rebound_count += 1
+                elif stored and not os.path.isfile(stored):
+                    rebound_count += 1
+            else:
+                rebound.append(stored)
+                missing += 1
+
+        if rebound_count == 0 and missing == 0:
+            return rebound, ""
+
+        roots_hint = "、".join(os.path.basename(r) for r in roots[:4])
+        msg = f"图像路径已按序列文件同级目录解析（{roots_hint}）"
+        if rebound_count:
+            msg += f"，重定位 {rebound_count}/{len(image_paths)} 张"
+        if missing:
+            msg += f"，仍缺失 {missing} 张"
+        return rebound, msg
+
+    @staticmethod
+    def set_image_paths_in_sequence_data(
+        sequence_data: Dict[str, Any],
+        image_paths: List[str],
+    ) -> None:
+        if not sequence_data:
+            return
+        if "image_paths" in sequence_data:
+            sequence_data["image_paths"] = list(image_paths)
+            return
+        image_seq = sequence_data.setdefault("image_sequence", {})
+        image_seq["image_paths"] = list(image_paths)
+
     def get_image_paths_from_sequence(self, sequence_data: Dict[str, Any]) -> List[str]:
         """
         从序列数据中提取图像路径列表（支持多种格式）

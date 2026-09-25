@@ -9,7 +9,7 @@ import os
 from log import setup_logging
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
-from ui_fonts import apply_app_song_font
+from ui_fonts import apply_app_song_font, configure_matplotlib_cjk
 from framework import FireballAnalysisApp
 
 
@@ -17,6 +17,7 @@ def main():
     setup_logging()
     app = QApplication(sys.argv)
     apply_app_song_font(app)
+    configure_matplotlib_cjk()
     
     # 设置应用程序信息
     app.setApplicationName("爆炸火球分析系统")

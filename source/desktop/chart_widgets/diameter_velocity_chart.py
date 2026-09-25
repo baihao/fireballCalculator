@@ -9,7 +9,7 @@
 3) 数据截断点
 """
 
-from .base_chart import BaseChart, FONT_SIZE_BODY, FONT_FAMILY
+from .base_chart import BaseChart, FONT_SIZE_BODY, chart_font_family
 from typing import Optional, Tuple
 import numpy as np
 
@@ -228,7 +228,7 @@ class DiameterVelocityChart(BaseChart):
 
         # 刷新图例与画布（使用常量）
         try:
-            ax.legend(fontsize=FONT_SIZE_BODY, prop={'family': FONT_FAMILY})
+            ax.legend(fontsize=FONT_SIZE_BODY, prop={'family': chart_font_family()})
         except Exception:
             pass
         # 使用 constrained_layout，无需 tight_layout

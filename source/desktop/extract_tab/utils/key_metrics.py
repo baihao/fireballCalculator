@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 NEAR_MAX_FRACTION = 0.95
+RADIUS_90_MAX_FRACTION = 0.90
 
 
 def _fmt(value: Any, digits: int = 6) -> str:
@@ -21,6 +22,65 @@ def _fmt(value: Any, digits: int = 6) -> str:
         return f"{v:.{digits}g}"
     except (TypeError, ValueError):
         return "—"
+
+
+def _interp_time(
+    t0: float, t1: float, r0: float, r1: float, r_target: float
+) -> float:
+    if abs(r1 - r0) < 1e-12:
+        return t1
+    frac = (r_target - r0) / (r1 - r0)
+    return t0 + frac * (t1 - t0)
+
+
+def _avg_velocity_to_90pct_max_radius_m_s(
+    series: Sequence[Tuple[float, float]],
+) -> Optional[float]:
+    """
+    从首有效点半径至达到 0.9·R_max 的平均膨胀速度 (m/s)。
+    series 为 (时间 ms, 直径 m)。
+    """
+    if len(series) < 2:
+        return None
+    times = np.asarray([t for t, _ in series], dtype=np.float64)
+    radii = 0.5 * np.asarray([d for _, d in series], dtype=np.float64)
+    if not np.all(np.isfinite(times)) or not np.all(np.isfinite(radii)):
+        return None
+    r_max = float(np.max(radii))
+    if r_max <= 0:
+        return None
+    r_target = RADIUS_90_MAX_FRACTION * r_max
+    r_start = float(radii[0])
+    t_start = float(times[0])
+    if r_start >= r_target:
+        return 0.0
+    hit = np.flatnonzero(radii >= r_target)
+    if hit.size == 0:
+        return None
+    j = int(hit[0])
+    if j == 0:
+        t_target = float(times[0])
+    else:
+        t_target = _interp_time(
+            float(times[j - 1]),
+            float(times[j]),
+            float(radii[j - 1]),
+            float(radii[j]),
+            r_target,
+        )
+    dt_ms = t_target - t_start
+    if dt_ms <= 0:
+        return None
+    return (r_target - r_start) / (dt_ms * 1e-3)
+
+
+def _max_diameter_m(series: Sequence[Tuple[float, float]]) -> Optional[float]:
+    if not series:
+        return None
+    diams = np.asarray([d for _, d in series], dtype=np.float64)
+    if diams.size == 0 or not np.any(np.isfinite(diams)):
+        return None
+    return float(np.nanmax(diams))
 
 
 def _pct(value: Any) -> str:
@@ -46,6 +106,7 @@ def build_key_metrics_text(
     current_frame_result: Optional[Dict[str, Any]] = None,
     diameter_series: Optional[Sequence[Tuple[float, float]]] = None,
     drag_fit: Optional[Dict[str, Any]] = None,
+    segmentation_avg_ms_per_image: Optional[float] = None,
 ) -> str:
     """生成分割 / 直径 / 拖曳拟合关键参数说明。"""
     params = parameters or {}
@@ -62,6 +123,29 @@ def build_key_metrics_text(
         f"像素标定 {_fmt(pixel_length or params.get('pixel_length'))} m/px"
     )
     lines.append(f"  序列帧数 {image_count if image_count else '—'}")
+    lines.append("")
+
+    series = list(diameter_series or [])
+    v90 = _avg_velocity_to_90pct_max_radius_m_s(series) if series else None
+    d_max = _max_diameter_m(series) if series else None
+
+    lines.append("【关键指标】")
+    if segmentation_avg_ms_per_image is not None and segmentation_avg_ms_per_image >= 0:
+        lines.append(
+            f"  分割每张图片的平均时间 {_fmt(segmentation_avg_ms_per_image, 4)} ms"
+        )
+    else:
+        lines.append("  分割每张图片的平均时间 —")
+    if v90 is not None:
+        lines.append(
+            f"  火球膨胀到90%最大半径的平均速度 {_fmt(v90, 4)} m/s"
+        )
+    else:
+        lines.append("  火球膨胀到90%最大半径的平均速度 —")
+    if d_max is not None:
+        lines.append(f"  火球最大直径 {_fmt(d_max, 4)} m")
+    else:
+        lines.append("  火球最大直径 —")
     lines.append("")
 
     lines.append("【分割质量】")
@@ -90,7 +174,6 @@ def build_key_metrics_text(
     lines.append("")
 
     lines.append("【直径实测】")
-    series = list(diameter_series or [])
     if series:
         times = np.asarray([t for t, _ in series], dtype=np.float64)
         diams = np.asarray([d for _, d in series], dtype=np.float64)

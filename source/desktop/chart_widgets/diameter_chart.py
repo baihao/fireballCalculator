@@ -6,7 +6,7 @@
 基于 BaseChart，提供直径曲线的渲染与数据更新接口。
 """
 
-from .base_chart import BaseChart, FONT_SIZE_BODY, FONT_FAMILY
+from .base_chart import BaseChart, FONT_SIZE_BODY, chart_font_family
 from typing import Optional, Tuple
 import numpy as np
 
@@ -161,7 +161,7 @@ class DiameterChart(BaseChart):
 
         # 刷新图例与画布
         try:
-            ax.legend(fontsize=FONT_SIZE_BODY, prop={'family': FONT_FAMILY})
+            ax.legend(fontsize=FONT_SIZE_BODY, prop={'family': chart_font_family()})
         except Exception:
             pass
         self.canvas.draw()
