@@ -47,6 +47,11 @@ FEATURE_DESC = "X = (equiv_kg_TNT, equiv * (al_percent/100) [= m_Al kg])"
 MODEL_ARTIFACT_FILENAMES = ("kbc_krr_K.joblib", "kbc_krr_B.joblib", "kbc_krr_C.joblib")
 
 DEFAULT_KERNEL_RIDGE_ALPHA = 1e-3
+# C 量级小、样本少时 LOOCV 易选过小 σ → 网格曲线在训练点间振荡；单独加强正则与 σ 下限，并在 log10 域拟合
+DEFAULT_KERNEL_RIDGE_ALPHA_C = 1e-2
+C_TARGET_MIN = 1e-12
+C_SIGMA_FLOOR_MEDIAN_FRAC = 0.5
+C_Y_TRANSFORM = "log10"
 
 
 class TargetSigmaErrors(TypedDict):
@@ -80,6 +85,48 @@ def build_X(equiv: np.ndarray, al_pct: np.ndarray) -> np.ndarray:
         raise ValueError("当量与含铝量长度不一致")
     al_frac = al / 100.0
     return np.column_stack([eq, eq * al_frac])
+
+
+def min_pairwise_feature_distance(X: np.ndarray) -> float:
+    """特征空间最近邻距离。"""
+    X = np.asarray(X, dtype=np.float64)
+    n = X.shape[0]
+    if n < 2:
+        return 1.0
+    d_min = float("inf")
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = float(np.linalg.norm(X[i] - X[j]))
+            if d < d_min:
+                d_min = d
+    return d_min if d_min < float("inf") else 1.0
+
+
+def median_pairwise_feature_distance(X: np.ndarray) -> float:
+    """特征空间成对距离的中位数（LOOCV σ 下限，避免 σ≪样本间距时预测坍缩为 0）。"""
+    X = np.asarray(X, dtype=np.float64)
+    n = X.shape[0]
+    if n < 2:
+        return 1.0
+    dists: list[float] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            dists.append(float(np.linalg.norm(X[i] - X[j])))
+    return float(np.median(dists)) if dists else 1.0
+
+
+def target_y_transform(name: str, y: np.ndarray) -> tuple[np.ndarray, str | None]:
+    """目标变换（仅 C 用 log10）；LOOCV 与最终拟合在同一空间进行。"""
+    y = np.asarray(y, dtype=np.float64).ravel()
+    if name == "C" and C_Y_TRANSFORM == "log10":
+        return np.log10(np.maximum(y, C_TARGET_MIN)), "log10"
+    return y, None
+
+
+def inverse_target_transform(y_hat: float, transform: str | None) -> float:
+    if transform == "log10":
+        return float(10.0 ** float(y_hat))
+    return float(y_hat)
 
 
 def sigma_grid_from_equiv(equiv: np.ndarray, n_steps: int = 30) -> np.ndarray:
@@ -131,6 +178,7 @@ def sweep_sigma_loocv(
     sigmas: np.ndarray,
     *,
     alpha: float,
+    sigma_floor: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     tr_list: list[float] = []
     te_list: list[float] = []
@@ -140,6 +188,8 @@ def sweep_sigma_loocv(
         te_list.append(te)
     tr_arr = np.asarray(tr_list, dtype=np.float64)
     te_arr = np.asarray(te_list, dtype=np.float64)
+    if sigma_floor is not None and float(sigma_floor) > 0:
+        te_arr = np.where(sigmas >= float(sigma_floor), te_arr, np.inf)
     j = int(np.argmin(te_arr))
     return sigmas, tr_arr, te_arr, float(sigmas[j])
 
@@ -165,6 +215,9 @@ def _save_model_bundle(
     best_sigma: float,
     alpha: float,
     feature_desc: str,
+    X_train: np.ndarray | None = None,
+    y_train: np.ndarray | None = None,
+    y_transform: str | None = None,
 ) -> None:
     bundle: dict[str, Any] = {
         "target": target,
@@ -175,6 +228,11 @@ def _save_model_bundle(
         "feature_desc": feature_desc,
         "model": model,
     }
+    if y_transform:
+        bundle["y_transform"] = y_transform
+    if X_train is not None and y_train is not None:
+        bundle["X_train"] = np.asarray(X_train, dtype=np.float64)
+        bundle["y_train"] = np.asarray(y_train, dtype=np.float64).ravel()
     path.parent.mkdir(parents=True, exist_ok=True)
     dump(bundle, path)
 
@@ -228,6 +286,10 @@ def train_kernel_regression_kbc(
     X = build_X(eq, al)
 
     sigmas = sigma_grid_from_equiv(eq, n_steps=30)
+    d_min = min_pairwise_feature_distance(X)
+    d_med = median_pairwise_feature_distance(X)
+    sigma_floor_kb = max(1.0, 0.25 * d_med)
+    sigma_floor_c = max(sigma_floor_kb, C_SIGMA_FLOOR_MEDIAN_FRAC * d_med)
 
     saved_root, ts_dir = _ensure_timestamp_root(Path(model_path))
 
@@ -236,9 +298,15 @@ def train_kernel_regression_kbc(
         "n_samples": len(records),
         "data_folder": training_model.data_folder,
         "alpha": alpha_v,
+        "alpha_C": DEFAULT_KERNEL_RIDGE_ALPHA_C,
+        "C_y_transform": C_Y_TRANSFORM,
         "kernel": "rbf",
         "rbf_parameterization": "k=exp(-||dx||^2/(2*sigma^2)); sklearn gamma=1/(2*sigma^2)",
         "sigmas": sigmas.tolist(),
+        "min_pairwise_feature_distance": d_min,
+        "median_pairwise_feature_distance": d_med,
+        "sigma_loocv_floor_KB": sigma_floor_kb,
+        "sigma_loocv_floor_C": sigma_floor_c,
         "targets": {},
     }
 
@@ -246,9 +314,19 @@ def train_kernel_regression_kbc(
     filenames = dict(zip(("K", "B", "C"), MODEL_ARTIFACT_FILENAMES))
     errors_by_target: dict[str, TargetSigmaErrors] = {}
 
+    best_sigma_k: float | None = None
+
     for name in ("K", "B", "C"):
-        ys = targets_y[name]
-        sm, tr_ms, te_ms, best_s = sweep_sigma_loocv(X, ys, sigmas, alpha=alpha_v)
+        ys_raw = targets_y[name]
+        ys, y_transform = target_y_transform(name, ys_raw)
+        alpha_fit = DEFAULT_KERNEL_RIDGE_ALPHA_C if name == "C" else alpha_v
+        sigma_floor = sigma_floor_c if name == "C" else sigma_floor_kb
+        if name == "C" and best_sigma_k is not None:
+            sigma_floor = max(sigma_floor, float(best_sigma_k))
+
+        sm, tr_ms, te_ms, best_s = sweep_sigma_loocv(
+            X, ys, sigmas, alpha=alpha_fit, sigma_floor=sigma_floor
+        )
         errors_by_target[name] = _errors_dict_from_arrays(sm, tr_ms, te_ms)
 
         csv_path = saved_root / f"kbc_krr_loocv_{name}.csv"
@@ -257,31 +335,89 @@ def train_kernel_regression_kbc(
             for si, tt, vv in zip(sm, tr_ms, te_ms):
                 fh.write(f"{si:.12g},{tt:.12g},{vv:.12g}\n")
 
-        model = fit_full_model(X, ys, best_s, alpha=alpha_v)
+        model = fit_full_model(X, ys, best_s, alpha=alpha_fit)
         bundle_path = saved_root / filenames[name]
         _save_model_bundle(
             bundle_path,
             model,
             target=name,
             best_sigma=best_s,
-            alpha=alpha_v,
+            alpha=alpha_fit,
             feature_desc=FEATURE_DESC,
+            X_train=X,
+            y_train=ys,
+            y_transform=y_transform,
         )
 
+        if name == "K":
+            best_sigma_k = best_s
+
         j = int(np.argmin(te_ms))
-        manifest["targets"][name] = {
+        entry: dict[str, Any] = {
             "best_sigma": best_s,
             "sklearn_rbf_gamma": sklearn_rbf_gamma_from_sigma(best_s),
             "best_loocv_test_mse": float(te_ms[j]),
             "best_loocv_train_mse": float(tr_ms[j]),
             "model_file": filenames[name],
             "loocv_csv": csv_path.name,
+            "alpha": alpha_fit,
         }
+        if y_transform:
+            entry["y_transform"] = y_transform
+        manifest["targets"][name] = entry
 
     with open(saved_root / "manifest.json", "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, ensure_ascii=False, indent=2)
 
     return saved_root, errors_by_target
+
+
+def _idw_rbf_predict(
+    X_row: np.ndarray,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    sigma: float,
+) -> float:
+    """σ 与 LOOCV 一致的高斯核逆距离加权，用于 KRR 预测坍缩时的兜底。"""
+    xe = np.asarray(X_row, dtype=np.float64).reshape(1, -1)
+    X_tr = np.asarray(X_train, dtype=np.float64)
+    y = np.asarray(y_train, dtype=np.float64).ravel()
+    d2 = np.sum((X_tr - xe) ** 2, axis=1)
+    s = max(float(sigma), 1.0)
+    w = np.exp(-d2 / (2.0 * s * s))
+    w_sum = float(np.sum(w))
+    if w_sum <= 1e-300:
+        return float(np.mean(y))
+    return float(np.dot(w, y) / w_sum)
+
+
+def _predict_from_bundle(bundle_path: Path, X_row: np.ndarray) -> float:
+    bundle = load(bundle_path)
+    model: KernelRidge = bundle["model"]
+    y_hat = float(model.predict(X_row)[0])
+    return inverse_target_transform(y_hat, bundle.get("y_transform"))
+
+
+def _predict_c_with_fallback(root: Path, X_row: np.ndarray) -> float:
+    bundle_path = root / MODEL_ARTIFACT_FILENAMES[2]
+    bundle = load(bundle_path)
+    y_transform = bundle.get("y_transform")
+    model: KernelRidge = bundle["model"]
+    c_hat = inverse_target_transform(float(model.predict(X_row)[0]), y_transform)
+    if c_hat > 0:
+        return c_hat
+    X_tr = bundle.get("X_train")
+    y_tr = bundle.get("y_train")
+    if X_tr is None or y_tr is None:
+        return c_hat
+    d_med = median_pairwise_feature_distance(np.asarray(X_tr))
+    sigma_fb = max(
+        float(bundle.get("best_sigma", d_med)),
+        C_SIGMA_FLOOR_MEDIAN_FRAC * d_med,
+        1.0,
+    )
+    y_idw = _idw_rbf_predict(X_row, X_tr, y_tr, sigma_fb)
+    return inverse_target_transform(y_idw, y_transform)
 
 
 def predict_kernel_regression_kbc(
@@ -303,13 +439,11 @@ def predict_kernel_regression_kbc(
 
     k_hat = float(_load_bundle_predict(root / MODEL_ARTIFACT_FILENAMES[0], xe))
     b_hat = float(_load_bundle_predict(root / MODEL_ARTIFACT_FILENAMES[1], xe))
-    c_hat = float(_load_bundle_predict(root / MODEL_ARTIFACT_FILENAMES[2], xe))
+    c_hat = _predict_c_with_fallback(root, xe)
     return k_hat, b_hat, c_hat
 
 
 def _load_bundle_predict(bundle_path: Path, X_row: np.ndarray) -> float:
     if not bundle_path.is_file():
         raise FileNotFoundError(f"缺少模型文件: {bundle_path}")
-    bundle = load(bundle_path)
-    m: KernelRidge = bundle["model"]
-    return float(m.predict(X_row)[0])
+    return _predict_from_bundle(bundle_path, X_row)

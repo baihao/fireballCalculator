@@ -83,7 +83,64 @@ k(x,x')=\exp\!\left(-\gamma_{\mathrm{sk}}\|x-x'\|^2\right),
 2. **测试侧 LOOCV MSE**：\(\mathrm{MSE}_{\mathrm{test}}(\sigma)=\frac{1}{n}\sum_j (y_j-\hat y_j^{(-j)})^2\)。
 3. **训练侧 LOOCV MSE（折内）**：每折仅在 **\(n-1\)** 条训练点上算拟合误差并平均，再在折上对外层平均——记为 \(\mathrm{MSE}_{\mathrm{train}}(\sigma)\)。
 
-以 **最小的 \(\mathrm{MSE}_{\mathrm{test}}(\sigma)\)** 对应的 \(\sigma^\*\) 为最终 \(\sigma\)（平局取实现规定的第一个）；落盘时在 ``manifest`` 中同时写明 **``sklearn_rbf_gamma = 1/(2(\sigma^\*)^2)``** 以便核对。
+### 4.1 \(\sigma\) 下限（相对旧版的改动）
+
+**旧策略（2026-09 之前 artefact）**：在全部 31 个候选 \(\sigma_i\) 上取
+
+\[
+\sigma^\* = \arg\min_{\sigma_i}\ \mathrm{MSE}_{\mathrm{test}}(\sigma_i).
+\]
+
+**现策略**：在比较 LOOCV 测试误差前，先算特征空间几何尺度，并禁止过小的 \(\sigma\) 参与择优。
+
+记训练特征矩阵 \(X\in\mathbb{R}^{n\times 2}\)（见第 2 节），所有样本对的欧氏距离为 \(\{d_{ab}\}\)，
+
+\[
+d_{\mathrm{med}} = \mathrm{median}_{a<b}(d_{ab}),\qquad
+\sigma_{\mathrm{floor}} = \max\bigl(1,\; 0.25\, d_{\mathrm{med}}\bigr).
+\]
+
+对每个候选 \(\sigma_i\)：
+
+\[
+\widetilde{\mathrm{MSE}}_{\mathrm{test}}(\sigma_i)=
+\begin{cases}
+\mathrm{MSE}_{\mathrm{test}}(\sigma_i), & \sigma_i \ge \sigma_{\mathrm{floor}},\\[4pt]
++\infty, & \sigma_i < \sigma_{\mathrm{floor}}.
+\end{cases}
+\]
+
+\[
+\sigma^\* = \arg\min_{\sigma_i}\ \widetilde{\mathrm{MSE}}_{\mathrm{test}}(\sigma_i).
+\]
+
+**要点**：
+
+- **K、B、C 共用同一 \(\sigma_{\mathrm{floor}}\)**（同一套 \(X\)），但 **各自独立** 选 \(\sigma^\*\)（三个目标的最优 \(\sigma\) 可以不同）。
+- **候选网格公式未改**（仍只由当量 \(e_{\min},e_{\max}\) 生成）；改的是 **谁有资格成为 \(\sigma^\*\)**。
+- \(\sigma_{\mathrm{floor}}\)、\(d_{\mathrm{med}}\)、最近邻距离 \(d_{\min}\) 写入 **`manifest.json`**，便于排查。
+
+**动机（C 预测坍缩为 0）**：当 \(\sigma\) 远小于样本间距时，查询点处 RBF 权重 \(\approx 0\)，`KernelRidge` 外推 \(\hat C\approx 0\)。拖曳式 \(D(t)=K(1-B e^{-C_{\mathrm{eff}} t^2})\) 在 **\(C=0\)** 时退化为常数 **\(D\equiv K(1-B)\)**，与渐近 **\(K\)** 不一致。旧 LOOCV 对 **量级 \(\sim 10^{-4}\)** 的 **\(C\)** 常误选 **\(\sigma=1\)**（留一法上“预测成 0”的 MSE 仍很小）。
+
+**示例（4 条训练、当量约 475–2000 kg）**：\(d_{\mathrm{med}}\approx 796\) → \(\sigma_{\mathrm{floor}}\approx 199\)；**C** 的 \(\sigma^\*\) 由 **1** 变为 **约 200** 量级，1000 kg 插值处 **\(\hat C\)** 恢复为 **\(10^{-4}\)** 量级而非 0。
+
+### 4.2 **\(C\)** 过拟合抑制（相对 **\(K,B\)** 的额外约定）
+
+**\(C\)** 量级小（\(10^{-5}\sim10^{-3}\)）、样本少时，LOOCV 在 **\(\sigma\)** 网格上仍可能选出 **过局部** 的核，训练 Tab 在当量 100 点网格上画 **\(C\)** 曲线时会出现 **训练点之间的深谷/尖峰**（过拟合），而非物理上平滑的随当量变化。
+
+实现上对 **仅目标 C** 增加：
+
+| 项 | **\(K,B\)** | **\(C\)** |
+|----|------------|-----------|
+| 岭正则 **`alpha`** | 默认 **`10^{-3}`** | **`10^{-2}`** |
+| **\(\sigma\)** 下限 | **`max(1, 0.25\, d_{\mathrm{med}})`** | **`max(上述, 0.5\, d_{\mathrm{med}}, \sigma^\*_K)`**（先训 **\(K\)** 再训 **\(C\)**） |
+| 拟合域 | 原值 | **`y = log10(max(C, \varepsilon))`**，预测 **`10^{\hat y}`** |
+
+**`joblib`** 中 **\(C\)** bundle 含 **`y_transform: "log10"`**；旧 artefact 无此字段则按线性 **\(C\)** 解读。
+
+### 4.3 择优与落盘
+
+以 **\(\widetilde{\mathrm{MSE}}_{\mathrm{test}}\)** 最小对应的 \(\sigma^\*\) 为最终 \(\sigma\)（平局取实现规定的第一个）；落盘时在 ``manifest`` 中同时写明 **``sklearn_rbf_gamma = 1/(2(\sigma^\*)^2)``** 以便核对。**\(C\)** 另记 **`alpha_C`**、**`C_y_transform`**。
 
 ---
 
@@ -101,7 +158,8 @@ k(x,x')=\exp\!\left(-\gamma_{\mathrm{sk}}\|x-x'\|^2\right),
 
 - **`K` / `B` / `C`** 三套持久化模型（如 `joblib`），文件名由实现约定（与旧版脚本中 `kbc_krr_K.joblib` 等可对齐或可重命名，以代码为准）。
 - 各目标的 **LOOCV 误差表**（CSV 首列为 **`sigma`**、折内平均训练 MSE、折外平均测试 MSE），用于描 **\(\sigma\)**–误差曲线（**旧 artefact** 可能仍为列名 **`gamma`**，实为历史误用下的 ``sklearn`` ``gamma``，作图脚本可兼容读取）。
-- **`manifest.json`**（或其它摘要文件）：\(n\) 样本、选用的 **`alpha`**、**`sigmas`** 候选列表、**`rbf_parameterization`** 说明、每个目标 **`best_sigma`** / **`sklearn_rbf_gamma`**、最佳 LOOCV 测试误差、相对路径文件名等。
+- **`manifest.json`**（或其它摘要文件）：\(n\) 样本、选用的 **`alpha`**、**`sigmas`** 候选列表、**`rbf_parameterization`** 说明、**`min_pairwise_feature_distance`**、**`median_pairwise_feature_distance`**、**`sigma_loocv_floor`**、每个目标 **`best_sigma`** / **`sklearn_rbf_gamma`**、最佳 LOOCV 测试误差、相对路径文件名等。
+- 各目标 **`joblib` bundle**（新 artefact）：除 `model` 外可含 **`X_train`**、**`y_train`**，供 **\(C\)** 预测兜底（见第 6.2 节）。**旧 artefact** 无此字段时仅依赖仿真侧回退。
 
 **读取已训练结果进行预测时**，应使用指向 **上述 `kernel_regression_{timestamp}` 目录**的路径（或与实现一致的「模型 bundle 路径」）。
 
@@ -150,7 +208,15 @@ k(x,x')=\exp\!\left(-\gamma_{\mathrm{sk}}\|x-x'\|^2\right),
 
 **返回**
 
-- **`K, B, C`**：三张量浮点预测（或单对象/tuple 三字段），由三个 `KernelRidge` 在构造好的 \(X\) 上 **`predict`** 得到。
+- **`K, B, C`**：三个浮点预测。**\(K,B\)** 直接来自对应 `KernelRidge.predict`。**\(C\)** 见下节兜底。
+
+**\(C\) 预测兜底（`predict_kernel_regression_kbc`）**
+
+1. 先用 **\(C\)** 模型 **`predict`** 得 \(\hat C\)。
+2. 若 **\(\hat C > 0\)**：直接返回。
+3. 若 **\(\hat C \le 0\)** 且 bundle 含 **`X_train`/`y_train`**：用与 RBF 一致的高斯核 **逆距离加权（IDW）** 再估一次，核宽度  
+   \(\sigma_{\mathrm{fb}} = \max(\sigma^\*,\; 0.25\, d_{\mathrm{med}},\; 1)\)（\(\sigma^\*\) 为该 **\(C\)** 模型 LOOCV 选中的 \(\sigma\)）。
+4. 仍 **\(\le 0\)** 或无训练缓存：**原样返回**（由仿真层处理，见第 8 节）。
 
 ---
 
@@ -184,19 +250,30 @@ python kernel_regression/run.py predict \
 
 ---
 
-## 8. 依赖
+## 8. 仿真侧兜底（`model_tab` / `ModelController`）
+
+当量仿真若已加载 KRR artefact，直径走 **`diameter_drag_series(K,B,C)`**（显式拖曳）。若 **`predict_kernel_regression_kbc`** 返回 **\(C\le 0\)**（常见于 **未重训的旧 artefact**、**\(C\)** 模型 **\(\sigma^\*=1\)**）：
+
+- **`ModelController.resolve_kbc_for_simulation`** 保留 KRR 的 **\(K,B\)**，将 **\(C\)** 替换为 **`FireballCalculator` 材料标准 `C` 按当量比 \(M\)** 缩放：\(C_{\mathrm{eff}} = C_{\mathrm{std}}/M\)（与非 KRR 计算器路径一致）。
+- 控制台打印警告，便于与 **manifest** 中 **`targets.C.best_sigma`** 对照。
+
+**建议**：修改 \(\sigma\) 策略或更换训练集后 **重新训练** 并导入新 **`kernel_regression_{timestamp}`**；仿真兜底仅保证直径随时间变化，**不保证**与 LOOCV 最优 **\(C\)** 一致。
+
+---
+
+## 9. 依赖
 
 需 **`numpy`、`matplotlib`、`joblib`、`scikit-learn`**（参见仓库 **`requirements.txt`**）。
 
 ---
 
-## 9. 小样本说明
+## 10. 小样本说明
 
 \(n&lt;2\) 时无法进行 LOOCV，实现应报错并提示。**极少样本下「最优 \(\sigma\)」不确定性大**，仅作工程上的折中选取；增量数据后可再次训练更新时间戳目录。
 
 ---
 
-## 10. 绘图（`graph.py`）
+## 11. 绘图（`graph.py`）
 
 脚本 **`kernel_regression/graph.py`** 提供两组能力（亦可在 Python 中 `import kernel_regression.graph` 调用同名函数）：
 
@@ -220,7 +297,7 @@ python kernel_regression/graph.py loocv \
 
 ---
 
-## 11. 批量预测与 \(K,B,C\)～当量 曲线（`run_test.py`）
+## 12. 批量预测与 \(K,B,C\)～当量 曲线（`run_test.py`）
 
 脚本 **`kernel_regression/run_test.py`** 对已落盘的模型：**固定含铝（默认 \(30\\%\)**）**，令当量依次为 **\(1,2,\ldots,150\)（可调范围）**，逐点调用 **`predict_kernel_regression_kbc`**，并将 **\(K,B,C\) 随当量** 绘制为三张纵向子图。**默认 PNG 与模型同目录**：**`kbc_vs_equivalent_al30.png`**；**`--out` 逻辑与 §10 相同**（相对路径相对 `--model-dir`）。
 
@@ -237,6 +314,6 @@ python kernel_regression/run_test.py \
 
 ---
 
-## 12. `matplotlib`
+## 13. `matplotlib`
 
 作图脚本使用 **`Agg`** 后端，无需显示设备即可写 PNG。
