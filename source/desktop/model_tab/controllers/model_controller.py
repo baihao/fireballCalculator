@@ -244,7 +244,23 @@ class ModelController:
                 except Exception as e:
                     print(f"⚠️ KRR 预测失败，回退计算器：{e}")
                 else:
-                    self.last_sim_kbc = (float(k), float(b), float(c))
+                    k, b, c = float(k), float(b), float(c)
+                    if c <= 0.0:
+                        p = self._calc.get_standard_parameters(material_name)
+                        std_eq = float(
+                            self.training_equivalent
+                            if self.training_equivalent is not None
+                            else p["standard_equivalent"]
+                        )
+                        m_ratio = (
+                            float(equivalent_kg_tnt) / std_eq if std_eq > 0 else 1.0
+                        )
+                        c = float(p["C"]) / m_ratio if m_ratio > 0 else float(p["C"])
+                        print(
+                            "⚠️ 核岭回归预测 C≤0（多为 C 模型 σ 过小、核权重≈0），"
+                            f"直径时间常数已改用计算器材料 C/M → C={c:g}"
+                        )
+                    self.last_sim_kbc = (k, b, c)
                     self.last_kbc_source = "krr"
                     print(
                         f"✓ 核岭回归 K,B,C @ 当量={equivalent_kg_tnt:g} kg, 含铝={al_percent:g} % → "
