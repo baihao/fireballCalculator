@@ -15,7 +15,13 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 from matplotlib.lines import Line2D
 
-from .base_chart import BaseChart, apply_dark_chart_style, FONT_SIZE_BODY, chart_font_family
+from .base_chart import (
+    BaseChart,
+    apply_dark_chart_style,
+    FONT_SIZE_BODY,
+    chart_font_family,
+    chart_font_properties,
+)
 
 
 # 与原型青色散点相近
@@ -305,10 +311,10 @@ class FireballTrainingScatterChart(BaseChart):
             ttl = legend.get_title()
             ttl.set_color('#94a3b8')
             ttl.set_fontsize(FONT_SIZE_BODY)
-            ff = chart_font_family()
-            ttl.set_fontfamily(ff)
+            fp = chart_font_properties(FONT_SIZE_BODY)
+            ttl.set_fontproperties(fp)
             for txt in legend.get_texts():
-                txt.set_fontfamily(ff)
+                txt.set_fontproperties(fp)
 
         if x_sc.size:
             foot = self._size_legend_hint
@@ -321,7 +327,7 @@ class FireballTrainingScatterChart(BaseChart):
                 va='bottom',
                 color='#94a3b8',
                 fontsize=FONT_SIZE_BODY,
-                fontfamily=chart_font_family(),
+                fontproperties=chart_font_properties(FONT_SIZE_BODY),
             )
 
         self.canvas.draw()

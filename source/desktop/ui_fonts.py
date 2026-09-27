@@ -9,17 +9,24 @@ Linux 常见: Noto Serif CJK SC、Source Han Serif SC 等。
 
 from __future__ import annotations
 
-from typing import List
+import os
+import sys
+from pathlib import Path
+from typing import List, Optional
 
-# 按优先级尝试；均为宋体或近宋衬线，用于中文界面
+# 按优先级尝试；Qt 与 Matplotlib 共用（Windows 上 Matplotlib 常需显式 addfont）
 SONG_FAMILY_FALLBACK: List[str] = [
     "SimSun",
     "NSimSun",
     "宋体",
+    "Microsoft YaHei",
+    "Microsoft YaHei UI",
+    "SimHei",
     "Songti SC",
     "STSong",
     "Noto Serif CJK SC",
     "Source Han Serif SC",
+    "Arial Unicode MS",
     "AR PL UMing CN",
 ]
 
@@ -60,50 +67,88 @@ _matplotlib_font_family: str | None = None
 
 def matplotlib_font_family() -> str:
     """图表轴标签/图例应使用的 fontfamily；未配置时回退 generic serif。"""
-    return _matplotlib_font_family or "serif"
+    if _matplotlib_font_family:
+        return _matplotlib_font_family
+    if sys.platform == "win32":
+        return "Microsoft YaHei"
+    return "serif"
 
 
-def configure_matplotlib_cjk() -> str | None:
+def _register_windows_font_files() -> None:
+    """将系统 Fonts 目录中的中文字体注册进 Matplotlib（Windows 上否则易回退 DejaVu）。"""
+    if sys.platform != "win32":
+        return
+    from matplotlib import font_manager
+
+    fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    if not fonts_dir.is_dir():
+        return
+    for fname in (
+        "simsun.ttc",
+        "simsunb.ttf",
+        "msyh.ttc",
+        "msyh.ttf",
+        "msyhl.ttc",
+        "simhei.ttf",
+    ):
+        path = fonts_dir / fname
+        if not path.is_file():
+            continue
+        try:
+            font_manager.fontManager.addfont(str(path))
+        except Exception:
+            continue
+
+
+def _matplotlib_can_render_cjk(family: str) -> bool:
+    from matplotlib import font_manager
+
+    try:
+        path = font_manager.findfont(
+            font_manager.FontProperties(family=family),
+            fallback_to_default=False,
+        )
+    except Exception:
+        return False
+    if not path or "dejavu" in path.lower():
+        return False
+    return True
+
+
+def configure_matplotlib_cjk() -> Optional[str]:
     """
-    在 QApplication 创建后调用：让 Matplotlib 与 Qt 使用同一套可显示中文的宋体族名。
+    在 QApplication 创建后调用：让 Matplotlib 与 Qt 使用同一套可显示中文的字体族名。
 
     若仅设置 rcParams['font.serif'] 列表但本机字体未被 Matplotlib 缓存识别，
-    中文轴标题/图例会回退到 DejaVu Serif，在 Windows 上常表现为空白或「丢失」。
+    中文轴标题/图例会回退到 DejaVu Serif，在 Windows 上常表现为方框或「丢失」。
     """
     global _matplotlib_font_family
     import matplotlib
     from matplotlib import font_manager
 
-    chosen: str | None = pick_system_song_font_family()
-    if chosen:
-        try:
-            font_manager.findfont(
-                font_manager.FontProperties(family=chosen),
-                fallback_to_default=False,
-            )
-        except Exception:
-            chosen = None
+    _register_windows_font_files()
 
-    if not chosen:
-        for name in SONG_FAMILY_FALLBACK:
-            try:
-                path = font_manager.findfont(
-                    font_manager.FontProperties(family=name),
-                    fallback_to_default=False,
-                )
-                if path and "dejavu" not in path.lower():
-                    chosen = name
-                    break
-            except Exception:
-                continue
+    candidates: List[str] = []
+    qt_pick = pick_system_song_font_family()
+    if qt_pick:
+        candidates.append(qt_pick)
+    for name in SONG_FAMILY_FALLBACK:
+        if name not in candidates:
+            candidates.append(name)
+
+    chosen: Optional[str] = None
+    for name in candidates:
+        if _matplotlib_can_render_cjk(name):
+            chosen = name
+            break
 
     if not chosen:
         return None
 
     _matplotlib_font_family = chosen
-    # 明确指定族名，避免仅写 'serif' 时回退链未命中 SimSun/宋体
     matplotlib.rcParams["font.family"] = chosen
     rest = [n for n in SONG_FAMILY_FALLBACK if n != chosen]
     matplotlib.rcParams["font.serif"] = [chosen, *rest, "DejaVu Serif"]
+    matplotlib.rcParams["font.sans-serif"] = [chosen, *rest, "DejaVu Sans"]
     matplotlib.rcParams["axes.unicode_minus"] = False
     return chosen

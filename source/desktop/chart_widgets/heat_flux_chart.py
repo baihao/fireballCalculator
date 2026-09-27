@@ -170,7 +170,9 @@ class HeatFluxChart(BaseChart):
                 for text in legend.get_texts():
                     text.set_color('white')
                     text.set_fontsize(FONT_SIZE_BODY)
-                    text.set_fontfamily(chart_font_family())
+                    from .base_chart import chart_font_properties
+
+                    text.set_fontproperties(chart_font_properties(FONT_SIZE_BODY))
             except Exception:
                 pass
         self.canvas.draw()
