@@ -9,6 +9,7 @@
 
 from typing import Optional, Tuple, Iterable
 import matplotlib
+from matplotlib.font_manager import FontProperties
 from framework import MatplotlibWidget
 from ui_fonts import matplotlib_font_family
 
@@ -39,10 +40,30 @@ ALPHA_PLACEHOLDER_BG = 0.8         # 占位文本背景透明度
 
 # 布局常量
 LAYOUT_PAD = 0.8                   # 仅兜底使用；默认采用 constrained_layout
-SUBPLOT_LEFT = 0.12
+SUBPLOT_LEFT = 0.18
 SUBPLOT_RIGHT = 0.98
 SUBPLOT_TOP = 0.88
 SUBPLOT_BOTTOM = 0.18
+
+
+def chart_font_properties(size: float = FONT_SIZE_BODY, *, bold: bool = False) -> FontProperties:
+    return FontProperties(
+        family=chart_font_family(),
+        size=size,
+        weight="bold" if bold else "normal",
+    )
+
+
+def prepare_figure_layout(fig) -> None:
+    try:
+        fig.set_constrained_layout(True)
+    except Exception:
+        fig.subplots_adjust(
+            left=SUBPLOT_LEFT,
+            right=SUBPLOT_RIGHT,
+            top=SUBPLOT_TOP,
+            bottom=SUBPLOT_BOTTOM,
+        )
 PLACEHOLDER_BBOX_PAD = 0.3         # 占位文本边框内边距
 PLACEHOLDER_BBOX_STYLE = 'round'    # 占位文本边框样式
 
@@ -67,6 +88,7 @@ def apply_dark_chart_style(ax, x_label: str, y_label: str, title: str,
     """
     # 画布与坐标轴底色
     fig = ax.figure
+    prepare_figure_layout(fig)
     fig.patch.set_facecolor(COLOR_BACKGROUND)
     ax.set_facecolor(COLOR_BACKGROUND)
 
@@ -75,11 +97,13 @@ def apply_dark_chart_style(ax, x_label: str, y_label: str, title: str,
     for spine in ['bottom', 'top', 'left', 'right']:
         ax.spines[spine].set_color(COLOR_BORDER)
 
-    # 轴标签与标题（使用常量）
-    ff = chart_font_family()
-    ax.set_xlabel(x_label, color=COLOR_TEXT, fontsize=FONT_SIZE_BODY, fontfamily=ff)
-    ax.set_ylabel(y_label, color=COLOR_TEXT, fontsize=FONT_SIZE_BODY, fontfamily=ff)
-    ax.set_title(title, color=COLOR_TITLE, fontsize=FONT_SIZE_TITLE, fontweight='bold', fontfamily=ff)
+    label_fp = chart_font_properties(FONT_SIZE_BODY)
+    title_fp = chart_font_properties(FONT_SIZE_TITLE, bold=True)
+    ax.set_xlabel(x_label, color=COLOR_TEXT, fontproperties=label_fp)
+    ax.set_ylabel(y_label, color=COLOR_TEXT, fontproperties=label_fp)
+    ax.set_title(title, color=COLOR_TITLE, fontproperties=title_fp)
+    for tick in ax.get_xticklabels() + ax.get_yticklabels():
+        tick.set_fontproperties(label_fp)
 
     # 轴范围
     if xlim is not None:
@@ -94,7 +118,7 @@ def apply_dark_chart_style(ax, x_label: str, y_label: str, title: str,
     if placeholder_text and placeholder_xy:
         ax.text(placeholder_xy[0], placeholder_xy[1], placeholder_text,
                 ha='center', va='center',
-                color=COLOR_PLACEHOLDER, fontsize=FONT_SIZE_BODY, fontfamily=chart_font_family(),
+                color=COLOR_PLACEHOLDER, fontproperties=chart_font_properties(FONT_SIZE_BODY),
                 bbox=dict(boxstyle=f"{PLACEHOLDER_BBOX_STYLE},pad={PLACEHOLDER_BBOX_PAD}",
                          facecolor=COLOR_PLACEHOLDER_BG, alpha=ALPHA_PLACEHOLDER_BG))
 

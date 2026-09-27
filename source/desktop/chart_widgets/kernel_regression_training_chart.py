@@ -129,9 +129,11 @@ class KernelRegressionTrainingCurveChart(BaseChart):
         )
 
         try:
+            from .base_chart import chart_font_properties
+
             leg = ax.legend(
                 fontsize=FONT_SIZE_BODY,
-                prop={'family': chart_font_family()},
+                prop=chart_font_properties(FONT_SIZE_BODY),
                 loc='upper right',
                 framealpha=0.9,
                 facecolor='#1f2937',

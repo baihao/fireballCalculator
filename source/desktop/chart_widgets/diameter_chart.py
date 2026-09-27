@@ -131,6 +131,9 @@ class DiameterChart(BaseChart):
 
         # 清空并重新绘制
         self.clear()
+        from .base_chart import prepare_figure_layout
+
+        prepare_figure_layout(self.figure)
         ax = self.figure.add_subplot(111)
 
         # 计算数据范围（包括原始数据或拟合曲线）
@@ -161,7 +164,9 @@ class DiameterChart(BaseChart):
 
         # 刷新图例与画布
         try:
-            ax.legend(fontsize=FONT_SIZE_BODY, prop={'family': chart_font_family()})
+            from .base_chart import chart_font_properties
+
+            ax.legend(fontsize=FONT_SIZE_BODY, prop=chart_font_properties(FONT_SIZE_BODY))
         except Exception:
             pass
         self.canvas.draw()

@@ -228,7 +228,9 @@ class DiameterVelocityChart(BaseChart):
 
         # 刷新图例与画布（使用常量）
         try:
-            ax.legend(fontsize=FONT_SIZE_BODY, prop={'family': chart_font_family()})
+            from .base_chart import chart_font_properties
+
+            ax.legend(fontsize=FONT_SIZE_BODY, prop=chart_font_properties(FONT_SIZE_BODY))
         except Exception:
             pass
         # 使用 constrained_layout，无需 tight_layout
