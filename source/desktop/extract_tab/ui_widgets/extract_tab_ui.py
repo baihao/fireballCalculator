@@ -47,12 +47,18 @@ class ExtractTabUI:
         # 创建侧边栏组件（为了确保所有组件都被创建）
         self._create_sidebar_components()
         
-        # 添加到分割器
+        left_widget.setMinimumWidth(360)
+        right_widget.setMinimumWidth(280)
+
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
-        splitter.setSizes([600, 300])
-        
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([600, 400])
+        self.ui_components["main_splitter"] = splitter
+
         layout.addWidget(splitter)
         parent_widget.setLayout(layout)
         

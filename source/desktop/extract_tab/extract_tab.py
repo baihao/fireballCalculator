@@ -329,6 +329,26 @@ class ExtractTab(QWidget):
             self._sidebar_widget = self.ui_builder.create_sidebar_widget()
         
         return self._sidebar_widget
+
+    def refresh_layout_after_show(self) -> None:
+        """窗口显示后修正 QSplitter 比例（Windows 上避免左侧预览区宽度为 0）。"""
+        splitter = self.ui_components.get("main_splitter")
+        if splitter is None or splitter.width() < 200:
+            return
+        sizes = splitter.sizes()
+        collapsed = sum(sizes) < 100 or (sizes and sizes[0] < 80)
+        if not collapsed and getattr(self, "_splitter_layout_ok", False):
+            return
+        total = max(splitter.width(), 680)
+        left = max(360, int(total * 0.58))
+        right = max(280, total - left)
+        splitter.setSizes([left, right])
+        self._splitter_layout_ok = True
+        if collapsed:
+            try:
+                self.chart_controller.reset()
+            except Exception:
+                pass
     
     def _reset_state_before_import(self):
         """在导入新序列前清空之前的内存状态与UI显示"""
@@ -824,7 +844,7 @@ class ExtractTab(QWidget):
             
             if file_path:
                 # 导出分析结果
-                success = self.export_analysis_results_to_json(file_path)
+                success, mirror_dest = self.export_analysis_results_to_json(file_path)
                 
                 # 如果选中了"同时导出分割图片"，则导出分割图片
                 export_images_success = False
@@ -832,7 +852,16 @@ class ExtractTab(QWidget):
                     export_images_success = self.export_segmentation_images(file_path)
                 
                 if success:
+                    from .utils.training_data_mirror import resolve_training_data_mirror_dir
+
                     message = f"分析结果已保存到:\n{file_path}\n\n包含 {len(diameter_series)} 个直径数据点与拟合参数"
+                    if mirror_dest:
+                        message += f"\n\n已同步训练库:\n{mirror_dest}"
+                    else:
+                        message += (
+                            f"\n\n（未写入 {resolve_training_data_mirror_dir()}，"
+                            "请查看运行日志）"
+                        )
                     if export_images_success:
                         message += "\n\n分割图片已成功导出"
                     elif self.export_segmentation_checkbox.isChecked():
@@ -848,7 +877,7 @@ class ExtractTab(QWidget):
             QMessageBox.critical(self, "错误", f"保存提取序列失败:\n{str(e)}")
             self.append_run_log("保存失败")
     
-    def export_analysis_results_to_json(self, file_path: str) -> bool:
+    def export_analysis_results_to_json(self, file_path: str) -> tuple[bool, Optional[str]]:
         """导出直径曲线、爆炸参数、拖曳拟合结果到 JSON 文件。"""
         try:
             from pathlib import Path
@@ -862,10 +891,18 @@ class ExtractTab(QWidget):
             import json
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(export_data, f, indent=2, ensure_ascii=False)
-            return True
+
+            from .utils.training_data_mirror import mirror_json_to_training_data
+
+            mirrored = mirror_json_to_training_data(file_path)
+            if mirrored is not None:
+                print(f"✓ 已同步到 training_data: {mirrored}")
+            else:
+                print("⚠️ 未能同步到 training_data（请检查磁盘权限或路径）")
+            return True, str(mirrored) if mirrored else None
         except Exception as e:
             print(f"❌ 导出分析结果失败: {e}")
-            return False
+            return False, None
     
     def export_segmentation_images(self, json_file_path: str) -> bool:
         """导出分割图片到指定目录"""

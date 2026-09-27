@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QTextEdit, QFileDialog, QCheckBox, QGroupBox,
                                QGridLayout, QSplitter, QFrame, QScrollArea)
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QSize
-from PySide6.QtGui import QPalette, QColor, QPixmap, QPainter, QPen, QCloseEvent
+from PySide6.QtGui import QPalette, QColor, QPixmap, QPainter, QPen, QCloseEvent, QShowEvent
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -193,23 +193,26 @@ class SidebarWidget(QWidget):
         
     def set_sidebar_content(self, content_widget):
         """设置侧边栏内容"""
-        # 如果还没有布局，创建一个
-        if not self.sidebar_container.layout():
-            layout = QVBoxLayout()
-            self.sidebar_container.setLayout(layout)
-        
+        container_layout = self.sidebar_container.layout()
+        if container_layout is None:
+            container_layout = QVBoxLayout()
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            self.sidebar_container.setLayout(container_layout)
+
         # 隐藏所有现有的侧边栏内容
-        for i in range(self.sidebar_container.layout().count()):
-            child = self.sidebar_container.layout().itemAt(i)
+        for i in range(container_layout.count()):
+            child = container_layout.itemAt(i)
             if child and child.widget():
                 child.widget().hide()
-        
+
         # 如果控件不在布局中，添加到布局
         if content_widget.parent() != self.sidebar_container:
-            self.sidebar_container.layout().addWidget(content_widget)
-        
+            container_layout.addWidget(content_widget)
+
         # 显示新的侧边栏内容
         content_widget.show()
+        content_widget.updateGeometry()
+        self.sidebar_container.updateGeometry()
         
 
 
@@ -292,14 +295,41 @@ class FireballAnalysisApp(QMainWindow):
 
         # 原生菜单栏（文件 / 视图）
         setup_application_menu(self)
+
+        # 首屏即挂载机器视觉侧栏（勿仅依赖延迟定时器，Windows 上易留空）
+        self._sidebars_loaded = False
+        self.on_tab_changed(0)
         
     def setup_connections(self):
         """设置信号连接"""
         # 标签页切换
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
-        
-        # 延迟初始化侧边栏，确保标签页完全创建
-        QTimer.singleShot(100, lambda: self.on_tab_changed(0))
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._refresh_layout_after_window_show)
+
+    def _refresh_layout_after_window_show(self) -> None:
+        """首次显示后刷新当前 Tab 与全局侧栏几何（修复 Windows 启动空白）。"""
+        idx = self.tab_widget.currentIndex()
+        if idx < 0:
+            idx = 0
+            self.tab_widget.setCurrentIndex(0)
+        self.on_tab_changed(idx)
+        self._refresh_current_tab_layout()
+        self.sidebar.updateGeometry()
+        self.tab_widget.updateGeometry()
+        central = self.centralWidget()
+        if central is not None:
+            central.updateGeometry()
+
+    def _refresh_current_tab_layout(self) -> None:
+        page = self.tab_widget.currentWidget()
+        if page is None:
+            return
+        refresh = getattr(page, "refresh_layout_after_show", None)
+        if callable(refresh):
+            refresh()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         try:
@@ -398,6 +428,8 @@ class FireballAnalysisApp(QMainWindow):
             self.sidebar.set_sidebar_content(self.model_tab.get_sidebar_widget())
         elif index == 3:  # 工程计算
             self.sidebar.set_sidebar_content(self.engineering_tab.get_sidebar_widget())
+
+        QTimer.singleShot(0, self._refresh_current_tab_layout)
 
     def _load_all_sidebars(self):
         """预加载所有侧边栏内容（与全局左栏同款容器内叠放）。"""

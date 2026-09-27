@@ -151,6 +151,7 @@ class FireballTemperatureCalculator:
 
         self.t1 = 0.0
         self.t2 = 0.0
+        self.t0_reference_peak_ms = float(self.t0)
 
         if profile == "legacy":
             self._init_legacy_piecewise(blend_width_ms)
@@ -189,6 +190,7 @@ class FireballTemperatureCalculator:
         self.t_ms_all = np.array([0, 20, 35, 70, 105, 140], dtype=float)
         self.T_degC_all = np.array([1180, 1240, 1220, 1015, 820, 740], dtype=float)
         self.t0 = 35.0
+        self.t0_reference_peak_ms = float(self.t0)
         self.blend_w = float(blend_width_ms)
         self.t1 = max(0.0, self.t0 - self.blend_w / 2.0)
         self.t2 = self.t0 + self.blend_w / 2.0
@@ -307,7 +309,10 @@ class FireballTemperatureCalculator:
         """CSV 基准全局峰值温度 (K)，用于幅值缩放分母。"""
         if getattr(self, "T_K_reference", None) is not None and len(self.T_K_reference) > 0:
             return float(np.max(self.T_K_reference))
-        return float(self.temperature_modified(self.t0_reference_peak_ms))
+        if self.profile == "legacy" and self.T_degC_all is not None and len(self.T_degC_all) > 0:
+            return float(np.max(self.T_degC_all)) + TEMP_OFFSET
+        peak_ms = float(getattr(self, "t0_reference_peak_ms", self.t0))
+        return float(self.temperature_modified(peak_ms))
 
     def _simulation_to_reference_time_ms(
         self,
