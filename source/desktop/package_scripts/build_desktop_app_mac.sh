@@ -188,6 +188,17 @@ if [ -d "$TEMP_SAM_DIR" ]; then
   rm -rf "$TEMP_SAM_DIR"
 fi
 
+# 将用户手册复制到可执行文件同级目录（相对路径：manual/manual.pdf）
+MANUAL_SRC="source/manual/manual.pdf"
+MANUAL_DEST_DIR="dist/${APP_NAME}/manual"
+if [ -f "$MANUAL_SRC" ]; then
+  mkdir -p "$MANUAL_DEST_DIR"
+  cp "$MANUAL_SRC" "$MANUAL_DEST_DIR/manual.pdf"
+  echo "[macOS 桌面应用] ✓ 已复制用户手册到 $MANUAL_DEST_DIR/manual.pdf"
+else
+  echo "[macOS 桌面应用] 警告: 未找到用户手册 $MANUAL_SRC"
+fi
+
 # 清理打包目录中的不必要文件
 echo "[macOS 桌面应用] 清理不必要的文件..."
 if [ -d "dist/${APP_NAME}/_internal" ]; then

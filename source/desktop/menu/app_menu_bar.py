@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-应用菜单栏装配：创建「文件」「视图」并委托给独立模块。
+应用菜单栏装配：创建「文件」「视图」「帮助」并委托给独立模块。
 
 - 「文件」：`file_menu.setup_file_menu`
 - 「视图」：`view_menu.setup_view_menu`
+- 「帮助」：`help_menu.setup_help_menu`
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QMainWindow
 
 from .file_menu import setup_file_menu
+from .help_menu import setup_help_menu
 from .view_menu import setup_view_menu
 
 
@@ -29,3 +31,6 @@ def setup_application_menu(main_window: QMainWindow) -> None:
 
     view_menu = bar.addMenu("视图")
     setup_view_menu(main_window, view_menu)
+
+    help_menu = bar.addMenu("帮助")
+    setup_help_menu(main_window, help_menu)

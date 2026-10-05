@@ -14,7 +14,7 @@
 火球总持续时间：
     t_d ≈ 0.30 * W^(1/3)   (s)，W 与 E 同为 TNT 当量 (kg)
 
-图 1–2 等效辐射温度（使用上式 t_d）：
+火球温度（使用上式 t_d；公式符号仍记为 T_eq）：
     T_eq = [ T_amb^4 + chi_r * E * H_TNT / (epsilon * sigma * kappa_A * 4 pi R_max^2 t_d) ]^(1/4)
 """
 

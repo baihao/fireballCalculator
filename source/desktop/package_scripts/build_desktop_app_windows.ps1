@@ -196,6 +196,17 @@ if ($TempSam -and (Test-Path $TempSam)) {
     Remove-Item -Path $TempSam -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# Copy user manual next to the executable (relative path: manual/manual.pdf)
+$ManualSrc = "source\manual\manual.pdf"
+$ManualDestDir = "dist\$AppName\manual"
+if (Test-Path $ManualSrc) {
+    New-Item -ItemType Directory -Path $ManualDestDir -Force | Out-Null
+    Copy-Item -Path $ManualSrc -Destination (Join-Path $ManualDestDir "manual.pdf") -Force
+    Write-Host "[OK] User manual copied to $ManualDestDir\manual.pdf"
+} else {
+    Write-Host "[Warn] User manual not found: $ManualSrc" -ForegroundColor Yellow
+}
+
 # Clean build artifacts in dist
 Write-Host "[Step] Cleaning dist artifacts..."
 $internalPath = "dist\$AppName\_internal"
