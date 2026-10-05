@@ -3,9 +3,8 @@
 """
 工程计算 — 火球直径（显式 K/B/C 拖曳式）、默认温度、热通量与累积热辐射。
 
-温度时间序列：无训练温度数据时使用 ``FireballTemperatureCalculator`` 参考 CSV（标定 100 kg），
-形状来自 ``fireball_temperature_reference_curve.csv``（仅归一化剖面）；
-时长 ``t_d``、峰值 ``1.3·T_eq`` 由 ``engineering_tab``（当量、含铝率等）确定。
+温度时间序列：无训练温度数据时使用 ``FireballTemperatureCalculator`` 内嵌参考曲线，
+形状仅作归一化剖面；时长 ``t_d``、峰值 ``1.3·T_eq`` 由 ``engineering_tab``（当量、含铝率等）确定。
 """
 
 from __future__ import annotations
@@ -26,9 +25,9 @@ from fireball_temperature_calculator import (
     FireballTemperatureCalculator,
     PEAK_TEMPERATURE_T_EQ_FACTOR,
     REFERENCE_EQUIVALENT_KG,
-    default_temperature_curve_csv_path,
     equivalent_time_scale,
     fireball_total_duration_ms,
+    reference_curve_duration_ms,
 )
 from transmissivity_calculator import TransmissivityParams
 from fireball_heat_radiation_calculator import (
@@ -50,12 +49,8 @@ _DESKTOP_ROOT = os.path.join(_PKG_ROOT, "desktop")
 
 
 def reference_temperature_duration_ms() -> float:
-    """100 kg 标定工况下参考温度 CSV 的时间跨度（ms）。"""
-    path = default_temperature_curve_csv_path()
-    if path.is_file():
-        t_ms = np.loadtxt(path, delimiter=",", skiprows=1, usecols=0)
-        return float(np.max(t_ms))
-    return 2000.0
+    """参考温度曲线时间跨度（ms）；来自内嵌数据（可被外部 CSV 覆盖）。"""
+    return float(reference_curve_duration_ms())
 
 
 REFERENCE_DURATION_MS = reference_temperature_duration_ms()

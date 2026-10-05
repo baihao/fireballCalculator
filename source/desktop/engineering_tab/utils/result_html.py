@@ -158,7 +158,7 @@ def format_engineering_result_html(
             ],
         ),
         _calc_block(
-            "等效辐射温度",
+            "火球温度",
             [
                 (
                     f"{sym.T_EQ} = [ {sym.T_AMB}<sup>4</sup> + "

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-爆炸火球分析系统 - 桌面应用主程序
+爆炸火球参数预测软件 - 桌面应用主程序
 """
 
 import sys
@@ -20,7 +20,7 @@ def main():
     configure_matplotlib_cjk()
     
     # 设置应用程序信息
-    app.setApplicationName("爆炸火球分析系统")
+    app.setApplicationName("爆炸火球参数预测软件")
     app.setApplicationVersion("1.0")
     app.setOrganizationName("Fireball Analysis")
     

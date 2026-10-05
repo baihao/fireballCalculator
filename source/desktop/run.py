@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-爆炸火球分析系统 - 桌面应用启动脚本
+爆炸火球参数预测软件 - 桌面应用启动脚本
 """
 
 import sys
