@@ -44,6 +44,8 @@ DEFAULT_RADIATION_X = (6.0, 10.0, 50)
 DEFAULT_SIMULATION_EQUIVALENT_KG = 2000.0
 # 参数仿真（K/B/C 显式）默认仿真时长
 DEFAULT_PARAMETER_SIMULATION_DURATION_MS = 2000.0
+# 温度预测上限 (K)：超过则截断
+MAX_TEMPERATURE_K = 3000.0
 
 _DESKTOP_ROOT = os.path.join(_PKG_ROOT, "desktop")
 
@@ -54,6 +56,14 @@ def reference_temperature_duration_ms() -> float:
 
 
 REFERENCE_DURATION_MS = reference_temperature_duration_ms()
+
+
+def _clamp_temperature_k(value: float) -> float:
+    return min(float(value), MAX_TEMPERATURE_K)
+
+
+def _clamp_temperature_series(t_k: np.ndarray) -> np.ndarray:
+    return np.minimum(np.asarray(t_k, dtype=np.float64), MAX_TEMPERATURE_K)
 
 
 def _ensure_desktop_import_path() -> None:
@@ -80,7 +90,7 @@ def peak_temperature_k_from_engineering(
             t_amb_k=float(t_amb_k),
         )
     )
-    return PEAK_TEMPERATURE_T_EQ_FACTOR * float(result.t_eq_k)
+    return _clamp_temperature_k(PEAK_TEMPERATURE_T_EQ_FACTOR * float(result.t_eq_k))
 
 
 def default_simulation_duration_ms(equivalent_kg: float) -> float:
@@ -155,13 +165,33 @@ def diameter_series_calculator_scaled(
     return out
 
 
-def temperature_shape_only_series(t_ms: np.ndarray, duration_ms: float) -> np.ndarray:
-    """参数仿真：基准 CSV 仅按 ``duration_ms`` 拉伸时间轴，温度幅值随 CSV。"""
+def temperature_shape_only_series(
+    t_ms: np.ndarray,
+    duration_ms: float,
+    *,
+    peak_temperature_k: Optional[float] = None,
+    ambient_k: float = 297.15,
+) -> np.ndarray:
+    """
+    参数仿真温度序列：基准曲线按 ``duration_ms`` 拉伸时间轴。
+
+    - 未给 ``peak_temperature_k``：幅值随内嵌参考曲线。
+    - 给定峰值：幅值缩放到该峰值 (K)，环境温度为 ``ambient_k``。
+    """
     t = np.asarray(t_ms, dtype=np.float64)
     calc = FireballTemperatureCalculator()
-    return np.asarray(
-        calc.temperature_from_reference_shape(t, float(duration_ms)),
-        dtype=np.float64,
+    if peak_temperature_k is None or float(peak_temperature_k) <= 0:
+        return _clamp_temperature_series(
+            calc.temperature_from_reference_shape(t, float(duration_ms))
+        )
+    return _clamp_temperature_series(
+        calc.temperature_baseline_scaled(
+            t,
+            equivalent_kg=1.0,
+            duration_ms=float(duration_ms),
+            peak_temperature_k=_clamp_temperature_k(peak_temperature_k),
+            ambient_k=float(ambient_k),
+        )
     )
 
 
@@ -180,15 +210,14 @@ def default_temperature_series(
         float(equivalent_kg), float(al_fraction), float(t_amb_k)
     )
     calc = FireballTemperatureCalculator()
-    return np.asarray(
+    return _clamp_temperature_series(
         calc.temperature_baseline_scaled(
             t,
             equivalent_kg=float(equivalent_kg),
             duration_ms=duration_ms,
             peak_temperature_k=peak_k,
             ambient_k=float(t_amb_k),
-        ),
-        dtype=np.float64,
+        )
     )
 
 
@@ -197,10 +226,12 @@ def temperature_series_from_training(
     training_temperature_data: Tuple[np.ndarray, np.ndarray],
 ) -> np.ndarray:
     train_time_ms, train_temp_K = training_temperature_data
-    return np.interp(
-        np.asarray(t_ms, dtype=np.float64),
-        np.asarray(train_time_ms, dtype=np.float64),
-        np.asarray(train_temp_K, dtype=np.float64),
+    return _clamp_temperature_series(
+        np.interp(
+            np.asarray(t_ms, dtype=np.float64),
+            np.asarray(train_time_ms, dtype=np.float64),
+            np.asarray(train_temp_K, dtype=np.float64),
+        )
     )
 
 
@@ -272,6 +303,7 @@ def preview_temperature_series_for_heat_flux(
     t_amb_k: float = 297.15,
     *,
     parameter_simulation: bool = False,
+    peak_temperature_k: Optional[float] = None,
 ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     """未跑完整 bundle 时，用与热通量相同的 T(t) 来源做预览。"""
     if duration_ms <= 0:
@@ -283,7 +315,12 @@ def preview_temperature_series_for_heat_flux(
     if training_temperature_data is not None:
         t_k = temperature_series_from_training(t_ms, training_temperature_data)
     elif parameter_simulation:
-        t_k = temperature_shape_only_series(t_ms, float(duration_ms))
+        t_k = temperature_shape_only_series(
+            t_ms,
+            float(duration_ms),
+            peak_temperature_k=peak_temperature_k,
+            ambient_k=float(t_amb_k),
+        )
     else:
         t_k = default_temperature_series(
             t_ms, float(equivalent_kg), al_fraction=al_fraction, t_amb_k=t_amb_k
@@ -332,12 +369,14 @@ def build_prediction_bundle(
     training_temperature_data: Optional[Tuple[np.ndarray, np.ndarray]],
     al_fraction: float = 0.30,
     parameter_simulation: bool = False,
+    peak_temperature_k: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     组装一次仿真所需的 ``prediction_data`` 及中间数组。
 
     - ``use_explicit_kbc=True`` 且 ``kbc`` 非空：直径由 ``diameter_drag_series``（核岭回归预测的 K,B,C）。
     - 否则：直径由 ``FireballCalculator`` + 当量比值 M（相对 ``training_equivalent`` 或计算器标准当量）。
+    - ``parameter_simulation=True`` 时可用 ``peak_temperature_k`` 指定火球最大温度 (K)。
     """
     t_ms = np.asarray(t_ms, dtype=np.float64)
     t_s = t_ms / 1000.0
@@ -361,11 +400,25 @@ def build_prediction_bundle(
         c = p["C"] / m if m > 0 else p["C"]
 
     t_amb_k = float(env_temp) + 273.15
+    peak_k_used: Optional[float] = None
     if training_temperature_data is not None:
         t_k = temperature_series_from_training(t_ms, training_temperature_data)
     elif parameter_simulation:
-        t_k = temperature_shape_only_series(t_ms, float(duration_ms))
+        peak_k_used = (
+            _clamp_temperature_k(peak_temperature_k)
+            if peak_temperature_k is not None and float(peak_temperature_k) > 0
+            else None
+        )
+        t_k = temperature_shape_only_series(
+            t_ms,
+            float(duration_ms),
+            peak_temperature_k=peak_k_used,
+            ambient_k=t_amb_k,
+        )
     else:
+        peak_k_used = peak_temperature_k_from_engineering(
+            float(equivalent), float(al_fraction), t_amb_k
+        )
         t_k = default_temperature_series(
             t_ms,
             float(equivalent),
@@ -405,13 +458,7 @@ def build_prediction_bundle(
             if parameter_simulation or training_temperature_data is None
             else fireball_total_duration_ms(float(equivalent))
         ),
-        "temperature_peak_k": (
-            None
-            if training_temperature_data is not None or parameter_simulation
-            else peak_temperature_k_from_engineering(
-                float(equivalent), float(al_fraction), t_amb_k
-            )
-        ),
+        "temperature_peak_k": peak_k_used,
         "max_temperature_heat_flux": summarize_max_temperature_heat_flux(
             t_ms, t_k, heat_store
         ),

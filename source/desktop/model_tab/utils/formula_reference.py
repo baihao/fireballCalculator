@@ -126,6 +126,7 @@ def build_formula_reference_text(
     heat_flux_distances: Sequence[float] = (),  # 保留签名兼容
     preview_equivalent_kg: Optional[float] = None,
     training_temperature_data: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+    peak_temperature_k: Optional[float] = None,
 ) -> str:
     """未执行仿真时：展示工况与可由 K,B,C 预估的指标。"""
     lines: List[str] = []
@@ -141,6 +142,8 @@ def build_formula_reference_text(
             lines.append(f"  材料档 {material_name}")
     else:
         lines.append("  模式：参数仿真（K / B / C）")
+        if peak_temperature_k is not None:
+            lines.append(f"  火球最大温度 {_fmt(peak_temperature_k)} K")
     if duration is not None:
         lines.append(f"  仿真时长 {_fmt(duration)} ms")
     lines.append("")
@@ -182,6 +185,7 @@ def build_formula_reference_text(
             al_fraction=al_frac,
             t_amb_k=t_amb,
             parameter_simulation=param_only,
+            peak_temperature_k=peak_temperature_k if param_only else None,
         )
         if series is not None:
             t_prev, t_k_prev = series
@@ -245,6 +249,11 @@ def build_formula_reference_from_prediction(
         m_ratio = prediction_data.get("equivalent_ratio")
         if m_ratio is not None:
             lines.append(f"  M = {_fmt(m_ratio)}")
+    else:
+        lines.append("  模式：参数仿真（K / B / C）")
+        peak_k = prediction_data.get("temperature_peak_k")
+        if peak_k is not None:
+            lines.append(f"  火球最大温度 {_fmt(peak_k)} K")
     lines.append(
         f"  环境 T={_fmt(prediction_data.get('env_temp'))} °C，"
         f"RH={_fmt(prediction_data.get('env_humidity'))} %，"

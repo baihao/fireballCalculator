@@ -32,6 +32,9 @@ DEFAULT_EPSILON = 0.43
 DEFAULT_KAPPA_A = 0.8888
 DEFAULT_SIGMA = SIGMA_W_M2_K4
 
+# 火球温度预测上限 (K)：超过则截断
+MAX_TEMPERATURE_K = 3000.0
+
 # 含铝率参考点（公式指数项 x - 0.3073）
 AL_REFERENCE_FRACTION = 0.3073
 
@@ -106,7 +109,8 @@ def equivalent_radiation_temperature_k(
         raise ValueError(f"{sym.CHI_R_PLAIN} 不能为负")
     numerator = chi_r * e_kg * H_TNT_J_PER_KG
     denominator = epsilon * sigma * kappa_a * 4.0 * math.pi * (r_max_m ** 2) * t_d_s
-    return (t_amb_k ** 4 + numerator / denominator) ** 0.25
+    t_k = (t_amb_k ** 4 + numerator / denominator) ** 0.25
+    return min(float(t_k), MAX_TEMPERATURE_K)
 
 
 def compute_engineering_estimate(inputs: EngineeringEstimateInputs) -> EngineeringEstimateResult:

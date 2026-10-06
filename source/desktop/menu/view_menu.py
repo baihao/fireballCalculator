@@ -15,7 +15,8 @@ from PySide6.QtWidgets import QMainWindow, QMenu
 TAB_INDEX_MACHINE_VISION = 0
 TAB_INDEX_MACHINE_LEARNING = 1
 TAB_INDEX_PARAMETER_PREDICTION = 2  # ModelTab「参数预测」
-TAB_INDEX_ENGINEERING_CALC = 3  # EngineeringTab「工程计算」
+TAB_INDEX_PARAMETER_SIMULATION = 3  # ParameterSimTab「参数仿真」
+TAB_INDEX_ENGINEERING_CALC = 4  # EngineeringTab「工程计算」
 
 
 def setup_view_menu(main_window: QMainWindow, view_menu: QMenu) -> None:
@@ -43,6 +44,12 @@ def setup_view_menu(main_window: QMainWindow, view_menu: QMenu) -> None:
     group.addAction(act_pred)
     view_menu.addAction(act_pred)
 
+    act_param_sim = QAction("参数仿真", main_window)
+    act_param_sim.setCheckable(True)
+    act_param_sim.setChecked(tab_widget.currentIndex() == TAB_INDEX_PARAMETER_SIMULATION)
+    group.addAction(act_param_sim)
+    view_menu.addAction(act_param_sim)
+
     act_eng_calc = QAction("工程计算", main_window)
     act_eng_calc.setCheckable(True)
     act_eng_calc.setChecked(tab_widget.currentIndex() == TAB_INDEX_ENGINEERING_CALC)
@@ -61,6 +68,10 @@ def setup_view_menu(main_window: QMainWindow, view_menu: QMenu) -> None:
         if checked:
             tab_widget.setCurrentIndex(TAB_INDEX_PARAMETER_PREDICTION)
 
+    def on_param_sim_toggled(checked: bool) -> None:
+        if checked:
+            tab_widget.setCurrentIndex(TAB_INDEX_PARAMETER_SIMULATION)
+
     def on_eng_calc_toggled(checked: bool) -> None:
         if checked:
             tab_widget.setCurrentIndex(TAB_INDEX_ENGINEERING_CALC)
@@ -68,20 +79,24 @@ def setup_view_menu(main_window: QMainWindow, view_menu: QMenu) -> None:
     act_mv.toggled.connect(on_mv_toggled)
     act_ml.toggled.connect(on_ml_toggled)
     act_pred.toggled.connect(on_pred_toggled)
+    act_param_sim.toggled.connect(on_param_sim_toggled)
     act_eng_calc.toggled.connect(on_eng_calc_toggled)
 
     def sync_tabs_from_menu(index: int) -> None:
         act_mv.blockSignals(True)
         act_ml.blockSignals(True)
         act_pred.blockSignals(True)
+        act_param_sim.blockSignals(True)
         act_eng_calc.blockSignals(True)
         act_mv.setChecked(index == TAB_INDEX_MACHINE_VISION)
         act_ml.setChecked(index == TAB_INDEX_MACHINE_LEARNING)
         act_pred.setChecked(index == TAB_INDEX_PARAMETER_PREDICTION)
+        act_param_sim.setChecked(index == TAB_INDEX_PARAMETER_SIMULATION)
         act_eng_calc.setChecked(index == TAB_INDEX_ENGINEERING_CALC)
         act_mv.blockSignals(False)
         act_ml.blockSignals(False)
         act_pred.blockSignals(False)
+        act_param_sim.blockSignals(False)
         act_eng_calc.blockSignals(False)
 
     tab_widget.currentChanged.connect(sync_tabs_from_menu)
