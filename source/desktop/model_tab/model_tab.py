@@ -9,12 +9,11 @@ import sys
 import os
 import csv
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional
 from PySide6.QtWidgets import QWidget, QMessageBox, QFileDialog
 from .ui_widgets.model_tab_ui import ModelTabUI
 from .controllers import ModelTabChartController, ModelController
 from .utils.calculator import (
-    DEFAULT_PARAMETER_SIMULATION_DURATION_MS,
     DEFAULT_SIMULATION_EQUIVALENT_KG,
     build_prediction_bundle,
     default_simulation_duration_ms,
@@ -87,12 +86,9 @@ class ModelTab(QWidget):
                     material = self.model_ctrl.get_material_by_al_content(al)
                     std_eq = self.fireball_calculator.get_standard_equivalent(material)
             text = build_formula_reference_text(
-                is_equivalent_mode=self._is_equivalent_sim_mode(),
+                is_equivalent_mode=True,
                 equivalent=equivalent,
                 al_percent=self._collect_sidebar_float("p_al"),
-                k=self._collect_sidebar_float("p_k"),
-                b=self._collect_sidebar_float("p_b"),
-                c=self._collect_sidebar_float("p_c"),
                 env_temp=self._collect_sidebar_float("p_env_temp"),
                 env_humidity=self._collect_sidebar_float("p_env_humidity"),
                 env_pressure=self._collect_sidebar_float("p_env_pressure"),
@@ -139,21 +135,9 @@ class ModelTab(QWidget):
             self.p_env_humidity = self.ui_components['p_env_humidity']
         if 'p_env_pressure' in self.ui_components:
             self.p_env_pressure = self.ui_components['p_env_pressure']
-        if 'p_k' in self.ui_components:
-            self.p_k = self.ui_components['p_k']
-        if 'p_b' in self.ui_components:
-            self.p_b = self.ui_components['p_b']
-        if 'p_c' in self.ui_components:
-            self.p_c = self.ui_components['p_c']
-        if 'sim_mode_equivalent' in self.ui_components:
-            self.sim_mode_equivalent = self.ui_components['sim_mode_equivalent']
-        if 'sim_mode_parameter' in self.ui_components:
-            self.sim_mode_parameter = self.ui_components['sim_mode_parameter']
         if 'params_form_layout' in self.ui_components:
             self.params_form_layout = self.ui_components['params_form_layout']
-        if 'param_form_row_labels' in self.ui_components:
-            self.param_form_row_labels = self.ui_components['param_form_row_labels']
-        
+
         if "params_scroll_area" in self.ui_components:
             self.params_scroll_area = self.ui_components["params_scroll_area"]
         if "simulation_log" in self.ui_components:
@@ -196,9 +180,6 @@ class ModelTab(QWidget):
             else:
                 self.simulation_log.appendPlainText(block_line)
 
-    def _is_equivalent_sim_mode(self) -> bool:
-        return not hasattr(self, "sim_mode_parameter") or not self.sim_mode_parameter.isChecked()
-
     @staticmethod
     def _parse_float_field(text: str) -> Optional[float]:
         cleaned = text.strip() if text else ""
@@ -229,23 +210,12 @@ class ModelTab(QWidget):
         al = self._parse_float_field(self.p_al.text())
         return eq is not None and eq > 0 and al is not None and al >= 0
 
-    def _parameter_mode_params_valid(self) -> bool:
-        if not all(hasattr(self, name) for name in ("p_k", "p_b", "p_c")):
-            return False
-        k = self._parse_float_field(self.p_k.text())
-        b = self._parse_float_field(self.p_b.text())
-        c = self._parse_float_field(self.p_c.text())
+    def _can_start_simulation(self) -> bool:
         return (
-            k is not None and k > 0
-            and b is not None and b > 0
-            and c is not None and c > 0
+            self._model_import_ok
+            and self._equivalent_mode_params_valid()
             and self._common_sim_params_valid()
         )
-
-    def _can_start_simulation(self) -> bool:
-        if self._is_equivalent_sim_mode():
-            return self._model_import_ok and self._equivalent_mode_params_valid() and self._common_sim_params_valid()
-        return self._parameter_mode_params_valid()
 
     def _update_predict_btn_state(self) -> None:
         if not hasattr(self, "predict_btn"):
@@ -253,27 +223,6 @@ class ModelTab(QWidget):
         if not self.predict_btn.isEnabled() and getattr(self, "_simulation_running", False):
             return
         self.predict_btn.setEnabled(self._can_start_simulation())
-
-    def _apply_sim_mode_visibility(self) -> None:
-        equivalent_mode = self._is_equivalent_sim_mode()
-        if hasattr(self, "params_form_layout") and hasattr(self, "param_form_row_labels"):
-            for key in ("eq", "al"):
-                self.params_form_layout.setRowVisible(self.param_form_row_labels[key], equivalent_mode)
-            for key in ("k", "b", "c"):
-                self.params_form_layout.setRowVisible(self.param_form_row_labels[key], not equivalent_mode)
-        self._update_predict_btn_state()
-
-    def _on_sim_mode_changed(self) -> None:
-        self._apply_sim_mode_visibility()
-        if self._is_equivalent_sim_mode():
-            self._sync_simulation_duration_from_equivalent()
-        elif hasattr(self, "p_duration"):
-            # 参数仿真与当量无关：默认 2000 ms，避免沿用当量模式的 t_d
-            self._syncing_duration_widget = True
-            self.p_duration.setText(f"{DEFAULT_PARAMETER_SIMULATION_DURATION_MS:.6g}")
-            self._syncing_duration_widget = False
-            self._duration_user_edited = False
-        self._refresh_formula_reference()
 
     def _on_sim_param_changed(self) -> None:
         self._update_predict_btn_state()
@@ -288,8 +237,6 @@ class ModelTab(QWidget):
 
     def _sync_simulation_duration_from_equivalent(self) -> None:
         """按当量更新侧栏「仿真时长」；若用户已手动改过则不再覆盖。"""
-        if not self._is_equivalent_sim_mode():
-            return
         if self._duration_user_edited or not hasattr(self, "p_duration"):
             return
         duration_ms = default_simulation_duration_ms(self._parse_equivalent_kg())
@@ -331,26 +278,22 @@ class ModelTab(QWidget):
                 self.predict_btn.clicked.connect(self.start_prediction)
             if hasattr(self, "export_btn"):
                 self.export_btn.clicked.connect(self.export_results)
-            if hasattr(self, "sim_mode_equivalent"):
-                self.sim_mode_equivalent.toggled.connect(self._on_sim_mode_changed)
-            if hasattr(self, "sim_mode_parameter"):
-                self.sim_mode_parameter.toggled.connect(self._on_sim_mode_changed)
             for widget_name in (
-                "p_eq", "p_al", "p_k", "p_b", "p_c",
+                "p_eq", "p_al",
                 "p_env_temp", "p_env_humidity", "p_env_pressure", "p_step", "p_duration",
             ):
                 widget = getattr(self, widget_name, None)
                 if widget is not None:
                     widget.textChanged.connect(self._on_sim_param_changed)
             self._wire_equivalent_duration_sync()
-            self._apply_sim_mode_visibility()
+            self._update_predict_btn_state()
         except Exception:
             pass
         
     def start_prediction(self):
         """开始预测"""
         if not self._can_start_simulation():
-            if self._is_equivalent_sim_mode() and not self._model_import_ok:
+            if not self._model_import_ok:
                 QMessageBox.warning(
                     self,
                     "仿真",
@@ -381,45 +324,17 @@ class ModelTab(QWidget):
             env_humidity = float(self.p_env_humidity.text()) if self.p_env_humidity.text() else 48.0
             env_pressure = float(self.p_env_pressure.text()) if self.p_env_pressure.text() else 2987.87
 
-            if self._is_equivalent_sim_mode():
-                equivalent = self._parse_equivalent_kg()
-                al_content = float(self.p_al.text()) if self.p_al.text() else 30.0
-                self._sync_simulation_duration_from_equivalent()
-                duration = float(self.p_duration.text()) if self.p_duration.text() else default_simulation_duration_ms(equivalent)
-                material_name = self.model_ctrl.get_material_by_al_content(al_content)
-                print(f"预测参数: 当量={equivalent}, 含铝量={al_content}%, 步长={step}, 时长={duration}ms")
-                print(f"环境参数: 温度={env_temp}°C, 湿度={env_humidity}%, 气压={env_pressure}Pa")
-                print(f"选择材料: {material_name}")
-                self.generate_prediction_curves(
-                    material_name, duration, equivalent, al_content, env_temp, env_humidity, env_pressure
-                )
-            else:
-                k_value = float(self.p_k.text())
-                b_value = float(self.p_b.text())
-                c_value = float(self.p_c.text())
-                duration = (
-                    float(self.p_duration.text())
-                    if self.p_duration.text()
-                    else DEFAULT_PARAMETER_SIMULATION_DURATION_MS
-                )
-                equivalent = self._parse_equivalent_kg()
-                al_content = float(self.p_al.text()) if self.p_al.text() else 30.0
-                material_name = self.model_ctrl.get_material_by_al_content(al_content)
-                print(
-                    f"参数仿真: K={k_value}, B={b_value}, C={c_value}, "
-                    f"步长={step}, 时长={duration} ms"
-                )
-                print(f"环境参数: 温度={env_temp}°C, 湿度={env_humidity}%, 气压={env_pressure}Pa")
-                self.generate_prediction_curves(
-                    material_name,
-                    duration,
-                    equivalent,
-                    al_content,
-                    env_temp,
-                    env_humidity,
-                    env_pressure,
-                    explicit_kbc=(k_value, b_value, c_value),
-                )
+            equivalent = self._parse_equivalent_kg()
+            al_content = float(self.p_al.text()) if self.p_al.text() else 30.0
+            self._sync_simulation_duration_from_equivalent()
+            duration = float(self.p_duration.text()) if self.p_duration.text() else default_simulation_duration_ms(equivalent)
+            material_name = self.model_ctrl.get_material_by_al_content(al_content)
+            print(f"预测参数: 当量={equivalent}, 含铝量={al_content}%, 步长={step}, 时长={duration}ms")
+            print(f"环境参数: 温度={env_temp}°C, 湿度={env_humidity}%, 气压={env_pressure}Pa")
+            print(f"选择材料: {material_name}")
+            self.generate_prediction_curves(
+                material_name, duration, equivalent, al_content, env_temp, env_humidity, env_pressure
+            )
 
             self._write_simulation_summary_log(al_content)
 
@@ -450,25 +365,16 @@ class ModelTab(QWidget):
         env_temp: float = 24.0,
         env_humidity: float = 48.0,
         env_pressure: float = 2987.87,
-        explicit_kbc: Optional[Tuple[float, float, float]] = None,
     ):
         """使用 ``ModelController`` 解析 K/B/C，``utils.calculator`` 组装直径、膨胀速度、热通量与累积辐射。"""
         print(f"生成 {material_name} 材料的预测曲线...")
         time_points = int(duration / 1.0) + 1
         t_ms = np.linspace(0, duration, time_points)
 
-        if explicit_kbc is not None:
-            kbc_tuple = tuple(float(v) for v in explicit_kbc)
-            use_explicit = True
-            self.model_ctrl.last_sim_kbc = kbc_tuple
-            self.model_ctrl.last_kbc_source = "explicit_kbc"
-            print(f"✓ 用户输入 K,B,C → K={kbc_tuple[0]:g}, B={kbc_tuple[1]:g}, C={kbc_tuple[2]:g}")
-        else:
-            _, kbc_tuple, use_explicit = self.model_ctrl.resolve_kbc_for_simulation(
-                float(equivalent), float(al_content), material_name
-            )
+        _, kbc_tuple, use_explicit = self.model_ctrl.resolve_kbc_for_simulation(
+            float(equivalent), float(al_content), material_name
+        )
 
-        is_parameter_sim = explicit_kbc is not None
         bundle = build_prediction_bundle(
             t_ms=t_ms,
             duration_ms=float(duration),
@@ -483,7 +389,7 @@ class ModelTab(QWidget):
             training_equivalent=self.model_ctrl.training_equivalent,
             training_temperature_data=self.model_ctrl.training_temperature_data,
             al_fraction=float(al_content) / 100.0,
-            parameter_simulation=is_parameter_sim,
+            parameter_simulation=False,
         )
         heat_series = bundle.pop("_heat_flux_series_chart")
         self.prediction_data = bundle
@@ -681,7 +587,7 @@ class ModelTab(QWidget):
             self._setup_ui_component_references()
             self.setup_connections()
             self._wire_equivalent_duration_sync()
-            self._apply_sim_mode_visibility()
+            self._update_predict_btn_state()
             self._refresh_formula_reference()
         
         return self._sidebar_widget

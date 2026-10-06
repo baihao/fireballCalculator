@@ -273,17 +273,20 @@ class FireballAnalysisApp(QMainWindow):
         # 导入各个标签页（输入已并入机器视觉 ExtractTab）
         from extract_tab.extract_tab import ExtractTab
         from model_tab.model_tab import ModelTab
+        from parameter_sim_tab import ParameterSimTab
         from training_tab import TrainingTab
         from engineering_tab import EngineeringTab
 
         self.extract_tab = ExtractTab()
         self.training_tab = TrainingTab()
         self.model_tab = ModelTab()
+        self.parameter_sim_tab = ParameterSimTab()
         self.engineering_tab = EngineeringTab()
 
         self.tab_widget.addTab(self.extract_tab, "机器视觉")
         self.tab_widget.addTab(self.training_tab, "机器学习")
         self.tab_widget.addTab(self.model_tab, "参数预测")
+        self.tab_widget.addTab(self.parameter_sim_tab, "参数仿真")
         self.tab_widget.addTab(self.engineering_tab, "工程计算")
         
         main_layout.addWidget(self.tab_widget)
@@ -426,7 +429,9 @@ class FireballAnalysisApp(QMainWindow):
             self.sidebar.set_sidebar_content(self.training_tab.get_sidebar_widget())
         elif index == 2:  # 参数预测
             self.sidebar.set_sidebar_content(self.model_tab.get_sidebar_widget())
-        elif index == 3:  # 工程计算
+        elif index == 3:  # 参数仿真
+            self.sidebar.set_sidebar_content(self.parameter_sim_tab.get_sidebar_widget())
+        elif index == 4:  # 工程计算
             self.sidebar.set_sidebar_content(self.engineering_tab.get_sidebar_widget())
 
         QTimer.singleShot(0, self._refresh_current_tab_layout)
@@ -436,10 +441,17 @@ class FireballAnalysisApp(QMainWindow):
         extract_sidebar = self.extract_tab.get_sidebar_widget()
         training_sidebar = self.training_tab.get_sidebar_widget()
         model_sidebar = self.model_tab.get_sidebar_widget()
+        parameter_sim_sidebar = self.parameter_sim_tab.get_sidebar_widget()
         engineering_sidebar = self.engineering_tab.get_sidebar_widget()
 
         layout = QVBoxLayout()
-        for w in (extract_sidebar, training_sidebar, model_sidebar, engineering_sidebar):
+        for w in (
+            extract_sidebar,
+            training_sidebar,
+            model_sidebar,
+            parameter_sim_sidebar,
+            engineering_sidebar,
+        ):
             layout.addWidget(w)
             w.hide()
 

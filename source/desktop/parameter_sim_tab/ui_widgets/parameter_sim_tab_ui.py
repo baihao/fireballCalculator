@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-建模与预测模块 UI 构建器
-负责创建和配置所有 UI 组件
-"""
+"""参数仿真模块 UI 构建器。"""
 
 from typing import Dict
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QGridLayout,
-    QPushButton,
     QLineEdit,
-    QGroupBox,
-    QScrollArea,
-    QFormLayout,
     QPlainTextEdit,
+    QPushButton,
     QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt
 
 from chart_widgets import (
     DiameterChart,
@@ -31,36 +27,24 @@ from chart_widgets import (
 )
 
 
-class ModelTabUI:
-    """建模与预测模块 UI 构建器"""
+class ParameterSimTabUI:
+    """参数仿真 UI：四图 + 仿真结果；侧栏为 K/B/C/峰值温度等。"""
 
-    def __init__(self):
-        self.ui_components = {}
+    def __init__(self) -> None:
+        self.ui_components: Dict = {}
 
     def create_main_layout(self, parent_widget: QWidget) -> QVBoxLayout:
-        """
-        创建主界面布局
-
-        Args:
-            parent_widget: 父控件
-
-        Returns:
-            QVBoxLayout: 主布局
-        """
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # 工具栏
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("仿真预测结果"))
+        toolbar.addWidget(QLabel("参数仿真结果"))
         toolbar.addStretch()
-
         self.ui_components["modeling_status"] = QLabel("未开始")
         self.ui_components["modeling_status"].setStyleSheet("color: #9ca3af; font-size: 12px;")
         toolbar.addWidget(self.ui_components["modeling_status"])
         layout.addLayout(toolbar)
 
-        # 四个图表网格
         charts_widget = QWidget()
         charts_widget.setSizePolicy(
             QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -88,53 +72,32 @@ class ModelTabUI:
 
         charts_widget.setLayout(charts_layout)
 
-        expanding_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        bottom_row = QHBoxLayout()
-        bottom_row.setContentsMargins(0, 0, 0, 0)
-
-        log_column = QVBoxLayout()
-        log_column.setContentsMargins(0, 0, 0, 0)
-        log_label = QLabel("仿真日志")
-        log_label.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: bold;")
-        log_column.addWidget(log_label)
-
-        self.ui_components["simulation_log"] = QPlainTextEdit()
-        self.ui_components["simulation_log"].setReadOnly(True)
-        self.ui_components["simulation_log"].setSizePolicy(expanding_policy)
-        self.ui_components["simulation_log"].setMinimumHeight(160)
-        self.ui_components["simulation_log"].setPlaceholderText(
-            "[计算] 完成一次「开始计算」后将输出火球直径、膨胀速度、热通量与累积热辐射等关键指标…"
+        expanding_policy = QSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        self.ui_components["simulation_log"].setStyleSheet(self._monospace_panel_style())
-        log_column.addWidget(self.ui_components["simulation_log"], 1)
 
-        formula_column = QVBoxLayout()
-        formula_column.setContentsMargins(0, 0, 0, 0)
-        formula_label = QLabel("仿真结果")
-        formula_label.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: bold;")
-        formula_column.addWidget(formula_label)
+        result_column = QVBoxLayout()
+        result_column.setContentsMargins(0, 0, 0, 0)
+        result_label = QLabel("仿真结果")
+        result_label.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: bold;")
+        result_column.addWidget(result_label)
 
         self.ui_components["formula_reference"] = QPlainTextEdit()
         self.ui_components["formula_reference"].setReadOnly(True)
         self.ui_components["formula_reference"].setSizePolicy(expanding_policy)
         self.ui_components["formula_reference"].setMinimumHeight(160)
         self.ui_components["formula_reference"].setPlaceholderText(
-            "完成「开始计算」后显示最大温度、90%最大半径平均膨胀速度、直径与热辐射等仿真结果…"
+            "完成「开始计算」后显示参数仿真结果…"
         )
         self.ui_components["formula_reference"].setStyleSheet(self._monospace_panel_style())
-        formula_column.addWidget(self.ui_components["formula_reference"], 1)
-
-        bottom_row.addLayout(log_column, 1)
-        bottom_row.addLayout(formula_column, 1)
+        result_column.addWidget(self.ui_components["formula_reference"], 1)
 
         bottom_widget = QWidget()
-        bottom_widget.setLayout(bottom_row)
+        bottom_widget.setLayout(result_column)
         bottom_widget.setSizePolicy(expanding_policy)
 
         layout.addWidget(charts_widget, 2)
         layout.addWidget(bottom_widget, 1)
-
         parent_widget.setLayout(layout)
         return layout
 
@@ -153,67 +116,31 @@ class ModelTabUI:
         """
 
     def create_sidebar_widget(self) -> QGroupBox:
-        """创建侧边栏组件"""
-        sidebar_widget = QGroupBox("参数预测")
+        sidebar_widget = QGroupBox("参数仿真")
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.setSpacing(16)
 
-        import_group = QGroupBox("模型导入")
-        import_layout = QVBoxLayout()
-        import_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        import_layout.setSpacing(8)
-
-        self.ui_components["model_select_btn"] = QPushButton("选择模型")
-        self.ui_components["model_select_btn"].setStyleSheet(
-            "QPushButton { background-color: #0ea5e9; color: white; }"
-        )
-        import_layout.addWidget(self.ui_components["model_select_btn"])
-
-        import_layout.addWidget(QLabel("模型与参数概要"))
-        self.ui_components["model_import_summary"] = QPlainTextEdit()
-        self.ui_components["model_import_summary"].setReadOnly(True)
-        self.ui_components["model_import_summary"].setMinimumHeight(100)
-        self.ui_components["model_import_summary"].setMaximumHeight(220)
-        self.ui_components["model_import_summary"].setPlaceholderText(
-            "选择模型目录后将显示路径、火球实验 JSON 与核岭回归 artefact 等信息…"
-        )
-        self.ui_components["model_import_summary"].setStyleSheet(
-            """
-            QPlainTextEdit {
-                background-color: #0b1220;
-                border: 1px solid #374151;
-                border-radius: 8px;
-                color: #cbd5e1;
-                font-family: 'Courier New', monospace;
-                font-size: 11px;
-                padding: 8px;
-            }
-        """
-        )
-        import_layout.addWidget(self.ui_components["model_import_summary"])
-
-        import_group.setLayout(import_layout)
-        layout.addWidget(import_group)
-
-        simulate_group = QGroupBox("仿真预测")
+        simulate_group = QGroupBox("仿真参数")
         simulate_layout = QVBoxLayout()
         simulate_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        simulate_layout.addWidget(QLabel("仿真参数（当量仿真）"))
 
         params_container = QWidget()
         params_form = QFormLayout()
         params_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         params_form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self.ui_components["p_eq"] = QLineEdit("2000")
-        params_form.addRow("当量 (kg TNT)", self.ui_components["p_eq"])
+        self.ui_components["p_k"] = QLineEdit("30")
+        params_form.addRow("K (m)", self.ui_components["p_k"])
 
-        self.ui_components["p_al"] = QLineEdit("30")
-        params_form.addRow("含铝量 (%)", self.ui_components["p_al"])
+        self.ui_components["p_b"] = QLineEdit("0.561313")
+        params_form.addRow("B", self.ui_components["p_b"])
 
-        self.ui_components["params_form_layout"] = params_form
+        self.ui_components["p_c"] = QLineEdit("8.49502e-05")
+        params_form.addRow("C", self.ui_components["p_c"])
+
+        self.ui_components["p_peak_temp_k"] = QLineEdit("1600")
+        params_form.addRow("火球最大温度 (K)", self.ui_components["p_peak_temp_k"])
 
         self.ui_components["p_env_temp"] = QLineEdit("24")
         params_form.addRow("环境温度 (°C)", self.ui_components["p_env_temp"])
@@ -231,18 +158,12 @@ class ModelTabUI:
         params_form.addRow("仿真时长 (ms)", self.ui_components["p_duration"])
 
         params_container.setLayout(params_form)
-
-        params_scroll = QScrollArea()
-        params_scroll.setWidgetResizable(True)
-        params_scroll.setWidget(params_container)
-        self.ui_components["params_scroll_area"] = params_scroll
-        simulate_layout.addWidget(params_scroll)
+        simulate_layout.addWidget(params_container)
 
         self.ui_components["predict_btn"] = QPushButton("开始计算")
         self.ui_components["predict_btn"].setStyleSheet(
             "QPushButton { background-color: #10b981; color: white; }"
         )
-        self.ui_components["predict_btn"].setEnabled(False)
         simulate_layout.addWidget(self.ui_components["predict_btn"])
 
         self.ui_components["export_btn"] = QPushButton("导出结果")
@@ -254,11 +175,9 @@ class ModelTabUI:
 
         simulate_group.setLayout(simulate_layout)
         layout.addWidget(simulate_group)
-
         layout.addStretch()
         sidebar_widget.setLayout(layout)
         return sidebar_widget
 
     def get_ui_components(self) -> Dict:
-        """获取所有 UI 组件的引用"""
         return self.ui_components.copy()
