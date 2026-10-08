@@ -275,19 +275,22 @@ class FireballAnalysisApp(QMainWindow):
         from model_tab.model_tab import ModelTab
         from parameter_sim_tab import ParameterSimTab
         from training_tab import TrainingTab
-        from engineering_tab import EngineeringTab
+        from engineering_tab import EngineeringTab, EngineeringHubTab
 
         self.extract_tab = ExtractTab()
         self.training_tab = TrainingTab()
         self.model_tab = ModelTab()
         self.parameter_sim_tab = ParameterSimTab()
         self.engineering_tab = EngineeringTab()
+        self.engineering_hub = EngineeringHubTab(
+            engineering_tab=self.engineering_tab,
+            parameter_sim_tab=self.parameter_sim_tab,
+        )
 
         self.tab_widget.addTab(self.extract_tab, "机器视觉")
         self.tab_widget.addTab(self.training_tab, "机器学习")
         self.tab_widget.addTab(self.model_tab, "参数预测")
-        self.tab_widget.addTab(self.parameter_sim_tab, "参数仿真")
-        self.tab_widget.addTab(self.engineering_tab, "工程计算")
+        self.tab_widget.addTab(self.engineering_hub, "工程计算")
         
         main_layout.addWidget(self.tab_widget)
         
@@ -307,6 +310,7 @@ class FireballAnalysisApp(QMainWindow):
         """设置信号连接"""
         # 标签页切换
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
+        self.engineering_hub.sub_tab_changed.connect(self._on_engineering_sub_tab_changed)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -416,6 +420,12 @@ class FireballAnalysisApp(QMainWindow):
             }}
         """)
         
+    def _on_engineering_sub_tab_changed(self, _index: int) -> None:
+        """工程计算大标签内子页切换时，刷新全局侧栏。"""
+        if self.tab_widget.currentWidget() is self.engineering_hub:
+            self.sidebar.set_sidebar_content(self.engineering_hub.get_sidebar_widget())
+            QTimer.singleShot(0, self._refresh_current_tab_layout)
+
     def on_tab_changed(self, index):
         """标签页切换事件"""
         # 预加载所有侧边栏内容（如果还没有加载）
@@ -429,10 +439,8 @@ class FireballAnalysisApp(QMainWindow):
             self.sidebar.set_sidebar_content(self.training_tab.get_sidebar_widget())
         elif index == 2:  # 参数预测
             self.sidebar.set_sidebar_content(self.model_tab.get_sidebar_widget())
-        elif index == 3:  # 参数仿真
-            self.sidebar.set_sidebar_content(self.parameter_sim_tab.get_sidebar_widget())
-        elif index == 4:  # 工程计算
-            self.sidebar.set_sidebar_content(self.engineering_tab.get_sidebar_widget())
+        elif index == 3:  # 工程计算（含参数仿真子标签）
+            self.sidebar.set_sidebar_content(self.engineering_hub.get_sidebar_widget())
 
         QTimer.singleShot(0, self._refresh_current_tab_layout)
 
