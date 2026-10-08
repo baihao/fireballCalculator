@@ -4,7 +4,7 @@
 直径变化速率图表组件
 
 显示：
-1) 原始直径数据的变化速率 dD/dt
+1) 直径滑动平滑后的变化速率 dD/dt（图例：原始速率）
 2) 拖曳函数拟合曲线的变化速率 dD/dt
 3) 数据截断点
 """
@@ -15,10 +15,18 @@ import numpy as np
 
 # 线条样式常量
 LINE_WIDTH = 2                    # 线条宽度
+LINE_WIDTH_FIT = 2.5              # 拟合速率略加粗，避免被原始噪声淹没
 SMOOTH_POINTS = 300               # 平滑曲线点数
 AXIS_PADDING_RATIO = 0.1          # 坐标轴边距比例（10%）
 X_PADDING_DEFAULT = 1.0            # x轴默认边距
 Y_PADDING_DEFAULT = 0.001         # y轴默认边距
+# 平滑速率纵轴：分位数稳健范围，避免残尖峰撑开刻度
+RAW_Y_PERCENTILE_LOW = 5.0
+RAW_Y_PERCENTILE_HIGH = 95.0
+# 有拟合时：平滑速率稳健范围最多扩到拟合幅度的该倍数
+RAW_VS_FIT_Y_EXPAND = 2.5
+# 计算「平滑速率」前对直径做滑动平均的窗口（点数）
+DIAMETER_SMOOTH_WINDOW = 11
 
 # 颜色常量
 COLOR_RAW = '#22c55e'             # 原始速率曲线颜色（绿色）
@@ -57,9 +65,59 @@ class DiameterVelocityChart(BaseChart):
         self._placeholder_text = "提取完成后显示"
 
     # --------------------------- 公共API --------------------------- #
+    @staticmethod
+    def _smooth_diameter(diameter_m: np.ndarray, window: int = DIAMETER_SMOOTH_WINDOW) -> np.ndarray:
+        """对直径序列做滑动平均，再用于数值求导。"""
+        d = np.asarray(diameter_m, dtype=float)
+        n = d.size
+        if n == 0:
+            return d.copy()
+        w = int(window)
+        if w < 3 or n < w:
+            return d.copy()
+        if w % 2 == 0:
+            w += 1
+        half = w // 2
+        out = np.empty(n, dtype=float)
+        for i in range(n):
+            lo = max(0, i - half)
+            hi = min(n, i + half + 1)
+            seg = d[lo:hi]
+            seg = seg[np.isfinite(seg)]
+            out[i] = float(np.mean(seg)) if seg.size else d[i]
+        return out
+
+    @staticmethod
+    def _rate_from_diameter(
+        time_ms: np.ndarray, diameter_m: np.ndarray, *, smooth: bool = True
+    ) -> Optional[np.ndarray]:
+        """由直径求 dD/dt；默认先滑动平滑直径。"""
+        t = np.asarray(time_ms, dtype=float)
+        d = np.asarray(diameter_m, dtype=float)
+        if t.size < 2 or d.size != t.size:
+            return None
+        if smooth:
+            d = DiameterVelocityChart._smooth_diameter(d)
+        return np.gradient(d, t)
+
+    @staticmethod
+    def _robust_y_span(values: np.ndarray) -> Optional[Tuple[float, float]]:
+        """用分位数得到稳健 y 范围；样本过少则退回 min/max。"""
+        valid = np.asarray(values, dtype=float)
+        valid = valid[np.isfinite(valid)]
+        if valid.size == 0:
+            return None
+        if valid.size < 8:
+            return float(np.min(valid)), float(np.max(valid))
+        lo, hi = np.percentile(
+            valid, [RAW_Y_PERCENTILE_LOW, RAW_Y_PERCENTILE_HIGH]
+        )
+        return float(lo), float(hi)
+
     def _compute_axis_limits(self, time_ms, ddt_raw, ddt_fit):
         """
-        依据原始/拟合速率计算坐标范围，返回 (xlim, ylim)。
+        计算坐标范围。有拟合时以拟合速率为主，平滑速率用稳健范围辅助。
+        纵轴不强制从 0 起。
         """
         xlim = self._xlim
         ylim = self._ylim
@@ -72,27 +130,38 @@ class DiameterVelocityChart(BaseChart):
                 return xlim, ylim
             time_valid = time_arr[valid_mask]
             x_min, x_max = np.min(time_valid), np.max(time_valid)
+            x_range = x_max - x_min
+            x_padding = x_range * AXIS_PADDING_RATIO if x_range > 0 else X_PADDING_DEFAULT
+            xlim = (x_min - x_padding, x_max + x_padding)
 
-            all_y_values = []
-            if ddt_raw is not None:
-                valid_raw = ddt_raw[np.isfinite(ddt_raw)]
-                if len(valid_raw) > 0:
-                    all_y_values.extend(valid_raw)
+            fit_span = None
             if ddt_fit is not None:
-                valid_fit = ddt_fit[np.isfinite(ddt_fit)]
-                if len(valid_fit) > 0:
-                    all_y_values.extend(valid_fit)
+                valid_fit = np.asarray(ddt_fit, dtype=float)
+                valid_fit = valid_fit[np.isfinite(valid_fit)]
+                if valid_fit.size > 0:
+                    fit_span = (float(np.min(valid_fit)), float(np.max(valid_fit)))
 
-            if len(all_y_values) > 0:
-                y_min, y_max = float(np.min(all_y_values)), float(np.max(all_y_values))
-                x_range = x_max - x_min
-                y_range = y_max - y_min
-                x_padding = x_range * AXIS_PADDING_RATIO if x_range > 0 else X_PADDING_DEFAULT
-                y_padding = y_range * AXIS_PADDING_RATIO if y_range > 0 else Y_PADDING_DEFAULT
-                xlim = (x_min - x_padding, x_max + x_padding)
-                ylim = (y_min - y_padding, y_max + y_padding)
-                if ylim[0] < 0 and y_min >= 0:
-                    ylim = (0, ylim[1])
+            raw_span = None
+            if ddt_raw is not None:
+                raw_span = self._robust_y_span(ddt_raw)
+
+            if fit_span is not None:
+                y_min, y_max = fit_span
+                fit_amp = max(abs(y_min), abs(y_max), Y_PADDING_DEFAULT)
+                if raw_span is not None:
+                    cap = RAW_VS_FIT_Y_EXPAND * fit_amp
+                    y_min = min(y_min, max(raw_span[0], -cap))
+                    y_max = max(y_max, min(raw_span[1], cap))
+            elif raw_span is not None:
+                y_min, y_max = raw_span
+            else:
+                return xlim, ylim
+
+            if y_max < y_min:
+                y_min, y_max = y_max, y_min
+            y_range = y_max - y_min
+            y_padding = y_range * AXIS_PADDING_RATIO if y_range > 0 else Y_PADDING_DEFAULT
+            ylim = (y_min - y_padding, y_max + y_padding)
         except Exception:
             pass
         return xlim, ylim
@@ -105,16 +174,24 @@ class DiameterVelocityChart(BaseChart):
         self.reset()
 
     def draw_raw_velocity(self, ax, time_ms, diameter_m) -> Optional[np.ndarray]:
-        """绘制原始数据速率，返回 ddt_raw（若可计算）。"""
+        """绘制平滑直径后的速率，返回 ddt（若可计算）。"""
         if time_ms is None or diameter_m is None:
             return None
         try:
-            t = np.array(time_ms, dtype=float)
-            d = np.array(diameter_m, dtype=float)
-            if len(t) >= 2 and len(d) == len(t):
-                ddt_raw = np.gradient(d, t)
-                ax.plot(time_ms, ddt_raw, color=self._raw_color, linewidth=LINE_WIDTH, label=self._raw_label)
-                return ddt_raw
+            ddt = self._rate_from_diameter(
+                np.asarray(time_ms, dtype=float),
+                np.asarray(diameter_m, dtype=float),
+                smooth=True,
+            )
+            if ddt is not None:
+                ax.plot(
+                    time_ms,
+                    ddt,
+                    color=self._raw_color,
+                    linewidth=LINE_WIDTH,
+                    label=self._raw_label,
+                )
+                return ddt
         except Exception:
             return None
         return None
@@ -171,14 +248,15 @@ class DiameterVelocityChart(BaseChart):
         ddt_raw = None
         ddt_fit = None
         
-        # 原始速率（可选）
+        # 平滑直径后再求导（可选）
         ddt_raw = None
         if diameter_m is not None:
             try:
-                t = np.array(time_ms, dtype=float)
-                d = np.array(diameter_m, dtype=float)
-                if len(t) >= 2 and len(d) == len(t):
-                    ddt_raw = np.gradient(d, t)
+                ddt_raw = self._rate_from_diameter(
+                    np.asarray(time_ms, dtype=float),
+                    np.asarray(diameter_m, dtype=float),
+                    smooth=True,
+                )
             except Exception:
                 ddt_raw = None
         
@@ -211,15 +289,31 @@ class DiameterVelocityChart(BaseChart):
             self.set_placeholder(self._placeholder_text or "无可绘制数据", self._placeholder_xy)
             return
         
-        # 分别绘制
+        # 分别绘制：原始半透明置底，拟合加粗置顶，便于辨认
         if ddt_raw is not None:
-            ax.plot(time_ms, ddt_raw, color=self._raw_color, linewidth=LINE_WIDTH, label=self._raw_label)
+            ax.plot(
+                time_ms,
+                ddt_raw,
+                color=self._raw_color,
+                linewidth=LINE_WIDTH,
+                alpha=0.45,
+                zorder=2,
+                label=self._raw_label,
+            )
         if ddt_fit is not None:
             try:
                 t_min = float(np.min(time_ms))
                 t_max = float(np.max(time_ms))
                 t_smooth = np.linspace(t_min, t_max, SMOOTH_POINTS)
-                ax.plot(t_smooth, ddt_fit, '-', color=self._fit_color, linewidth=LINE_WIDTH, label='拟合速率')
+                ax.plot(
+                    t_smooth,
+                    ddt_fit,
+                    '-',
+                    color=self._fit_color,
+                    linewidth=LINE_WIDTH_FIT,
+                    zorder=3,
+                    label='拟合速率',
+                )
             except Exception:
                 pass
 
