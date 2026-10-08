@@ -35,10 +35,13 @@ def _interp_time(
 
 def _avg_velocity_to_90pct_max_radius_m_s(
     series: Sequence[Tuple[float, float]],
+    *,
+    max_diameter_m: Optional[float] = None,
 ) -> Optional[float]:
     """
     从首有效点半径至达到 0.9·R_max 的平均膨胀速度 (m/s)。
     series 为 (时间 ms, 直径 m)。
+    max_diameter_m 优先：有拖曳拟合时传入 K，避免用单帧分割峰值当 R_max。
     """
     if len(series) < 2:
         return None
@@ -46,7 +49,10 @@ def _avg_velocity_to_90pct_max_radius_m_s(
     radii = 0.5 * np.asarray([d for _, d in series], dtype=np.float64)
     if not np.all(np.isfinite(times)) or not np.all(np.isfinite(radii)):
         return None
-    r_max = float(np.max(radii))
+    if max_diameter_m is not None and np.isfinite(max_diameter_m) and max_diameter_m > 0:
+        r_max = 0.5 * float(max_diameter_m)
+    else:
+        r_max = float(np.max(radii))
     if r_max <= 0:
         return None
     r_target = RADIUS_90_MAX_FRACTION * r_max
@@ -74,13 +80,17 @@ def _avg_velocity_to_90pct_max_radius_m_s(
     return (r_target - r_start) / (dt_ms * 1e-3)
 
 
-def _max_diameter_m(series: Sequence[Tuple[float, float]]) -> Optional[float]:
-    if not series:
+def _drag_fit_k_m(drag_fit: Optional[Dict[str, Any]]) -> Optional[float]:
+    """拖曳拟合渐近直径 K (m)；无效则返回 None。"""
+    if not drag_fit or drag_fit.get("K") is None:
         return None
-    diams = np.asarray([d for _, d in series], dtype=np.float64)
-    if diams.size == 0 or not np.any(np.isfinite(diams)):
+    try:
+        k = float(drag_fit.get("K"))
+    except (TypeError, ValueError):
         return None
-    return float(np.nanmax(diams))
+    if not np.isfinite(k) or k <= 0:
+        return None
+    return k
 
 
 def _pct(value: Any) -> str:
@@ -126,8 +136,13 @@ def build_key_metrics_text(
     lines.append("")
 
     series = list(diameter_series or [])
-    v90 = _avg_velocity_to_90pct_max_radius_m_s(series) if series else None
-    d_max = _max_diameter_m(series) if series else None
+    # 最大直径取拖曳拟合 K（渐近稳定值），不用分割序列瞬时峰值
+    d_max = _drag_fit_k_m(drag_fit)
+    v90 = (
+        _avg_velocity_to_90pct_max_radius_m_s(series, max_diameter_m=d_max)
+        if series
+        else None
+    )
 
     lines.append("【关键指标】")
     if segmentation_avg_ms_per_image is not None and segmentation_avg_ms_per_image >= 0:
@@ -143,9 +158,9 @@ def build_key_metrics_text(
     else:
         lines.append("  火球膨胀到90%最大半径的平均速度 —")
     if d_max is not None:
-        lines.append(f"  火球最大直径 {_fmt(d_max, 4)} m")
+        lines.append(f"  火球最大直径 {_fmt(d_max, 4)} m（拟合 K）")
     else:
-        lines.append("  火球最大直径 —")
+        lines.append("  火球最大直径 —（需完成拖曳拟合）")
     lines.append("")
 
     lines.append("【分割质量】")
