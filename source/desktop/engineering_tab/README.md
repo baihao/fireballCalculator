@@ -106,9 +106,20 @@ t_d \approx 0.30\, W^{1/3}
 
 对应代码：`fireball_total_duration_s()`。
 
-### 步骤 3：火球温度
+### 步骤 3：温度特征时间（仅用于 \(T_{\mathrm{eq}}\)）
 
-在 duration 与球面上平均意义下的火球温度（公式符号仍记 \(T_{\mathrm{eq}}\)）：
+与展示用 \(t_d\) 分离，取较弱当量指数 \(\beta=0.2\)，使能量项随当量缓升：
+
+\[
+t_{\mathrm{char}} \approx 0.30\, W^{0.2}
+\quad (\mathrm{s})
+\]
+
+对应代码：`fireball_temperature_char_time_s()`。
+
+### 步骤 4：火球温度
+
+在特征时间与球面上平均意义下的火球温度（公式符号仍记 \(T_{\mathrm{eq}}\)）：
 
 \[
 T_{\mathrm{eq}} =
@@ -116,13 +127,14 @@ T_{\mathrm{eq}} =
 T_{\mathrm{amb}}^{4}
 +
 \frac{\chi_r\, E\, H_{\mathrm{TNT}}}
-{\varepsilon\, \sigma\, \kappa_A\, 4\pi R_{\max}^{2}\, t_d}
+{\varepsilon\, \sigma\, \kappa_A\, 4\pi R_{\max}^{2}\, t_{\mathrm{char}}}
 \right]^{1/4}
 \quad (\mathrm{K})
 \]
 
-- 使用步骤 1 的 \(R_{\max}\) 与步骤 2 的 \(t_d\)。  
+- 使用步骤 1 的 \(R_{\max}\) 与步骤 3 的 \(t_{\mathrm{char}}\)（**不用** \(t_d\)）。  
 - **\(T_{\mathrm{eq}}\)** 在界面与结果中称为 **火球温度**（原资料中的平均等效辐射温度记号仍保留为 \(T_{\mathrm{eq}}\)）。  
+- 仿真时长仍用步骤 2 的 \(t_d\)。
 
 对应代码：`equivalent_radiation_temperature_k()`。
 

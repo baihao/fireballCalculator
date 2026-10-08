@@ -17,6 +17,7 @@ R_MAX = "R<sub>max</sub>"
 D_MAX = "D<sub>max</sub>"
 T_M = "t<sub>m</sub>"
 T_D = "t<sub>d</sub>"
+T_CHAR = "t<sub>char</sub>"
 H_TNT = "H<sub>TNT</sub>"
 V_MAX = "v<sub>max</sub>"
 
