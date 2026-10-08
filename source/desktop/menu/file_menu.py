@@ -14,8 +14,7 @@ from PySide6.QtWidgets import QMainWindow, QMenu
 TAB_INDEX_MACHINE_VISION = 0
 TAB_INDEX_MACHINE_LEARNING = 1
 TAB_INDEX_PARAMETER_PREDICTION = 2
-TAB_INDEX_PARAMETER_SIMULATION = 3
-TAB_INDEX_ENGINEERING_CALC = 4
+TAB_INDEX_ENGINEERING_HUB = 3
 
 
 def setup_file_menu(main_window: QMainWindow, file_menu: QMenu) -> None:
