@@ -42,7 +42,7 @@ def avg_radial_velocity_to_90pct_max_radius(
     c_material: float,
 ) -> Optional[Tuple[float, float, float, float, float]]:
     """
-    拖曳曲线 D(t)=K(1−B·e^{−C_eff·t_s²}) 下，从 R(0) 到 0.9·R_max 的平均径向速度。
+    拖曳曲线 D(t)=K(1−B·e^{−C_eff·t_s²}) 下，从 R(0)=0 到 0.9·R_max 的平均径向速度。
 
     Returns:
         (t_90_ms, r0_m, r90_m, v_avg_m_per_ms, v_avg_m_per_s) 或 None（B≤0.1 等）
@@ -56,7 +56,7 @@ def avg_radial_velocity_to_90pct_max_radius(
     t90_ms = math.sqrt(math.log(b_val / 0.1) / c_s) * 1000.0
     if t90_ms <= 0 or not math.isfinite(t90_ms):
         return None
-    r0 = k * (1.0 - b_val) / 2.0
+    r0 = 0.0
     r90 = 0.45 * k
     v_mm = (r90 - r0) / t90_ms
     return t90_ms, r0, r90, v_mm, v_mm * 1000.0
@@ -164,7 +164,7 @@ def build_formula_reference_text(
             t90, r0, r90, v_mm, v_s = vel
             lines.append("")
             lines.append("【膨胀（由 K,B,C 预估，t=0 起算）】")
-            lines.append(f"  R(0) = {_fmt(r0, 4)} m，0.9·R_max = {_fmt(r90, 4)} m")
+            lines.append(f"  R(0) = 0 m，0.9·R_max = {_fmt(r90, 4)} m")
             lines.append(f"  t_90% = {_fmt(t90, 4)} ms")
             lines.append(f"  平均径向速度 = {_fmt(v_mm, 4)} m/ms（{_fmt(v_s, 4)} m/s）")
     else:
@@ -291,12 +291,12 @@ def build_formula_reference_from_prediction(
     lines.append("")
 
     lines.append("【膨胀至 90% 最大半径】")
-    lines.append("  R_max = K/2，R(0)=K(1−B)/2，t_90 满足 D(t)=0.9K")
+    lines.append("  R_max = K/2，R(0)=0，t_90 满足 D(t)=0.9K")
     if kd is not None and b_val is not None and c_val is not None:
         vel = avg_radial_velocity_to_90pct_max_radius(kd, b_val, c_val)
         if vel is not None:
             t90, r0, r90, v_mm, v_s = vel
-            lines.append(f"  R(0) = {_fmt(r0, 4)} m，0.9·R_max = {_fmt(r90, 4)} m")
+            lines.append(f"  R(0) = 0 m，0.9·R_max = {_fmt(r90, 4)} m")
             lines.append(f"  t_90% = {_fmt(t90, 4)} ms")
             lines.append(f"  平均径向速度 = {_fmt(v_mm, 4)} m/ms（{_fmt(v_s, 4)} m/s）")
         else:
