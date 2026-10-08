@@ -86,10 +86,13 @@ def format_engineering_result_html(
             f"<div class='formula'>{sym.T_D} ≈ 0.30 · W<sup>1/3</sup> &nbsp; [s]</div>"
         ),
         _line(
+            f"<div class='formula'>{sym.T_CHAR} ≈ 0.30 · W<sup>0.2</sup> &nbsp; [s]</div>"
+        ),
+        _line(
             "<div class='formula'>"
             f"{sym.T_EQ} = [ {sym.T_AMB}<sup>4</sup> + "
             f"{sym.CHI_R}·W·{sym.H_TNT} / ({sym.EPSILON}·{sym.SIGMA}·{sym.KAPPA_A}·4π·"
-            f"{sym.R_MAX}<sup>2</sup>·{sym.T_D}) ]<sup>1/4</sup> &nbsp; [K]"
+            f"{sym.R_MAX}<sup>2</sup>·{sym.T_CHAR}) ]<sup>1/4</sup> &nbsp; [K]"
             "</div>"
         ),
         _line("<h2>二、代入参数</h2>"),
@@ -158,18 +161,26 @@ def format_engineering_result_html(
             ],
         ),
         _calc_block(
+            "温度特征时间",
+            [
+                f"{sym.T_CHAR} ≈ 0.30 · W<sup>0.2</sup>",
+                f"= 0.30 · ({_g(w)})<sup>0.2</sup>",
+                f"= <b>{_g(result.t_char_s, 6)} s</b>（{_g(result.t_char_s * 1000, 6)} ms）",
+            ],
+        ),
+        _calc_block(
             "火球温度",
             [
                 (
                     f"{sym.T_EQ} = [ {sym.T_AMB}<sup>4</sup> + "
                     f"{sym.CHI_R}·W·{sym.H_TNT} / ({sym.EPSILON}·{sym.SIGMA}·{sym.KAPPA_A}·4π·"
-                    f"{sym.R_MAX}<sup>2</sup>·{sym.T_D}) ]<sup>1/4</sup>"
+                    f"{sym.R_MAX}<sup>2</sup>·{sym.T_CHAR}) ]<sup>1/4</sup>"
                 ),
                 (
                     f"= [ ({_g(t_amb, 6)})<sup>4</sup> + "
                     f"{_g(inputs.chi_r)}·{_g(w)}·{_g(H_TNT_J_PER_KG)} / "
                     f"({_g(inputs.epsilon)}·{_g(inputs.sigma)}·{_g(inputs.kappa_a)}·4π·"
-                    f"{_g(result.r_max_m, 6)}<sup>2</sup>·{_g(result.t_d_s, 6)}) ]<sup>1/4</sup>"
+                    f"{_g(result.r_max_m, 6)}<sup>2</sup>·{_g(result.t_char_s, 6)}) ]<sup>1/4</sup>"
                 ),
                 f"= <b>{_g(result.t_eq_k, 6)} K</b>（{_g(result.t_eq_c, 6)} °C）",
             ],

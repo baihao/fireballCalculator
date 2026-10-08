@@ -11,11 +11,14 @@
     D_max = 2 * R_max
     t_m   = t   （达到最大半径/直径时间，与上式 t 同一符号）
 
-火球总持续时间：
+火球总持续时间（展示 / 仿真时长）：
     t_d ≈ 0.30 * W^(1/3)   (s)，W 与 E 同为 TNT 当量 (kg)
 
-火球温度（使用上式 t_d；公式符号仍记为 T_eq）：
-    T_eq = [ T_amb^4 + chi_r * E * H_TNT / (epsilon * sigma * kappa_A * 4 pi R_max^2 t_d) ]^(1/4)
+温度公式特征时间（仅用于 T_eq，β=0.2，使能量项随 E 缓升）：
+    t_char ≈ 0.30 * W^0.2   (s)
+
+火球温度（分母用 t_char，不用 t_d；公式符号仍记为 T_eq）：
+    T_eq = [ T_amb^4 + chi_r * E * H_TNT / (epsilon * sigma * kappa_A * 4 pi R_max^2 t_char) ]^(1/4)
 """
 
 from __future__ import annotations
@@ -38,6 +41,10 @@ MAX_TEMPERATURE_K = 3000.0
 # 含铝率参考点（公式指数项 x - 0.3073）
 AL_REFERENCE_FRACTION = 0.3073
 
+# 温度特征时间 t_char = T_CHAR_COEF · W^T_CHAR_BETA（与展示用 t_d 的 1/3 次幂分离）
+T_CHAR_COEF = 0.30
+T_CHAR_BETA = 0.2
+
 
 @dataclass(frozen=True)
 class EngineeringEstimateInputs:
@@ -57,6 +64,7 @@ class EngineeringEstimateResult:
     v_max_m_s: float
     t_m_s: float
     t_d_s: float
+    t_char_s: float
     t_eq_k: float
 
     @property
@@ -90,25 +98,32 @@ def fireball_total_duration_s(e_kg: float) -> float:
     return 0.30 * (float(e_kg) ** (1.0 / 3.0))
 
 
+def fireball_temperature_char_time_s(e_kg: float) -> float:
+    """温度公式特征时间 t_char ≈ 0.30·W^0.2 (s)；仅用于 T_eq。"""
+    if e_kg <= 0:
+        raise ValueError("当量 W 必须大于 0")
+    return T_CHAR_COEF * (float(e_kg) ** T_CHAR_BETA)
+
+
 def equivalent_radiation_temperature_k(
     *,
     e_kg: float,
     t_amb_k: float,
     r_max_m: float,
-    t_d_s: float,
+    t_char_s: float,
     chi_r: float = DEFAULT_CHI_R,
     epsilon: float = DEFAULT_EPSILON,
     kappa_a: float = DEFAULT_KAPPA_A,
     sigma: float = DEFAULT_SIGMA,
 ) -> float:
-    if r_max_m <= 0 or t_d_s <= 0:
-        raise ValueError(f"{sym.R_MAX_PLAIN} 与 {sym.T_D_PLAIN} 必须大于 0")
+    if r_max_m <= 0 or t_char_s <= 0:
+        raise ValueError(f"{sym.R_MAX_PLAIN} 与 t_char 必须大于 0")
     if epsilon <= 0 or kappa_a <= 0 or sigma <= 0:
         raise ValueError(f"{sym.EPSILON}、{sym.KAPPA_A_PLAIN}、{sym.SIGMA} 必须大于 0")
     if chi_r < 0:
         raise ValueError(f"{sym.CHI_R_PLAIN} 不能为负")
     numerator = chi_r * e_kg * H_TNT_J_PER_KG
-    denominator = epsilon * sigma * kappa_a * 4.0 * math.pi * (r_max_m ** 2) * t_d_s
+    denominator = epsilon * sigma * kappa_a * 4.0 * math.pi * (r_max_m ** 2) * t_char_s
     t_k = (t_amb_k ** 4 + numerator / denominator) ** 0.25
     return min(float(t_k), MAX_TEMPERATURE_K)
 
@@ -120,12 +135,13 @@ def compute_engineering_estimate(inputs: EngineeringEstimateInputs) -> Engineeri
     d_max = 2.0 * r_max
 
     t_d = fireball_total_duration_s(e)
+    t_char = fireball_temperature_char_time_s(e)
 
     t_eq = equivalent_radiation_temperature_k(
         e_kg=e,
         t_amb_k=float(inputs.t_amb_k),
         r_max_m=r_max,
-        t_d_s=t_d,
+        t_char_s=t_char,
         chi_r=float(inputs.chi_r),
         epsilon=float(inputs.epsilon),
         kappa_a=float(inputs.kappa_a),
@@ -138,6 +154,7 @@ def compute_engineering_estimate(inputs: EngineeringEstimateInputs) -> Engineeri
         v_max_m_s=v,
         t_m_s=t_m,
         t_d_s=t_d,
+        t_char_s=t_char,
         t_eq_k=t_eq,
     )
 
