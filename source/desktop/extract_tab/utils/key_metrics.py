@@ -39,7 +39,7 @@ def _avg_velocity_to_90pct_max_radius_m_s(
     max_diameter_m: Optional[float] = None,
 ) -> Optional[float]:
     """
-    从首有效点半径至达到 0.9·R_max 的平均膨胀速度 (m/s)。
+    从 R(0)=0、t=0 至达到 0.9·R_max 的平均膨胀速度 (m/s)。
     series 为 (时间 ms, 直径 m)。
     max_diameter_m 优先：有拖曳拟合时传入 K，避免用单帧分割峰值当 R_max。
     """
@@ -56,10 +56,8 @@ def _avg_velocity_to_90pct_max_radius_m_s(
     if r_max <= 0:
         return None
     r_target = RADIUS_90_MAX_FRACTION * r_max
-    r_start = float(radii[0])
-    t_start = float(times[0])
-    if r_start >= r_target:
-        return 0.0
+    r_start = 0.0
+    t_start = 0.0
     hit = np.flatnonzero(radii >= r_target)
     if hit.size == 0:
         return None
