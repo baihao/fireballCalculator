@@ -20,13 +20,14 @@ SMOOTH_POINTS = 300               # 平滑曲线点数
 AXIS_PADDING_RATIO = 0.1          # 坐标轴边距比例（10%）
 X_PADDING_DEFAULT = 1.0            # x轴默认边距
 Y_PADDING_DEFAULT = 0.001         # y轴默认边距
-# 平滑速率纵轴：分位数稳健范围，避免残尖峰撑开刻度
+# 「原始速率」纵轴：分位数稳健范围，避免残尖峰撑开刻度
 RAW_Y_PERCENTILE_LOW = 5.0
 RAW_Y_PERCENTILE_HIGH = 95.0
-# 有拟合时：平滑速率稳健范围最多扩到拟合幅度的该倍数
+# 有拟合时：原始速率稳健范围最多扩到拟合幅度的该倍数
 RAW_VS_FIT_Y_EXPAND = 2.5
 # 计算「平滑速率」前对直径做滑动平均的窗口（点数）
 DIAMETER_SMOOTH_WINDOW = 11
+RAW_RATE_LABEL = "原始速率"
 
 # 颜色常量
 COLOR_RAW = '#22c55e'             # 原始速率曲线颜色（绿色）
@@ -62,6 +63,8 @@ class DiameterVelocityChart(BaseChart):
         self._raw_color = COLOR_RAW
         self._fit_color = COLOR_FIT
         self._raw_label = raw_label
+        # 仅显示「原始速率」时对纵轴做分位数稳健缩放；膨胀速度等完整显示峰值
+        self._use_robust_raw_ylim = raw_label == RAW_RATE_LABEL
         self._placeholder_text = "提取完成后显示"
 
     # --------------------------- 公共API --------------------------- #
@@ -101,6 +104,15 @@ class DiameterVelocityChart(BaseChart):
         return np.gradient(d, t)
 
     @staticmethod
+    def _data_y_span(values: np.ndarray) -> Optional[Tuple[float, float]]:
+        """用全部有限样本的 min/max，保证峰值完整可见。"""
+        valid = np.asarray(values, dtype=float)
+        valid = valid[np.isfinite(valid)]
+        if valid.size == 0:
+            return None
+        return float(np.min(valid)), float(np.max(valid))
+
+    @staticmethod
     def _robust_y_span(values: np.ndarray) -> Optional[Tuple[float, float]]:
         """用分位数得到稳健 y 范围；样本过少则退回 min/max。"""
         valid = np.asarray(values, dtype=float)
@@ -116,8 +128,9 @@ class DiameterVelocityChart(BaseChart):
 
     def _compute_axis_limits(self, time_ms, ddt_raw, ddt_fit):
         """
-        计算坐标范围。有拟合时以拟合速率为主，平滑速率用稳健范围辅助。
-        纵轴不强制从 0 起。
+        纵轴范围：
+        - 显示「原始速率」时：对原始曲线用 5%–95% 分位数（有拟合则以拟合完整峰值为主）
+        - 膨胀速度等非原始速率：按实际 min/max，完整显示峰值
         """
         xlim = self._xlim
         ylim = self._ylim
@@ -134,34 +147,42 @@ class DiameterVelocityChart(BaseChart):
             x_padding = x_range * AXIS_PADDING_RATIO if x_range > 0 else X_PADDING_DEFAULT
             xlim = (x_min - x_padding, x_max + x_padding)
 
-            fit_span = None
-            if ddt_fit is not None:
-                valid_fit = np.asarray(ddt_fit, dtype=float)
-                valid_fit = valid_fit[np.isfinite(valid_fit)]
-                if valid_fit.size > 0:
-                    fit_span = (float(np.min(valid_fit)), float(np.max(valid_fit)))
+            fit_span = self._data_y_span(ddt_fit) if ddt_fit is not None else None
+            if self._use_robust_raw_ylim:
+                raw_span = self._robust_y_span(ddt_raw) if ddt_raw is not None else None
+            else:
+                raw_span = self._data_y_span(ddt_raw) if ddt_raw is not None else None
 
-            raw_span = None
-            if ddt_raw is not None:
-                raw_span = self._robust_y_span(ddt_raw)
-
-            if fit_span is not None:
+            if fit_span is not None and self._use_robust_raw_ylim:
                 y_min, y_max = fit_span
                 fit_amp = max(abs(y_min), abs(y_max), Y_PADDING_DEFAULT)
                 if raw_span is not None:
                     cap = RAW_VS_FIT_Y_EXPAND * fit_amp
                     y_min = min(y_min, max(raw_span[0], -cap))
                     y_max = max(y_max, min(raw_span[1], cap))
-            elif raw_span is not None:
-                y_min, y_max = raw_span
             else:
-                return xlim, ylim
+                y_min: Optional[float] = None
+                y_max: Optional[float] = None
+                for span in (fit_span, raw_span):
+                    if span is None:
+                        continue
+                    lo, hi = span
+                    y_min = lo if y_min is None else min(y_min, lo)
+                    y_max = hi if y_max is None else max(y_max, hi)
+                if y_min is None or y_max is None:
+                    return xlim, ylim
 
             if y_max < y_min:
                 y_min, y_max = y_max, y_min
+            amp = max(abs(y_max), abs(y_min), Y_PADDING_DEFAULT)
+            if y_min >= 0.0 or abs(y_min) <= 0.05 * amp:
+                y_min = 0.0
             y_range = y_max - y_min
             y_padding = y_range * AXIS_PADDING_RATIO if y_range > 0 else Y_PADDING_DEFAULT
-            ylim = (y_min - y_padding, y_max + y_padding)
+            ylim = (
+                y_min if y_min == 0.0 else y_min - y_padding,
+                y_max + y_padding,
+            )
         except Exception:
             pass
         return xlim, ylim
