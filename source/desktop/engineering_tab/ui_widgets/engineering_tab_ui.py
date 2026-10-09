@@ -12,15 +12,12 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QTextEdit,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from ui_fonts import song_family_qss
-
-from ..utils.symbols import CHI_R, EPSILON, KAPPA_A, SIGMA, T_AMB, UNIT_SIGMA
 
 
 class EngineeringTabUI:
@@ -37,12 +34,6 @@ class EngineeringTabUI:
 
     def create_main_widget(self) -> QWidget:
         return self._main_root
-
-    @staticmethod
-    def _rich_label(html: str) -> QLabel:
-        lab = QLabel(html)
-        lab.setTextFormat(Qt.TextFormat.RichText)
-        return lab
 
     def _result_panel_style(self) -> str:
         fq = song_family_qss()
@@ -68,27 +59,11 @@ class EngineeringTabUI:
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         self.ui_components["eq_kg"] = QLineEdit("2000")
-        form.addRow("TNT 当量 W (kg)", self.ui_components["eq_kg"])
+        form.addRow("装药质量 M / TNT 当量 W (kg)", self.ui_components["eq_kg"])
         self.ui_components["al_percent"] = QLineEdit("30")
         form.addRow("含铝率 X (%)", self.ui_components["al_percent"])
-        self.ui_components["t_amb_c"] = QLineEdit("24")
-        form.addRow(self._rich_label(f"环境温度 {T_AMB} (°C)"), self.ui_components["t_amb_c"])
         input_group.setLayout(form)
         sidebar_layout.addWidget(input_group)
-
-        adv_group = QGroupBox("计算参数")
-        adv_form = QFormLayout()
-        adv_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.ui_components["chi_r"] = QLineEdit("0.4")
-        self.ui_components["epsilon"] = QLineEdit("0.43")
-        self.ui_components["kappa_a"] = QLineEdit("0.8888")
-        self.ui_components["sigma"] = QLineEdit("5.6704e-8")
-        adv_form.addRow(self._rich_label(f"{CHI_R} 辐射能量比"), self.ui_components["chi_r"])
-        adv_form.addRow(self._rich_label(f"{EPSILON} 发射率"), self.ui_components["epsilon"])
-        adv_form.addRow(self._rich_label(f"{KAPPA_A} 平均/最大面积比"), self.ui_components["kappa_a"])
-        adv_form.addRow(self._rich_label(f"{SIGMA} ({UNIT_SIGMA})"), self.ui_components["sigma"])
-        adv_group.setLayout(adv_form)
-        sidebar_layout.addWidget(adv_group)
 
         self.ui_components["calc_btn"] = QPushButton("开始计算")
         self.ui_components["calc_btn"].setStyleSheet(
@@ -114,7 +89,7 @@ class EngineeringTabUI:
             QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         )
         self.ui_components["result_panel"].setPlaceholderText(
-            "在左侧填写 W、X、T_amb 等参数，点击「开始计算」后在此显示完整计算流程…"
+            "在左侧填写 M（W）、含铝率，点击「开始计算」后在此显示完整计算流程…"
         )
         self.ui_components["result_panel"].setStyleSheet(self._result_panel_style())
         layout.addWidget(self.ui_components["result_panel"], 1)

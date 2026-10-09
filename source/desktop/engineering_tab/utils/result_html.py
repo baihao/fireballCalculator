@@ -10,10 +10,18 @@ from typing import List
 from . import symbols as sym
 from .image_formula_engineering import (
     AL_REFERENCE_FRACTION,
-    H_TNT_J_PER_KG,
+    T_BASE_K,
+    T_SCALE_AL_BASE,
+    T_SCALE_AL_COEF,
+    T_SCALE_COEF,
+    T_SCALE_M_EXP,
+    T_TRANSIENT_AL,
+    T_TRANSIENT_BASE,
+    U_COEF,
     EngineeringEstimateInputs,
     EngineeringEstimateResult,
     _al_exp_shift,
+    _temperature_scale_c,
 )
 
 _RESULT_STYLE = """
@@ -56,7 +64,7 @@ def format_engineering_result_html(
     w = float(inputs.equivalent_kg)
     x = float(inputs.al_fraction)
     dx = _al_exp_shift(x)
-    t_amb = float(inputs.t_amb_k)
+    a_coef, c_coef = _temperature_scale_c(w, x)
 
     ref = AL_REFERENCE_FRACTION
     x_minus_ref = f"(x−{ref})"
@@ -86,26 +94,26 @@ def format_engineering_result_html(
             f"<div class='formula'>{sym.T_D} ≈ 0.30 · W<sup>1/3</sup> &nbsp; [s]</div>"
         ),
         _line(
-            f"<div class='formula'>{sym.T_CHAR} ≈ 0.30 · W<sup>0.2</sup> &nbsp; [s]</div>"
+            "<div class='formula'>"
+            f"u = {_g(U_COEF)} · t / M<sup>1/3</sup>"
+            "</div>"
         ),
         _line(
             "<div class='formula'>"
-            f"{sym.T_EQ} = [ {sym.T_AMB}<sup>4</sup> + "
-            f"{sym.CHI_R}·W·{sym.H_TNT} / ({sym.EPSILON}·{sym.SIGMA}·{sym.KAPPA_A}·4π·"
-            f"{sym.R_MAX}<sup>2</sup>·{sym.T_CHAR}) ]<sup>1/4</sup> &nbsp; [K]"
+            f"T(t; M, x) = {_g(T_BASE_K, 4)} + ({_g(T_TRANSIENT_BASE, 4)} + "
+            f"{_g(T_TRANSIENT_AL, 4)}x)·e<sup>−2u</sup> + "
+            f"{_g(T_SCALE_COEF)}·M<sup>{_g(T_SCALE_M_EXP, 4)}</sup>·"
+            f"({_g(T_SCALE_AL_BASE, 4)} + {_g(T_SCALE_AL_COEF, 4)}x)·"
+            f"(e<sup>−u</sup> − 14/13·e<sup>−2u</sup> + 1/13·e<sup>−15u</sup>) &nbsp; [K]"
             "</div>"
+        ),
+        _line(
+            f"<div class='formula'>{sym.T_MAX} = max<sub>t≥0</sub> T(t; M, x) &nbsp; [K]</div>"
         ),
         _line("<h2>二、代入参数</h2>"),
         _line(
-            f"<div class='subst'>W = {_g(w)} kg TNT，"
-            f"x = {_g(x * 100, 4)} % → {_g(x, 6)}，"
-            f"{sym.T_AMB} = {_g(t_amb, 6)} K（{_g(t_amb - 273.15, 4)} °C）</div>"
-        ),
-        _line(
-            f"<div class='subst'>"
-            f"{sym.CHI_R} = {_g(inputs.chi_r)}，{sym.EPSILON} = {_g(inputs.epsilon)}，"
-            f"{sym.KAPPA_A} = {_g(inputs.kappa_a)}，{sym.SIGMA} = {_g(inputs.sigma)} "
-            f"{sym.UNIT_SIGMA}，{sym.H_TNT} = {_g(H_TNT_J_PER_KG)} J/kg</div>"
+            f"<div class='subst'>M = W = {_g(w)} kg，"
+            f"x = {_g(x * 100, 4)} % → {_g(x, 6)}</div>"
         ),
         _line(
             f"<div class='subst'>(x − {ref}) = {_g(x, 6)} − {ref} = <b>{_g(dx, 6)}</b></div>"
@@ -161,28 +169,28 @@ def format_engineering_result_html(
             ],
         ),
         _calc_block(
-            "温度特征时间",
-            [
-                f"{sym.T_CHAR} ≈ 0.30 · W<sup>0.2</sup>",
-                f"= 0.30 · ({_g(w)})<sup>0.2</sup>",
-                f"= <b>{_g(result.t_char_s, 6)} s</b>（{_g(result.t_char_s * 1000, 6)} ms）",
-            ],
-        ),
-        _calc_block(
-            "火球温度",
+            "最大温度",
             [
                 (
-                    f"{sym.T_EQ} = [ {sym.T_AMB}<sup>4</sup> + "
-                    f"{sym.CHI_R}·W·{sym.H_TNT} / ({sym.EPSILON}·{sym.SIGMA}·{sym.KAPPA_A}·4π·"
-                    f"{sym.R_MAX}<sup>2</sup>·{sym.T_CHAR}) ]<sup>1/4</sup>"
+                    f"A = {_g(T_TRANSIENT_BASE, 4)} + {_g(T_TRANSIENT_AL, 4)}x = "
+                    f"{_g(T_TRANSIENT_BASE, 4)} + {_g(T_TRANSIENT_AL, 4)}·{_g(x, 6)} = "
+                    f"<b>{_g(a_coef, 6)}</b>"
                 ),
                 (
-                    f"= [ ({_g(t_amb, 6)})<sup>4</sup> + "
-                    f"{_g(inputs.chi_r)}·{_g(w)}·{_g(H_TNT_J_PER_KG)} / "
-                    f"({_g(inputs.epsilon)}·{_g(inputs.sigma)}·{_g(inputs.kappa_a)}·4π·"
-                    f"{_g(result.r_max_m, 6)}<sup>2</sup>·{_g(result.t_char_s, 6)}) ]<sup>1/4</sup>"
+                    f"C = {_g(T_SCALE_COEF)}·M<sup>{_g(T_SCALE_M_EXP, 4)}</sup>·"
+                    f"({_g(T_SCALE_AL_BASE, 4)} + {_g(T_SCALE_AL_COEF, 4)}x) = "
+                    f"<b>{_g(c_coef, 6)}</b>"
                 ),
-                f"= <b>{_g(result.t_eq_k, 6)} K</b>（{_g(result.t_eq_c, 6)} °C）",
+                (
+                    f"{sym.T_MAX} = max<sub>t</sub> [ {_g(T_BASE_K, 4)} + A·e<sup>−2u</sup> + "
+                    f"C·(e<sup>−u</sup> − 14/13·e<sup>−2u</sup> + 1/13·e<sup>−15u</sup>) ]，"
+                    f"u = {_g(U_COEF)}·t/M<sup>1/3</sup>"
+                ),
+                (
+                    f"= <b>{_g(result.t_max_k, 6)} K</b>（{_g(result.t_max_c, 6)} °C），"
+                    f"对应 t = {_g(result.t_at_tmax_s, 6)} s"
+                    f"（{_g(result.t_at_tmax_s * 1000, 6)} ms）"
+                ),
             ],
         ),
         "</body></html>",

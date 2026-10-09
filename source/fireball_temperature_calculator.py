@@ -15,7 +15,7 @@
 - **形状**：内嵌参考曲线（PCHIP，时间列仅作归一化参数
   ``u = t_ref / T_span``，0→1；**不**决定物理时长与峰值温度）。
 - **物理时长**：``t_d``（ms）由 ``engineering_tab`` 火球持续时间公式（当量 W）。
-- **峰值温度**：``1.3·T_eq``（``T_eq`` 由 ``engineering_tab`` 当量、含铝率、环境等计算）。
+- **峰值温度**：``T_max``（由 ``engineering_tab`` 温度闭式 ``T(t;M,x)`` 对时间取峰）。
 - 映射：``t_ref = (t / t_d) · T_csv,span``，再对 CSV 形状做幅值缩放至目标峰值。
 """
 
@@ -482,7 +482,7 @@ class FireballTemperatureCalculator:
             t_ms: 仿真时刻 (ms)
             equivalent_kg: 保留兼容；时长与峰值由 ``duration_ms`` / ``peak_temperature_k`` 传入
             duration_ms: 火球温度过程时长 ``t_d`` (ms)，来自工程公式
-            peak_temperature_k: 目标峰值 (K)，通常为 ``1.3·T_eq``（工程公式）
+            peak_temperature_k: 目标峰值 (K)，通常为工程公式 ``T_max``
             ambient_k: 环境温度 (K)，幅值缩放基准
         """
         del equivalent_kg, reference_equivalent_kg

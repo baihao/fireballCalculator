@@ -4,7 +4,7 @@
 工程计算 — 火球直径（显式 K/B/C 拖曳式）、默认温度、热通量与累积热辐射。
 
 温度时间序列：无训练温度数据时使用 ``FireballTemperatureCalculator`` 内嵌参考曲线，
-形状仅作归一化剖面；时长 ``t_d``、峰值 ``1.3·T_eq`` 由 ``engineering_tab``（当量、含铝率等）确定。
+形状仅作归一化剖面；时长 ``t_d``、峰值 ``T_max`` 由 ``engineering_tab``（当量、含铝率）确定。
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ if _PKG_ROOT not in sys.path:
 from fireball_radius_calculator import FireballCalculator
 from fireball_temperature_calculator import (
     FireballTemperatureCalculator,
-    PEAK_TEMPERATURE_T_EQ_FACTOR,
     REFERENCE_EQUIVALENT_KG,
     equivalent_time_scale,
     fireball_total_duration_ms,
@@ -76,7 +75,7 @@ def peak_temperature_k_from_engineering(
     al_fraction: float,
     t_amb_k: float,
 ) -> float:
-    """``PEAK_TEMPERATURE_T_EQ_FACTOR * T_eq``，T_eq 来自工程估算公式。"""
+    """工程公式 ``T(t;M,x)`` 的峰值 ``T_max``（``t_amb_k`` 保留签名兼容，未参与计算）。"""
     _ensure_desktop_import_path()
     from engineering_tab.utils.image_formula_engineering import (
         EngineeringEstimateInputs,
@@ -90,7 +89,7 @@ def peak_temperature_k_from_engineering(
             t_amb_k=float(t_amb_k),
         )
     )
-    return _clamp_temperature_k(PEAK_TEMPERATURE_T_EQ_FACTOR * float(result.t_eq_k))
+    return _clamp_temperature_k(float(result.t_max_k))
 
 
 def default_simulation_duration_ms(equivalent_kg: float) -> float:
@@ -202,7 +201,7 @@ def default_temperature_series(
     t_amb_k: float = 297.15,
 ) -> np.ndarray:
     """
-    无实验温度序列：CSV 形状 + 工程 t_d 时长 + 1.3·T_eq 峰值。
+    无实验温度序列：CSV 形状 + 工程 t_d 时长 + T_max 峰值。
     """
     t = np.asarray(t_ms, dtype=np.float64)
     duration_ms = fireball_total_duration_ms(float(equivalent_kg))
